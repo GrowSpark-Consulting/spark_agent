@@ -1,6 +1,7 @@
 import type { StartTrialResult } from "@pakka/types";
 import { handleHandoffLink } from "../agent/handoff/takeover";
 import { getLeadCard } from "../agent/leadcard/route";
+import { suggestReply } from "../agent/leadcard/suggest";
 import { getBalance } from "../billing/credits";
 import { startTrialFor } from "../billing/start-trial";
 import { createTrialTenant } from "../billing/trial";
@@ -96,6 +97,12 @@ const conversationMode: RouteHandler = (request, deps, params) =>
 // → LeadCard (docs/dashboard-screen-contracts.md, Inbox): the card pinned beside a chat, so staff need not read it. Owner, admin or staff; free. Read only.
 const conversationLeadCard: RouteHandler = (request, deps, params) =>
   tenantRoute(({ context, params: p }) => getLeadCard(context, p.id))(request, deps.userClient, params);
+// no body → { reply, language, reason }: a reply staff can send as it is (the lead card's suggested reply). Owner, admin or staff; free; nothing is sent.
+// The browser sends a POST with no body, so this authenticates itself like the other body-less routes.
+const conversationSuggest: RouteHandler = async (request, deps, params) => {
+  const { context } = await requireTenant(request, deps.userClient);
+  return Response.json(await suggestReply(context, params.id));
+};
 // ?resourceId= → { url }: the Google consent link for one staff member. Owner or admin.
 const googleConnect: RouteHandler = (request, deps, params) =>
   tenantRoute(({ context }) => googleConnectUrl(context, new URL(request.url).searchParams.get("resourceId")))(request, deps.userClient, params);
@@ -167,6 +174,7 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/conversations/:id/messages", browser: true, methods: { POST: staffReply } },
   { path: "/api/conversations/:id/mode", browser: true, methods: { POST: conversationMode } },
   { path: "/api/conversations/:id/lead-card", browser: true, methods: { GET: conversationLeadCard } },
+  { path: "/api/conversations/:id/suggest", browser: true, methods: { POST: conversationSuggest } },
   { path: "/api/kb/documents", browser: true, maxBodyBytes: KB_UPLOAD_MAX_BODY_BYTES, methods: { POST: kbUpload } },
   { path: "/api/kb/documents/:id", browser: true, methods: { DELETE: kbDeleteDocument } },
   { path: "/api/kb/faqs", browser: true, methods: { POST: (request, deps) => kbCreateFaq(request, deps.userClient) } },
