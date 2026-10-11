@@ -1,6 +1,6 @@
 # Day 3 (Dev 1): the assistant qualifies and books. What was built, and what Dev 2 and Dev 3 need to do or know
 
-Audience: Dev 2 (Shaaz) and Dev 3 (Dhatri). Raja and the next person to touch the agent can read it too.
+Audience: Dev 2 (Shaaz) and Dev 3 (Dhatri). The next person to touch the agent can read it too.
 
 Nothing here changes a file, a table, a migration, an endpoint or an event of yours. Everything of Dev 1's is in `backend/src/agent/`
 (plus tests, the conversation tests, one ESLint rule and this note). Dev 2's booking functions are only **called**, and Dev 3's tables are only **read**.
@@ -12,7 +12,7 @@ A customer writes on WhatsApp. The assistant now:
 
 1. **Asks the missing details casually**, two at a time at most, in the pack's order (budget, area, timeline for real estate).
 2. **Scores the lead with plain code** (hot, warm, cold, or disqualified) from the pack's rules and the business's own catalog. The AI never decides the score.
-3. **Offers three real free times in an ordinary sentence**, not a list or buttons (Raja's call: it should read like a person). The times come from `findSlots`.
+3. **Offers three real free times in an ordinary sentence**, not a list or buttons (the product owner's call: it should read like a person). The times come from `findSlots`.
 4. **Reads the customer's answer in words** ("the second one", "3pm", "Monday", "any is fine", "none of these") and books it: `holdSlot` then `confirmBooking`.
 5. If someone took the time first, **says so and offers the others**. If nothing is free, or the business has no service to book, **a person takes over**.
 6. A customer with a booking can **move it** (`rescheduleBooking`) or **cancel it** (`cancelBooking`). A cancellation is always asked about first and only a clear yes cancels.
@@ -123,7 +123,7 @@ check the booking in the calendar and the lead at `booked`.
 - **Real models were not used.** All of this was tested with scripted models and fakes (3,200+ backend tests, 11 booking chats). `pnpm test:conversations -- --live --only booking`
   runs the same chats with the real models (only `expect` is checked) and is worth doing once on staging with a key.
 - **Not run on staging or against the real database from the agent's code path.** The booking SQL is Dev 2's and unchanged.
-- **Labels are English** ("Sun 11 Oct, 10:00 am"); the model writes the reply in the customer's language around them. Raja's English and Tamil wording for the confirmation,
+- **Labels are English** ("Sun 11 Oct, 10:00 am"); the model writes the reply in the customer's language around them. The English and Tamil wording for the confirmation,
   reminders, feedback and staff alert is the templates' job (Dev 2's catalogue), not this step's.
 - **The `hot_lead` handover** (the pack lists it as a trigger) is not wired: a hot lead is offered times, not handed to a person.
 - **Several services without a named one**, field visits, callbacks and multi-day bookings are the next steps (Day 4).
