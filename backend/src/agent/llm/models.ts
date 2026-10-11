@@ -6,6 +6,8 @@
 export const MODELS = {
   extraction: "claude-haiku-4-5-20251001",
   reply: "claude-sonnet-5-5",
+  // The lead card staff read when a chat needs a person (Day 4): the same strong model, since it may write a reply in Tamil script.
+  summary: "claude-sonnet-5-5",
 } as const;
 
 export type LlmRole = keyof typeof MODELS;
@@ -30,6 +32,8 @@ export const ROLE_SETTINGS: Record<LlmRole, RoleSettings> = {
   // Under 600 characters of text, which in Tamil script is more tokens than in English; thinking also counts
   // against max_tokens, so there is room for both.
   reply: { model: MODELS.reply, maxTokens: 2_000, effort: "low", attemptTimeoutMs: 15_000, totalTimeoutMs: 25_000 },
+  // A JSON card with a short summary and a reply of under 400 characters, which in Tamil script is many tokens.
+  summary: { model: MODELS.summary, maxTokens: 2_000, effort: "low", attemptTimeoutMs: 15_000, totalTimeoutMs: 25_000 },
 };
 
 export interface TokenUsage {
