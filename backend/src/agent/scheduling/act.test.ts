@@ -23,6 +23,8 @@ function port(over: Partial<SchedulingPort> = {}) {
     holdSlot: vi.fn<SchedulingPort["holdSlot"]>(async () => ({ id: BOOKING })),
     confirmBooking: vi.fn<SchedulingPort["confirmBooking"]>(async () => ({ id: BOOKING })),
     activeBooking: vi.fn<SchedulingPort["activeBooking"]>(async () => null),
+    rescheduleBooking: vi.fn<SchedulingPort["rescheduleBooking"]>(async () => ({ id: BOOKING })),
+    cancelBooking: vi.fn<SchedulingPort["cancelBooking"]>(async () => undefined),
     ...over,
   };
   return p as unknown as { [K in keyof SchedulingPort]: Mock<SchedulingPort[K]> };
@@ -138,5 +140,76 @@ describe("booking the time the customer picked", () => {
   it("an outage is thrown so the step is tried again", async () => {
     const p = port({ confirmBooking: vi.fn<SchedulingPort["confirmBooking"]>(async () => { throw new Error("database down"); }) });
     await expect(runAct(book, ctx(p))).rejects.toThrow("database down");
+  });
+});
+
+describe("moving a booking", () => {
+  const OLD = "50000000-0000-0000-0000-000000000005";
+  const move = { kind: "reschedule", serviceId: SERVICE, bookingId: OLD, slot: offered(SUN_15) } as const;
+
+  it("looks for times for it like for a new booking, and says the offer is for moving it", async () => {
+    const p = port();
+    const result = await runAct({ kind: "offer", serviceId: SERVICE, preferredText: "monday evening", rescheduleBookingId: OLD }, ctx(p));
+    expect(result).toMatchObject({ kind: "offered", rescheduleBookingId: OLD });
+    expect(p.holdSlot).not.toHaveBeenCalled();
+  });
+
+  it("moves it with the booking engine to the time the customer picked", async () => {
+    const p = port();
+    expect(await runAct(move, ctx(p))).toEqual({ kind: "rescheduled", label: "Sun 11 Oct, 3:00 pm" });
+    expect(p.rescheduleBooking).toHaveBeenCalledWith(T, OLD, offered(SUN_15));
+    expect(p.holdSlot).not.toHaveBeenCalled();
+  });
+
+  it("when someone took that time first: nothing is moved, and the others are offered, still for moving it", async () => {
+    const p = port({ rescheduleBooking: vi.fn<SchedulingPort["rescheduleBooking"]>(async () => { throw new AppError("slot_taken", "taken"); }), findSlots: vi.fn<SchedulingPort["findSlots"]>(async () => [SUN_10]) });
+    expect(await runAct(move, ctx(p))).toEqual({ kind: "offered", slots: [offered(SUN_10)], asked: false, retaken: true, rescheduleBookingId: OLD });
+  });
+
+  it("a retry after it was already moved does not move it again", async () => {
+    const p = port({ activeBooking: vi.fn<SchedulingPort["activeBooking"]>(async () => ({ id: BOOKING, start: SUN_15.start, end: SUN_15.end, status: "confirmed" })) });
+    expect(await runAct(move, ctx(p))).toEqual({ kind: "rescheduled", label: "Sun 11 Oct, 3:00 pm" });
+    expect(p.rescheduleBooking).not.toHaveBeenCalled();
+  });
+
+  it("a booking that cannot be moved (not confirmed, not found) is an error result; an outage is thrown", async () => {
+    const refused = port({ rescheduleBooking: vi.fn<SchedulingPort["rescheduleBooking"]>(async () => { throw new AppError("conflict", "Only a confirmed booking can be moved."); }) });
+    expect(await runAct(move, ctx(refused))).toEqual({ kind: "error" });
+    const down = port({ rescheduleBooking: vi.fn<SchedulingPort["rescheduleBooking"]>(async () => { throw new Error("database down"); }) });
+    await expect(runAct(move, ctx(down))).rejects.toThrow("database down");
+  });
+});
+
+describe("cancelling a booking asks first", () => {
+  const OLD = "50000000-0000-0000-0000-000000000005";
+
+  it("asking changes nothing in the calendar: it only says the question was asked", async () => {
+    const p = port();
+    expect(await runAct({ kind: "ask_cancel", bookingId: OLD, label: "Sun 11 Oct, 3:00 pm" }, ctx(p))).toEqual({ kind: "cancel_asked", bookingId: OLD, label: "Sun 11 Oct, 3:00 pm" });
+    for (const fn of [p.findSlots, p.holdSlot, p.confirmBooking, p.rescheduleBooking, p.cancelBooking]) expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("an answer of yes cancels that booking, with a reason that says who asked", async () => {
+    const p = port();
+    expect(await runAct({ kind: "cancel", bookingId: OLD, label: "Sun 11 Oct, 3:00 pm" }, ctx(p))).toEqual({ kind: "cancelled", label: "Sun 11 Oct, 3:00 pm" });
+    expect(p.cancelBooking).toHaveBeenCalledWith(T, OLD, expect.stringMatching(/customer/i));
+  });
+
+  it("a booking that is already gone counts as cancelled; any other refusal is an error result", async () => {
+    const gone = port({ cancelBooking: vi.fn<SchedulingPort["cancelBooking"]>(async () => { throw new AppError("not_found", "That booking wasn't found."); }) });
+    expect(await runAct({ kind: "cancel", bookingId: OLD, label: "x" }, ctx(gone))).toEqual({ kind: "cancelled", label: "x" });
+    const refused = port({ cancelBooking: vi.fn<SchedulingPort["cancelBooking"]>(async () => { throw new AppError("conflict", "Already completed."); }) });
+    expect(await runAct({ kind: "cancel", bookingId: OLD, label: "x" }, ctx(refused))).toEqual({ kind: "error" });
+  });
+
+  it("an answer of no keeps the booking: nothing is called, and the question is over", async () => {
+    const p = port();
+    expect(await runAct({ kind: "keep", label: "Sun 11 Oct, 3:00 pm" }, ctx(p))).toEqual({ kind: "kept", label: "Sun 11 Oct, 3:00 pm" });
+    expect(p.cancelBooking).not.toHaveBeenCalled();
+  });
+
+  it("an outage while cancelling is thrown, so the step is tried again", async () => {
+    const p = port({ cancelBooking: vi.fn<SchedulingPort["cancelBooking"]>(async () => { throw new Error("database down"); }) });
+    await expect(runAct({ kind: "cancel", bookingId: OLD, label: "x" }, ctx(p))).rejects.toThrow("database down");
   });
 });

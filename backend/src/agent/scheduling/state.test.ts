@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { freshOffer, OFFER_MAX_AGE_MS, parseOfferState } from "./state";
+import { freshOffer, OFFER_MAX_AGE_MS, parseOfferState, parsePendingState } from "./state";
 
 const ID = "10000000-0000-0000-0000-000000000001";
 const RES = "20000000-0000-0000-0000-000000000002";
@@ -54,5 +54,41 @@ describe("an offer goes stale", () => {
 
   it("no offer stays no offer", () => {
     expect(freshOffer(null, new Date(at))).toBeNull();
+  });
+});
+
+// Moving or cancelling a booking (Day 3): the same remembered state also carries "this offer is for moving booking X" and "we asked whether
+// to cancel booking X". Nothing is cancelled until the customer answers yes.
+describe("moving a booking, and asking before cancelling one", () => {
+  const BOOKING = "40000000-0000-0000-0000-000000000004";
+
+  it("an offer can be for moving a booking", () => {
+    expect(parseOfferState({ slots: [slot], at: AT, rescheduleBookingId: BOOKING })).toEqual({ slots: [slot], at: AT, rescheduleBookingId: BOOKING });
+    expect(parseOfferState({ slots: [slot], at: AT, rescheduleBookingId: "b1" })).toEqual({ slots: [slot], at: AT }); // an id that is not an id is dropped, not trusted
+  });
+
+  it("a question whether to cancel is read back as such", () => {
+    expect(parsePendingState({ cancel: { bookingId: BOOKING, label: "Tue 13 Oct, 10:00 am" }, at: AT })).toEqual({ cancel: { bookingId: BOOKING, label: "Tue 13 Oct, 10:00 am" }, at: AT });
+  });
+
+  it("an offer is read as before", () => {
+    expect(parsePendingState({ slots: [slot], at: AT })).toEqual({ slots: [slot], at: AT });
+  });
+
+  it.each([
+    ["null", null],
+    ["a booking that is not an id", { cancel: { bookingId: "b1", label: "x" }, at: AT }],
+    ["no label", { cancel: { bookingId: BOOKING, label: "" }, at: AT }],
+    ["no time", { cancel: { bookingId: BOOKING, label: "x" } }],
+    ["both an offer and a cancellation (it is neither)", { slots: [slot], cancel: { bookingId: BOOKING, label: "x" }, at: AT }],
+    ["nothing", {}],
+  ])("a pending state that is %s is nothing", (_why, value) => {
+    expect(parsePendingState(value)).toBeNull();
+  });
+
+  it("a question whether to cancel goes stale after a day", () => {
+    const ask = { cancel: { bookingId: BOOKING, label: "x" }, at: AT };
+    expect(freshOffer(ask, new Date(Date.parse(AT) + 60_000))).toEqual(ask);
+    expect(freshOffer(ask, new Date(Date.parse(AT) + OFFER_MAX_AGE_MS + 1))).toBeNull();
   });
 });

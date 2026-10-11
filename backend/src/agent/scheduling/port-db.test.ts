@@ -8,6 +8,7 @@ const LEAD = "10000000-0000-0000-0000-0000000000f1";
 const SERVICE = "30000000-0000-0000-0000-000000000003";
 const RES = "20000000-0000-0000-0000-000000000002";
 const BOOKING = "40000000-0000-0000-0000-000000000004";
+const NEW_BOOKING = "60000000-0000-0000-0000-000000000006";
 const NOW = new Date("2026-10-10T04:30:00.000Z");
 
 // A query builder that records what was asked and answers with `result`, like the supabase client (every call returns the builder; awaiting it gives the result).
@@ -43,6 +44,8 @@ function build(results: Parameters<typeof fakeDb>[0] = {}, functions: Partial<Bo
     findSlots: vi.fn(async () => [slot]),
     holdSlot: vi.fn(async () => booking),
     confirmBooking: vi.fn(async () => booking),
+    rescheduleBooking: vi.fn(async () => ({ ...booking, id: NEW_BOOKING })),
+    cancelBooking: vi.fn(async () => undefined),
     ...functions,
   };
   const deps = createSchedulingDeps({ db, functions: fns, isEnabled: vi.fn(async () => enabled), now: () => NOW });
@@ -64,6 +67,14 @@ describe("the calendar, through Dev 2's booking functions", () => {
     expect(fns.holdSlot).toHaveBeenCalledWith(T, { start: slot.start, end: slot.end, resourceId: RES, serviceId: SERVICE }, LEAD, { kind: "site_visit" });
     expect(await deps.port.confirmBooking(T, BOOKING)).toEqual({ id: BOOKING });
     expect(fns.confirmBooking).toHaveBeenCalledWith(T, BOOKING);
+  });
+
+  it("moves a booking to the time the customer picked, and cancels one with the reason it is given", async () => {
+    const { deps, fns } = build();
+    expect(await deps.port.rescheduleBooking(T, BOOKING, { start: slot.start, end: slot.end, resourceId: RES, serviceId: SERVICE, label: slot.label })).toEqual({ id: NEW_BOOKING });
+    expect(fns.rescheduleBooking).toHaveBeenCalledWith(T, BOOKING, { start: slot.start, end: slot.end, resourceId: RES });
+    await deps.port.cancelBooking(T, BOOKING, "asked in chat");
+    expect(fns.cancelBooking).toHaveBeenCalledWith(T, BOOKING, "asked in chat");
   });
 
   it("is switched on by the business's booking feature", async () => {
