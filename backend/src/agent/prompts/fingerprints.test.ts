@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildExtractionSystem } from "./extraction_v1";
 import { buildExtractionSystem as buildExtractionSystemV2 } from "./extraction_v2";
 import { buildReplySystem } from "./reply_v1";
+import { buildReplySystem as buildReplySystemV2 } from "./reply_v2";
 
 // A prompt that is in use is never edited: a change is a new version (extraction_v2.ts, reply_v2.ts), so a trace
 // that says "reply_v1" always means the same words. This test holds the words of the fixed parts of each prompt
@@ -26,5 +27,11 @@ describe("prompt fingerprints", () => {
     const friendly = buildReplySystem({ businessName: "X", persona: "Y", tone: "friendly" });
     const formal = buildReplySystem({ businessName: "X", tone: "formal" });
     expect(sha([friendly[0].text, friendly[1].text, formal[1].text].join("\n---\n"))).toBe("53c2b09db0bdc8ed");
+  });
+
+  it("reply_v2: the rules (with the human-voice rule) and both tones are unchanged", () => {
+    const friendly = buildReplySystemV2({ businessName: "X", persona: "Y", tone: "friendly" });
+    const formal = buildReplySystemV2({ businessName: "X", tone: "formal" });
+    expect(sha([friendly[0].text, friendly[1].text, formal[1].text].join("\n---\n"))).toBe("a6e7a64e08906371");
   });
 });

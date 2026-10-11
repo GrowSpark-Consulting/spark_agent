@@ -1,4 +1,5 @@
 import type { HandoffPriority, TenantReplyInfo } from "../agent/pipeline/store";
+import { parseOfferState } from "../agent/scheduling/state";
 import type { BatchText, ContactRow, ConversationRow, HistoryItem, InboundMessage, LeadRow, LeadState, PendingMessage, PipelineStore, TenantRow } from "../agent/pipeline/store";
 
 // An in-memory PipelineStore for tests. It enforces the same filtering the real store does: a message,
@@ -233,6 +234,19 @@ export function fakePipelineStore(
       for (const m of earlier) {
         const planCase = (m.meta?.agent as { planCase?: unknown } | undefined)?.planCase;
         if (typeof planCase === "string") return planCase;
+      }
+      return null;
+    },
+    async getPreviousOffer(tenantId, conversationId, before) {
+      calls.push("getPreviousOffer");
+      maybeFail("getPreviousOffer");
+      const earlier = [...messages.values()]
+        .filter((m) => m.tenantId === tenantId && m.conversationId === conversationId && m.sender === "customer" && Date.parse(m.createdAt) < Date.parse(before))
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+        .slice(0, 20);
+      for (const m of earlier) {
+        const agent = m.meta?.agent as Record<string, unknown> | undefined;
+        if (agent && Object.hasOwn(agent, "offer")) return parseOfferState(agent.offer);
       }
       return null;
     },
