@@ -1,0 +1,32 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "100000000000001",
+      "changes": [
+        {
+          "field": "smb_message_echoes",
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "910000000001",
+              "phone_number_id": "200000000000001"
+            },
+            "message_echoes": [
+              {
+                "from": "910000000001",
+                "to": "910000000101",
+                "id": "wamid.SYNTHETIC_ECHO_0001",
+                "timestamp": "1759743600",
+                "type": "text",
+                "text": {
+                  "body": "Sure, I will call you this evening."
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

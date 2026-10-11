@@ -2,10 +2,12 @@ import { inngest } from "../../inngest/client";
 import { serverEnv } from "../../lib/env";
 import { AppError } from "../../lib/errors";
 import { stripUnsafeCharacters } from "../../lib/text";
+import { storeEchoedMessage, type EchoArgs, type EchoOutcome } from "./echo";
 import * as db from "./inbound-db";
 import { WebhookDbError, type ConnectionRow, type StoreInboundArgs } from "./inbound-db";
 import { parseWebhook, type ParsedMessage } from "./parse";
 import { verifySignature } from "./signature";
+import { supabaseAdmin } from "../../lib/supabase-admin";
 
 // POST /api/webhooks/whatsapp: Meta delivering messages and delivery statuses (docs/handover.md, "Message
 // pipeline" and module 10, "Webhooks"). Order matters:
@@ -61,6 +63,11 @@ export interface WebhookDeps {
   templateBelongsToTenant: typeof db.templateBelongsToTenant;
   setTemplateStatus: typeof db.setTemplateStatus;
   updateConnectionHealth: typeof db.updateConnectionHealth;
+  /**
+   * Keeps the owner's reply from the phone app as a staff message and, if the AI had the chat, switches it to a person (echo.ts). Optional so
+   * that a caller built before coexistence still works: without it an echo is counted and skipped.
+   */
+  storeEchoedMessage?: (args: EchoArgs) => Promise<EchoOutcome>;
   sendEvent: (event: { id: string; name: string; data: Record<string, string> }) => Promise<unknown>;
 }
 
@@ -74,6 +81,7 @@ const realDeps = (): WebhookDeps => ({
   templateBelongsToTenant: db.templateBelongsToTenant,
   setTemplateStatus: db.setTemplateStatus,
   updateConnectionHealth: db.updateConnectionHealth,
+  storeEchoedMessage: (args) => storeEchoedMessage(supabaseAdmin(), args),
   sendEvent: (event) => inngest.send(event),
 });
 
@@ -99,7 +107,7 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
     try {
       // The ids in a body that is not verified yet only choose which secrets to try.
       const candidates = parseWebhook(JSON.parse(new TextDecoder().decode(raw)));
-      const phoneIds = [...new Set([...candidates.messages, ...candidates.statuses].map((item) => item.phoneNumberId))];
+      const phoneIds = [...new Set([...candidates.messages, ...candidates.statuses, ...candidates.echoes].map((item) => item.phoneNumberId))];
       for (const { connectionId, secret } of await deps.findByoSecrets(phoneIds)) {
         if (verifySignature(raw, signature, secret)) byoVerified.add(connectionId);
       }
@@ -130,7 +138,7 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
   }
   const parsed = parseWebhook(payload);
 
-  const counts = { stored: 0, duplicates: 0, statuses: 0, unknown: 0, inactive: 0, failed: 0, templates: 0, templatesIgnored: 0, templatesNotOurs: 0, ambiguous: 0, health: 0 };
+  const counts = { echoes: 0, echoesSwitched: 0, echoesSkipped: 0, stored: 0, duplicates: 0, statuses: 0, unknown: 0, inactive: 0, failed: 0, templates: 0, templatesIgnored: 0, templatesNotOurs: 0, ambiguous: 0, health: 0 };
   const errorCodes = new Set<string>();
   const fail = (err: unknown) => {
     counts.failed++;
@@ -139,7 +147,7 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
 
   let connections = new Map<string, ConnectionRow>();
   try {
-    const ids = [...new Set([...parsed.messages, ...parsed.statuses].map((item) => item.phoneNumberId))];
+    const ids = [...new Set([...parsed.messages, ...parsed.statuses, ...parsed.echoes].map((item) => item.phoneNumberId))];
     connections = new Map((await deps.findConnections(ids)).map((c) => [c.phoneNumberId, c]));
   } catch (err) {
     fail(err);
@@ -184,6 +192,41 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
           name: "whatsapp/message.received",
           data: { tenantId: connection.tenantId, conversationId: stored.conversationId, messageId: stored.messageId },
         });
+      } catch (err) {
+        fail(err);
+      }
+    }
+    // The owner's replies from the phone app (coexistence): kept as staff messages, and the chat goes to a person if the AI had it. Never a
+    // customer's message, so nothing is queued for the AI. The business and channel come from the connection row, never from the payload.
+    for (const echo of parsed.echoes) {
+      const connection = connectionFor(echo);
+      if (!connection) continue;
+      if (!deps.storeEchoedMessage) {
+        counts.echoesSkipped++;
+        continue;
+      }
+      try {
+        const outcome = await deps.storeEchoedMessage({
+          tenantId: connection.tenantId,
+          channelId: connection.channelId,
+          customerPhone: echo.customerPhone,
+          providerMsgId: echo.providerMsgId,
+          kind: echo.kind,
+          body: echo.kind === "text" ? (clean(echo.text) ?? null) : null,
+          ...(echo.unsupportedType !== undefined && { unsupportedType: echo.unsupportedType }),
+          sentAt: echo.sentAt,
+        });
+        if (outcome.status === "stored") {
+          counts.echoes++;
+          if (outcome.switched) {
+            counts.echoesSwitched++;
+            // Starts the 24-hour wait after which the AI takes the chat back if the team has not replied. Ids only. A repeat of Meta's webhook is
+            // a duplicate (no event), and the id makes Inngest drop a repeat of this one.
+            await deps.sendEvent({ id: `phone_reply:${outcome.messageId}`, name: "chat.phone_reply", data: { tenantId: connection.tenantId, conversationId: outcome.conversationId } });
+          }
+        } else {
+          counts.echoesSkipped++;
+        }
       } catch (err) {
         fail(err);
       }
@@ -272,7 +315,7 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
 
   const codes = errorCodes.size > 0 ? ` error_codes=${[...errorCodes].join(",")}` : "";
   console.log(
-    `${TAG} messages=${parsed.messages.length} stored=${counts.stored} duplicates=${counts.duplicates} statuses=${counts.statuses} ` +
+    `${TAG} messages=${parsed.messages.length} stored=${counts.stored} duplicates=${counts.duplicates} echoes=${parsed.echoes.length} echoes_stored=${counts.echoes} echoes_switched=${counts.echoesSwitched} echoes_skipped=${counts.echoesSkipped} statuses=${counts.statuses} ` +
       `templates=${parsed.templateStatuses.length} templates_set=${counts.templates} templates_ignored=${counts.templatesIgnored} templates_not_ours=${counts.templatesNotOurs} accounts_unmatched=${counts.ambiguous} health=${counts.health} ignored=${parsed.ignored.length} unknown=${counts.unknown} inactive=${counts.inactive} failed=${counts.failed}${codes}${fields}`,
   );
 

@@ -8,6 +8,7 @@ import { kbSweep } from "./kb-sweep";
 import { leadNudges } from "./lead-nudges";
 import { noShowRebooking } from "./noshow-rebooking";
 import { ownNumberOutcome } from "./own-number-outcome";
+import { phoneReplyReturn } from "./phone-reply-return";
 import { ping } from "./ping";
 import { postVisit } from "./post-visit";
 import { processMessage } from "./process-message";
@@ -29,4 +30,5 @@ export const functions = [
   noShowRebooking,
   dailyAgenda,
   ownNumberOutcome,
+  phoneReplyReturn,
 ];

@@ -55,7 +55,7 @@ export type AccountUpdate = z.infer<typeof AccountUpdate>;
 export const REASON_MAX_CHARS = 500;
 
 export type IgnoredReason =
-  | "unsupported_field" // a webhook field we do not handle (echoes, history, app state, anything new)
+  | "unsupported_field" // a webhook field we do not handle (history, app state, anything new)
   | "unsupported_status" // for example "played"
   | "invalid_item" // failed validation: bad number, bad timestamp, unsafe template id
   | "malformed_payload";
@@ -68,12 +68,30 @@ export type IgnoredItem = {
   ref?: string;
 };
 
+/**
+ * From smb_message_echoes (coexistence): the business owner replied to a customer from the WhatsApp Business APP on their phone, and Meta sends a copy.
+ * Not a customer's message. The shape is from Meta's coexistence documentation as known today and is UNCONFIRMED: only the text body is read, and
+ * anything else is kept as an echo with no words. Live after Embedded Signup is approved.
+ */
+export type ParsedEcho = Routing & {
+  /** The wamid of the owner's message: the dedupe key. */
+  providerMsgId: string;
+  /** The customer it was sent to, E.164. */
+  customerPhone: string;
+  sentAt: string;
+  kind: "text" | "unsupported";
+  text?: string;
+  /** Meta's own type word when the echo is not text (for example "image"). */
+  unsupportedType?: string;
+};
+
 export type ParseResult = {
   messages: ParsedMessage[];
   statuses: ParsedStatus[];
   templateStatuses: TemplateStatusUpdate[];
   qualityUpdates: QualityUpdate[];
   accountUpdates: AccountUpdate[];
+  echoes: ParsedEcho[];
   ignored: IgnoredItem[];
 };
 
@@ -91,6 +109,8 @@ const MessagesValue = z.looseObject({
   statuses: z.array(z.unknown()).optional(),
 });
 const Contact = z.looseObject({ wa_id: nonEmpty, profile: z.looseObject({ name: str }).optional() });
+const EchoesValue = z.looseObject({ metadata: z.looseObject({ phone_number_id: nonEmpty }), message_echoes: z.unknown().optional() });
+const EchoBase = z.looseObject({ id: nonEmpty, to: str, type: str });
 
 const MessageBase = z.looseObject({ id: nonEmpty, from: str, type: str });
 const TextBody = z.looseObject({ text: z.looseObject({ body: str }) });
@@ -272,6 +292,48 @@ function parseAccount(value: unknown, wabaId: string): AccountUpdate | IgnoredIt
   return { wabaId, event: plain((parsed.data as Record<string, unknown>).event) ?? "unknown" };
 }
 
+/** One echo of the owner's reply, or why it was ignored. Keeps the words only of a plain text body. */
+function parseEcho(raw: unknown, routing: Routing): ParsedEcho | IgnoredItem {
+  const field = "smb_message_echoes";
+  const base = EchoBase.safeParse(raw);
+  if (!base.success) return invalid(field, routing.wabaId);
+  const item = base.data;
+  const customerPhone = normalizeE164(item.to);
+  const sentAt = toIso((raw as Record<string, unknown>).timestamp);
+  if (customerPhone === null || sentAt === null) return invalid(field, routing.wabaId, refOf(item.id));
+  const common = { providerMsgId: item.id, customerPhone, sentAt, ...routing };
+  if (item.type === "text") {
+    const text = TextBody.safeParse(raw);
+    if (text.success) return { ...common, kind: "text", text: text.data.text.body };
+  }
+  return { ...common, kind: "unsupported", unsupportedType: safeWord(item.type) };
+}
+
+function parseEchoes(value: unknown, wabaId: string, result: ParseResult): void {
+  const field = "smb_message_echoes";
+  const parsed = EchoesValue.safeParse(value);
+  if (!parsed.success) {
+    result.ignored.push({ field, reason: "malformed_payload", wabaId });
+    return;
+  }
+  const routing: Routing = { phoneNumberId: parsed.data.metadata.phone_number_id, wabaId };
+  const echoes = parsed.data.message_echoes;
+  if (echoes === undefined || echoes === null) return;
+  if (!Array.isArray(echoes)) {
+    result.ignored.push({ field, reason: "malformed_payload", wabaId });
+    return;
+  }
+  for (const raw of echoes) {
+    try {
+      const item = parseEcho(raw, routing);
+      if ("providerMsgId" in item && "customerPhone" in item) result.echoes.push(item);
+      else result.ignored.push(item);
+    } catch {
+      result.ignored.push(invalid(field, wabaId));
+    }
+  }
+}
+
 function parseChange(rawChange: unknown, wabaId: string, result: ParseResult): void {
   const change = Change.safeParse(rawChange);
   if (!change.success) {
@@ -298,8 +360,12 @@ function parseChange(rawChange: unknown, wabaId: string, result: ParseResult): v
     else result.ignored.push(item);
     return;
   }
+  if (field === "smb_message_echoes") {
+    parseEchoes(value, wabaId, result);
+    return;
+  }
   if (field !== "messages") {
-    // Coexistence echoes, history and anything new: counted by name, shape not guessed.
+    // Coexistence history, app state and anything new: counted by name, shape not guessed.
     result.ignored.push({ field: safeWord(field), reason: "unsupported_field", wabaId });
     return;
   }
@@ -338,7 +404,7 @@ function parseChange(rawChange: unknown, wabaId: string, result: ParseResult): v
 
 /** Never throws. Takes a verified, already-parsed body. No de-duplication: the wamid is the dedupe key. */
 export function parseWebhook(body: unknown): ParseResult {
-  const result: ParseResult = { messages: [], statuses: [], templateStatuses: [], qualityUpdates: [], accountUpdates: [], ignored: [] };
+  const result: ParseResult = { messages: [], statuses: [], templateStatuses: [], qualityUpdates: [], accountUpdates: [], echoes: [], ignored: [] };
   try {
     const envelope = Envelope.safeParse(body);
     if (!envelope.success) {
@@ -364,7 +430,7 @@ export function parseWebhook(body: unknown): ParseResult {
       }
     }
   } catch {
-    return { messages: [], statuses: [], templateStatuses: [], qualityUpdates: [], accountUpdates: [], ignored: [{ field: "payload", reason: "malformed_payload" }] };
+    return { messages: [], statuses: [], templateStatuses: [], qualityUpdates: [], accountUpdates: [], echoes: [], ignored: [{ field: "payload", reason: "malformed_payload" }] };
   }
   return result;
 }
