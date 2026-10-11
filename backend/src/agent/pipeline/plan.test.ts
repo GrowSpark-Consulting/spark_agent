@@ -392,3 +392,81 @@ describe("the language of a fixed line", () => {
     expect(planReply(input({ understood: { status: "model_unavailable" }, contactLanguage: "ta" })).reply).toMatchObject({ language: "ta" });
   });
 });
+
+// Step 5, qualifying (Day 3): the model's reply also asks for the next missing details, and a lead that is certainly not a fit is
+// closed kindly. The facts come from understandTurn's qualification; with none, nothing here applies (every test above).
+describe("qualifying the lead", () => {
+  const ASK = [
+    { key: "location", label: "Preferred area" },
+    { key: "timeline", label: "Timeline", options: ["0-3m", "3-6m", "6m+"] },
+  ];
+  const qualification = (over: Partial<NonNullable<Extract<UnderstandResult, { status: "understood" }>["qualification"]>> = {}) => ({
+    score: 30,
+    temperature: "cold" as const,
+    ask: ASK,
+    missingRequired: ["location", "timeline"],
+    readyForSlots: false,
+    hardFail: null,
+    ...over,
+  });
+  const withQualification = (retrieval: Retrieval, q = qualification(), over: Parameters<typeof summary>[0] = {}): UnderstandResult => ({ status: "understood", summary: summary(over), retrieval, qualification: q });
+
+  it("an answer from the knowledge base also asks for the next missing details, with their labels", () => {
+    const plan = planReply(input({ understood: withQualification(found) }));
+    expect(plan).toMatchObject({
+      case: "answered_from_kb",
+      reply: { mode: "model", action: { kind: "answer_and_ask", question: "What is the price of a 2BHK?", askFields: ["location", "timeline"] }, ask: ASK },
+    });
+  });
+
+  it("details given with no question are acknowledged with a request for the next ones (ask_fields)", () => {
+    const plan = planReply(input({ understood: withQualification({ outcome: "skipped" }, qualification(), { intent: "give_details", hasQuestion: false }), question: null }));
+    expect(plan).toMatchObject({ case: "ask_details", kbMisses: 0, reply: { mode: "model", action: { kind: "ask_fields", askFields: ["location", "timeline"] }, ask: ASK, facts: [] } });
+  });
+
+  it("with everything required in, nothing is asked and the reply is as before", () => {
+    const done = qualification({ ask: [], missingRequired: [], temperature: "hot", score: 75, readyForSlots: true });
+    const plan = planReply(input({ understood: withQualification({ outcome: "skipped" }, done, { intent: "give_details", hasQuestion: false }), question: null }));
+    expect(plan).toMatchObject({ case: "nothing_to_look_up", reply: { mode: "model", action: { kind: "answer_and_ask", question: "", askFields: [] } } });
+    expect(planReply(input({ understood: withQualification(found, done) })).reply).toMatchObject({ action: { askFields: [] } });
+  });
+
+  it("never asks more than two things at once, whatever the qualification holds", () => {
+    const many = qualification({ ask: [...ASK, { key: "c", label: "C" }, { key: "d", label: "D" }] });
+    const plan = planReply(input({ understood: withQualification(found, many) }));
+    expect((plan.reply as { action: { askFields: string[] }; ask: unknown[] }).action.askFields).toHaveLength(2);
+    expect((plan.reply as { ask: unknown[] }).ask).toHaveLength(2);
+  });
+
+  it("a knowledge-base miss, an outage or a handover do not ask anything: the fixed lines stay as they are", () => {
+    expect(planReply(input({ understood: withQualification({ outcome: "none" }) })).reply).toEqual({ mode: "fixed", text: "fallback", language: "en" });
+    expect(planReply(input({ understood: withQualification({ outcome: "unavailable" }) })).reply).toEqual({ mode: "fixed", text: "fallback", language: "en" });
+    expect(planReply(input({ understood: withQualification(found, qualification(), { intent: "talk_to_human" }) })).reply).toMatchObject({ mode: "fixed", text: "handoff" });
+  });
+
+  it("an off-topic message is declined, not asked a question", () => {
+    const plan = planReply(input({ understood: withQualification({ outcome: "skipped" }, qualification(), { intent: "off_topic", hasQuestion: false }) }));
+    expect(plan.reply).toMatchObject({ action: { kind: "decline_off_topic" } });
+    expect((plan.reply as { ask?: unknown }).ask).toBeUndefined();
+  });
+
+  describe("a lead that is certainly not a fit", () => {
+    const failed = qualification({ temperature: "disqualified", score: 0, ask: [], missingRequired: ["location"], hardFail: { field: "budget", rule: "below min_project_price" } });
+
+    it("is closed kindly when the customer has just given the detail that fails it and asked nothing else", () => {
+      const plan = planReply(input({ understood: withQualification({ outcome: "skipped" }, failed, { intent: "give_details", hasQuestion: false, fieldKeys: ["budget"] }), question: null }));
+      expect(plan).toMatchObject({ case: "disqualified", kbMisses: 0, reply: { mode: "model", action: { kind: "close_disqualified", reason: "The business has nothing that fits what the customer is looking for." }, facts: ["The business has nothing that fits what the customer is looking for."] } });
+      expect(plan.handoff).toBeUndefined();
+    });
+
+    it("is not closed again on a later message that gives nothing new about it", () => {
+      const plan = planReply(input({ understood: withQualification({ outcome: "skipped" }, failed, { intent: "greeting", hasQuestion: false, fieldKeys: [] }), question: null }));
+      expect(plan.case).toBe("nothing_to_look_up");
+    });
+
+    it("a question the knowledge base can answer is still answered, and nothing is asked", () => {
+      const plan = planReply(input({ understood: withQualification(found, failed, { fieldKeys: ["budget"] }) }));
+      expect(plan).toMatchObject({ case: "answered_from_kb", reply: { action: { kind: "answer_and_ask", askFields: [] } } });
+    });
+  });
+});

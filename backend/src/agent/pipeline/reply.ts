@@ -198,6 +198,7 @@ async function compose(plan: Plan, loaded: Loaded, turn: TurnContext, exceeded: 
     const first: LlmMessage[] = buildReplyMessages({
       action: model.action,
       facts: model.facts,
+      askFields: model.ask?.map(({ label, options }) => ({ label, options })),
       history: history.map((h) => ({ sender: h.sender, text: h.body })),
       language: model.language ?? undefined,
     });

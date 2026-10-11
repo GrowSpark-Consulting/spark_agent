@@ -1074,3 +1074,51 @@ describe("the question asked once when it is not clear how the customer is leavi
     expect(w.complete).toHaveBeenCalledOnce();
   });
 });
+
+// Step 5 (qualifying) reaches the customer through the reply: the details to ask for go to the model by their labels, and a lead that
+// is not a fit is closed kindly. What to ask and whether to close was decided by code (plan.ts); the model only words it.
+describe("the details to ask for, and a lead that is not a fit", () => {
+  const ASK = [
+    { key: "location", label: "Preferred area" },
+    { key: "timeline", label: "When are you planning to buy?", options: ["0-3m", "3-6m", "6m+"] },
+  ];
+  const qualified = (retrieval: Retrieval, over: Record<string, unknown>, q: Record<string, unknown> = {}): UnderstandResult => ({
+    ...understood(retrieval, over),
+    qualification: { score: 30, temperature: "cold", ask: ASK, missingRequired: ["location", "timeline"], readyForSlots: false, hardFail: null, ...q },
+  } as UnderstandResult);
+
+  it("an answer also asks for the next missing details, by their labels and the choices the pack allows", async () => {
+    const w = world();
+    const out = await replyTurn(runner().step, w.turn, qualified(found, {}), Date.now(), w.deps);
+    expect(out).toMatchObject({ case: "answered_from_kb", reply: { status: "sent", source: "model" } });
+    const user = w.complete.mock.calls[0][0].messages[0].content as string;
+    expect(user).toContain("<ask>");
+    expect(user).toContain("- Preferred area");
+    expect(user).toContain("- When are you planning to buy? (the customer can choose: 0-3m, 3-6m, 6m+)");
+  });
+
+  it("details given with no question are acknowledged with a request for the next ones", async () => {
+    const w = world({ question: null });
+    const out = await replyTurn(runner().step, w.turn, qualified({ outcome: "skipped" }, { intent: "give_details", hasQuestion: false }), Date.now(), w.deps);
+    expect(out).toMatchObject({ case: "ask_details", reply: { status: "sent", source: "model" } });
+    expect(w.complete.mock.calls[0][0].messages[0].content).toContain("Ask the customer for the details listed in <ask>");
+  });
+
+  it("a lead that is not a fit is told so kindly, in the model's words from the fact, and nothing is asked", async () => {
+    const w = world({ question: null, script: ["Thank you for asking. I am sorry, we do not have anything that fits right now."] });
+    const failed = qualified({ outcome: "skipped" }, { intent: "give_details", hasQuestion: false, fieldKeys: ["budget"] }, { temperature: "disqualified", score: 0, ask: [], hardFail: { field: "budget", rule: "below min_project_price" } });
+    const out = await replyTurn(runner().step, w.turn, failed, Date.now(), w.deps);
+    expect(out).toMatchObject({ case: "disqualified", reply: { status: "sent", source: "model" }, handoff: null });
+    const user = w.complete.mock.calls[0][0].messages[0].content as string;
+    expect(user).toContain("nothing that fits what the customer is looking for");
+    expect(user).not.toContain("<ask>");
+    expect(w.handoffs).toHaveLength(0);
+  });
+
+  it("the step results stay small: the labels are the pack's, never the customer's words", async () => {
+    const w = world();
+    const r = runner();
+    await replyTurn(r.step, w.turn, qualified(found, {}), Date.now(), w.deps);
+    expect(JSON.stringify([...r.memo.values()])).not.toContain(CUSTOMER_WORDS);
+  });
+});
