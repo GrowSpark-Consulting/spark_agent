@@ -67,6 +67,8 @@ export interface Options {
   script?: string[];
   port?: Partial<SchedulingPort>;
   services?: { id: string }[];
+  /** tenants.agent_settings, as the dashboard saves it. */
+  agentSettings?: unknown;
   enabled?: boolean;
   /** What the extraction kept on the message before the reply step ran (a retry finds the act's result already there). */
   agent?: Record<string, unknown>;
@@ -85,7 +87,7 @@ export function world(over: Options = {}) {
     conversations: [{ id: CONV, tenantId: A, contactId: CONTACT, mode: "ai" }],
     contacts: [{ id: CONTACT, tenantId: A, language: null, optedOut: false, consentAt: "2026-10-01T00:00:00Z" }],
     leads: [{ id: LEAD, tenantId: A, contactId: CONTACT, stage: "engaged", createdAt: 1, fields: {} }],
-    tenantInfo: { [A]: { name: "Skyline Homes", agentSettings: {} } },
+    tenantInfo: { [A]: { name: "Skyline Homes", agentSettings: over.agentSettings ?? {} } },
     answered: [],
   });
   const queue = [...(over.script ?? ["Done."])];

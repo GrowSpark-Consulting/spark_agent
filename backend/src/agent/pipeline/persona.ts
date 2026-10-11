@@ -13,6 +13,7 @@ const Settings = z.object({
   persona: z.string().optional().catch(undefined),
   tone: z.enum(["friendly", "formal"]).optional().catch(undefined),
   privacyNotice: z.boolean().optional().catch(undefined),
+  bookingServiceId: z.guid().optional().catch(undefined),
   handoffTriggers: z
     .array(z.object({ key: z.string(), enabled: z.boolean().optional().catch(undefined) }).catch({ key: "", enabled: undefined }))
     .optional()
@@ -30,6 +31,11 @@ export interface ReplySettings {
   complaintHandoffEnabled: boolean;
   /** The first AI reply to a contact carries the privacy notice. Off unless the business turns it on (Raja, 9 Oct: switchable if legal review requires it). */
   privacyNotice: boolean;
+  /**
+   * The service the assistant books when the business has several active ones (a service's id). Without it the assistant books on its own only
+   * when there is exactly one, and otherwise hands the chat to a person: it never picks a service for the customer.
+   */
+  bookingServiceId: string | null;
 }
 
 export function parseReplySettings(raw: unknown): ReplySettings {
@@ -44,5 +50,6 @@ export function parseReplySettings(raw: unknown): ReplySettings {
     askedHumanHandoffEnabled: enabled(TRIGGER_KEYS.asked_human),
     complaintHandoffEnabled: enabled(TRIGGER_KEYS.complaint),
     privacyNotice: settings.privacyNotice === true,
+    bookingServiceId: settings.bookingServiceId ?? null,
   };
 }
