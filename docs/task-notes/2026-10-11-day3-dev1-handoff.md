@@ -1,10 +1,10 @@
-# Day 3 (Dev 1): the assistant qualifies and books. What was built, and what Dev 2 and Dev 3 need to do or know
+# Day 3 (Dev 1): the assistant qualifies and books. What was built, and what Dev 2 and Dev 3 should know
 
 Audience: Dev 2 (Shaaz) and Dev 3 (Dhatri). The next person to touch the agent can read it too.
 
 Nothing here changes a file, a table, a migration, an endpoint or an event of yours. Everything of Dev 1's is in `backend/src/agent/`
 (plus tests, the conversation tests, one ESLint rule and this note). Dev 2's booking functions are only **called**, and Dev 3's tables are only **read**.
-The sections that start "Dev 2:" and "Dev 3:" are the things to do or check.
+How to read this note: it says what Dev 1 built, what it calls or reads of yours, what it adds that you may meet, and anything on your side that it affects. It does not tell you how to do your own work: where your area is affected, the note says what and why, and the choice is yours. Dev 1 changes none of your files. Sections 4 and 5 are the parts about Dev 3's and Dev 2's areas.
 
 ## 1. What it does, in plain words
 
@@ -43,23 +43,22 @@ involved, **act** and **plan-act**, then **reply**, then **handoff**). The booki
 - Switches: all of it runs only when the business has the **`booking`** and **`lead_qualification`** features (`isEnabled`), and only for a pack whose
   `bookingModes` include `slot` or `site_visit`. Otherwise a turn runs exactly as it did on Day 2.
 
-## 4. Dev 3: what to do or check
+## 4. For Dev 3: what Dev 1's work reads or writes in your area
 
 1. **Catalog editor attribute names.** To score, the assistant reads each active `catalog_items` row: `price_from` (the lowest price, a column) and, inside
    `attributes`, **`price_to`** (the highest price) and **`area`** (or `areas`, a list). If the editor saves other names, the budget and area rules earn nothing
-   and a budget far below the cheapest home never disqualifies. The names are one constant in `agent/scoring/references.ts` (`CATALOG_ATTRIBUTES`), so either side can change.
+   and a budget far below the cheapest home never disqualifies. The names are one constant in `agent/scoring/references.ts` (`CATALOG_ATTRIBUTES`); whichever side changes them, the other has to match.
 2. **Which service the assistant books.** The assistant books on its own only when the business has **exactly one active service**, or one it was told to use.
    The seeded demo real-estate business has two ("Site visit" and "Video walkthrough"), so on staging it would hand every booking to a person.
-   The setting is `tenants.agent_settings.bookingServiceId` (the id of an active service). It needs a field on the Agent settings screen, for example
-   "Service the assistant books", a dropdown of the business's active services. Until then it can be set by hand (see section 7).
+   The setting is `tenants.agent_settings.bookingServiceId` (the id of an active service). There is no field for it on the Agent settings screen today, so until there is one it is set by hand (see section 7).
 3. **The leads board and lead detail** read `leads.score` and `leads.temperature`. The assistant now writes both (only while the lead is open: new, engaged, qualified or nurture).
    `temperature` can be `hot`, `warm`, `cold` or `disqualified` (the column already allowed it). The assistant does **not** change `leads.stage`; the only stage change
    is `booked`, which Dev 2's `confirm_booking` makes.
-4. **The calendar** shows bookings the assistant made like any other: kind `site_visit` (or `slot`), with the resource the engine picked. Nothing to build.
+4. **The calendar** shows bookings the assistant made like any other: kind `site_visit` (or `slot`), with the resource the engine picked. They look like any other booking.
 5. **The lint rule is backend-only.** Your exported prototype screens compare industries (for example `K==='hotel'` in `features/settings/pakka-settings.tsx`). The rule is not
-   applied to `frontend/` for that reason. Worth cleaning up when those screens become real, and then the rule can be extended.
+   applied to `frontend/` for that reason. The rule can be extended to `frontend/` once those screens stop comparing industries.
 
-## 5. Dev 2: what to check
+## 5. For Dev 2: what Dev 1's work calls and assumes
 
 The functions used, exactly as called (all through `scheduling/port-db.ts`, all with the default dependencies):
 
@@ -73,13 +72,13 @@ The functions used, exactly as called (all through `scheduling/port-db.ts`, all 
 
 Also read (read only): `services` (active ones, ids), `tenants.timezone`, and `bookings` (the lead's next held or confirmed booking that has not ended).
 
-Please check:
+Where it meets your area:
 
 1. **No second confirmation message.** The assistant sends the booking confirmation itself, as the reply to the customer's pick (one `ai_reply`, one credit).
    Today `booking.confirmed` only drives the reminders, the calendar sync and the post-visit job, so nothing doubles up. If a "booking confirmed" template is
-   planned on that event (`booking_confirmed_v1` is in the pack's template list), the customer would get two. Decide which one stays.
+   planned on that event (`booking_confirmed_v1` is in the pack's template list), the customer would get two. Which of the two stays is Dev 2's call.
 2. **One credit entry per reply (exit test 4).** The assistant sends exactly one `ai_reply` per answered turn (the scripted chats assert it for every turn). That each of those
-   creates exactly **one** `credit_ledger` row is `notify.send` and `spend_credits`, which are yours. Please look at the ledger on staging after a booking chat.
+   creates exactly **one** `credit_ledger` row is `notify.send` and `spend_credits`, which are yours. Dev 1 has not looked at the ledger on staging.
 3. **Two people, one slot (exit test 3).** The assistant relies on the database refusing the second hold (`slot_taken`). The concurrency test is yours
    (`scripts/db/hold-slot-concurrency.sh`); the chats only cover how the assistant behaves when the engine says "taken".
 4. **A rescheduled booking gets a new id.** `rescheduleBooking` confirms a new booking and marks the old one `rescheduled`; the assistant reads the lead's current booking from
@@ -125,7 +124,7 @@ check the booking in the calendar and the lead at `booked`.
 - **Not run on staging or against the real database from the agent's code path.** The booking SQL is Dev 2's and unchanged.
 - **Labels are English** ("Sun 11 Oct, 10:00 am"); the model writes the reply in the customer's language around them. The English and Tamil wording for the confirmation,
   reminders, feedback and staff alert is the templates' job (Dev 2's catalogue), not this step's.
-- **The `hot_lead` handover** (the pack lists it as a trigger) is not wired: a hot lead is offered times, not handed to a person.
+- **The `hot_lead` trigger** was not wired on Day 3. On Day 4 it became an event (`lead.hot`), not a handoff row; see the Day 4 note.
 - **Several services without a named one**, field visits, callbacks and multi-day bookings are the next steps (Day 4).
 - The reply says what the facts say. If a business's catalog or services are wrong, the assistant is exactly as wrong.
 
