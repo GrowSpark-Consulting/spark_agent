@@ -130,7 +130,7 @@ UI: filters (All / AI handling / Needs human / Unread), search, chat list, chat,
         GET  /api/conversations/:id/lead-card            PROPOSED · Dev 1 (wraps buildLeadCard)
         POST /api/conversations/:id/messages             HANDOVER · Dev 3 → notify.send (Dev 2)
         POST /api/conversations/:id/mode                 HANDOVER · Dev 3
-        POST /api/conversations/:id/suggest              HANDOVER · Dev 1
+        POST /api/conversations/:id/suggest              BUILT · Dev 1 → { reply: string|null, language, reason: "unavailable"|null }
   ↓ loading: list and chat skeletons; outgoing bubble shows "sending"
   ↓ empty: first-day copy + copy test link (built); "no chats match" (built)
   ↓ error: failed bubble + Retry; outside_window → template dialog; realtime lost → banner
