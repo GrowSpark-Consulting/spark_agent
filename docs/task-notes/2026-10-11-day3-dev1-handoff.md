@@ -4,7 +4,7 @@ Audience: Dev 2 (Shaaz) and Dev 3 (Dhatri). The next person to touch the agent c
 
 Nothing here changes a file, a table, a migration, an endpoint or an event of yours. Everything of Dev 1's is in `backend/src/agent/`
 (plus tests, the conversation tests, one ESLint rule and this note). Dev 2's booking functions are only **called**, and Dev 3's tables are only **read**.
-How to read this note: it says what Dev 1 built, what it calls or reads of yours, what it adds that you may meet, and anything on your side that it affects. It does not tell you how to do your own work: where your area is affected, the note says what and why, and the choice is yours. Dev 1 changes none of your files. Sections 4 and 5 are the parts about Dev 3's and Dev 2's areas.
+Sections 4 and 5 are the parts about Dev 3's and Dev 2's areas.
 
 ## 1. What it does, in plain words
 

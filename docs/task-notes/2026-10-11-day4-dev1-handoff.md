@@ -4,7 +4,7 @@ Audience: Dev 2 (Shaaz) and Dev 3 (Dhatri). The next person to touch the agent c
 
 Nothing here changes a file, a table, a migration or an endpoint of yours. Everything of Dev 1's is in `backend/src/agent/` and `backend/src/channels/whatsapp/`
 (plus tests, conversation tests and this note). The only shared files touched are `server/routes.ts` (one added route), `inngest/functions.ts` and
-`inngest/process-message.ts` (one added function and one added branch). How to read this note: it says what Dev 1 built, what it calls or reads of yours, what it adds that you may meet, and anything on your side that it affects. It does not tell you how to do your own work: where your area is affected, the note says what and why, and the choice is yours. Dev 1 changes none of your files. Sections 3 and 4 are the parts about Dev 2's and Dev 3's areas.
+`inngest/process-message.ts` (one added function and one added branch). Sections 3 and 4 are the parts about Dev 2's and Dev 3's areas.
 
 ## 1. What it does, in plain words
 
