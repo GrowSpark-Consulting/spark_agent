@@ -43,7 +43,11 @@ function world(over: Options = {}) {
     audit_logs: [],
   });
   const sent: { tenantId: string; kind: string; payload: { conversationId: string; text: string } }[] = [];
+  const events: { id: string; name: string; data: Record<string, string> }[] = [];
   const deps: LinkDeps = {
+    sendEvent: vi.fn(async (event) => {
+      events.push(event);
+    }),
     db: t.db,
     env: { ENCRYPTION_KEY: KEY, NEXT_PUBLIC_APP_URL: APP },
     now: () => over.now ?? NOW,
@@ -63,7 +67,7 @@ function world(over: Options = {}) {
     const l = link(mode, claims, at);
     return handleHandoffLink(l.request, l.params, deps);
   };
-  return { ...t, deps, sent, link, open };
+  return { ...t, deps, sent, events, link, open };
 }
 
 const body = async (res: Response) => (await res.text()).replace(/\s+/g, " ");
@@ -331,5 +335,30 @@ describe("what a page never shows, and how it is sent", () => {
       const named = call.op === "insert" ? (call.payload as { tenant_id?: string }).tenant_id === A : call.filters.some((f) => (f.column === "tenant_id" || (call.table === "tenants" && f.column === "id")) && f.op === "eq");
       expect(named, `${call.table} ${call.op} is not scoped to the business`).toBe(true);
     }
+  });
+});
+
+describe("the event for Dev 2's outcome question", () => {
+  it("is sent when a chat goes to the staff member's own number, once per handoff, with ids only", async () => {
+    const w = world({ mode: "ai" });
+    await w.open("own");
+    expect(w.events).toEqual([{ id: `handoff_own_number:${HANDOFF}`, name: "handoff.own_number", data: { tenantId: A, handoffId: HANDOFF } }]);
+  });
+
+  it("is not sent for the inbox button, nor when the link did nothing", async () => {
+    const inbox = world({ mode: "ai" });
+    await inbox.open("inbox");
+    const used = world({ mode: "ai", handoff: { picked_at: iso(NOW.getTime() - 1000) } });
+    await used.open("own");
+    expect(inbox.events).toEqual([]);
+    expect(used.events).toEqual([]);
+  });
+
+  it("does not undo the takeover when the event cannot be sent", async () => {
+    const w = world({ mode: "ai" });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    (w.deps.sendEvent as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("down"));
+    expect((await w.open("own")).status).toBe(302);
+    expect(w.tables.conversations[0]).toMatchObject({ mode: "external" });
   });
 });

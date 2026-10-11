@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { isEnabled } from "../../features/is-enabled";
 import { serverEnv } from "../../lib/env";
+import { inngest } from "../../inngest/client";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { send, type NotifyPayload, type SendOutcome } from "../../notify/send";
 import { friendlyPage, NOTICES, redirect, type Notice } from "./pages";
@@ -29,6 +30,8 @@ export interface LinkDeps {
   /** The staff member's name as the customer will read it, or null. */
   userName: (userId: string) => Promise<string | null>;
   send: Send;
+  /** Tells the rest of the system (Dev 2's outcome question, 4 hours later) that a chat went to a staff member's own number. Ids only. */
+  sendEvent: (event: { id: string; name: string; data: Record<string, string> }) => Promise<unknown>;
 }
 
 const defaults = (): LinkDeps => ({
@@ -44,6 +47,7 @@ const defaults = (): LinkDeps => ({
     return (named ?? data.user.email?.split("@")[0] ?? "").trim() || null;
   },
   send: (tenantId, kind, payload) => send(tenantId, kind, payload),
+  sendEvent: (event) => inngest.send(event),
 });
 
 const HandoffRow = z.object({ conversation_id: z.string(), picked_at: z.string().nullable(), resolved_at: z.string().nullable() });
@@ -144,6 +148,9 @@ export async function handleHandoffLink(request: Request, params: { token: strin
     await db.from("audit_logs").insert({ tenant_id: tenantId, actor: userId, action: "handoff.picked", entity: "handoff", entity_id: handoffId, diff: { takeover: mode === "own" ? "own_number" : "inbox" } });
 
     if (mode === "inbox") return redirect(`${inboxUrl}?chat=${handoff.conversation_id}`);
+
+    // Dev 2's job asks the staff member how it went after a while. Best effort: the takeover has happened either way.
+    await deps.sendEvent({ id: `handoff_own_number:${handoffId}`, name: "handoff.own_number", data: { tenantId, handoffId } }).catch(() => console.error(`${TAG} the own-number event could not be sent (business ${tenantId})`));
 
     // Own number: the customer is told who will message them, from which number (one AI reply, 1 credit). Best effort: a customer outside the 24-hour
     // window, or a business out of credits, is simply not told, and the staff member is sent to them all the same.
