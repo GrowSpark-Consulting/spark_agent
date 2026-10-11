@@ -48,6 +48,35 @@ describe("offering times", () => {
   });
 });
 
+describe("a business that names the service to book", () => {
+  const OTHER = "30000000-0000-0000-0000-000000000009";
+  const two = [{ id: SERVICE }, { id: OTHER }];
+
+  it("with several active services, books the one the business named (agent_settings.bookingServiceId)", async () => {
+    const w = world({ services: two, agentSettings: { bookingServiceId: OTHER }, script: [OFFER_TEXT] });
+    const out = await replyTurn(runner().step, w.turn, understood(), NOW, w.deps);
+    expect(out).toMatchObject({ case: "offer_slots", reply: { status: "sent" } });
+    expect(w.port.findSlots.mock.calls[0][1].serviceId).toBe(OTHER);
+  });
+
+  it("a named service that is not active is not used: with several, a person takes over", async () => {
+    const w = world({ services: two, agentSettings: { bookingServiceId: "30000000-0000-0000-0000-000000000077" } });
+    const out = await replyTurn(runner().step, w.turn, understood(), NOW, w.deps);
+    expect(out).toMatchObject({ case: "no_service", handoff: { trigger: "stuck" } });
+    expect(w.port.findSlots).not.toHaveBeenCalled();
+  });
+
+  it("a setting that is not an id is ignored", async () => {
+    const w = world({ services: two, agentSettings: { bookingServiceId: "site visit" } });
+    expect(await replyTurn(runner().step, w.turn, understood(), NOW, w.deps)).toMatchObject({ case: "no_service" });
+  });
+
+  it("with exactly one service the setting is not needed", async () => {
+    const w = world({ services: [{ id: SERVICE }], script: [OFFER_TEXT] });
+    expect(await replyTurn(runner().step, w.turn, understood(), NOW, w.deps)).toMatchObject({ case: "offer_slots" });
+  });
+});
+
 describe("a business with no single service", () => {
   it.each([[[]], [[{ id: SERVICE }, { id: "30000000-0000-0000-0000-000000000009" }]]])("is taken over by a person, and the calendar is not searched (%j services)", async (services) => {
     const w = world({ services });

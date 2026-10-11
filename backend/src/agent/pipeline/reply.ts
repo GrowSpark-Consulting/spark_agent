@@ -125,7 +125,7 @@ async function loadPlanInput(turn: TurnContext, understood: UnderstandResult, de
   ]);
   const asked = (agent?.extraction as { question?: unknown } | undefined)?.question;
   const settings = parseReplySettings(info?.agentSettings);
-  const scheduling = await loadScheduling(turn, understood, texts, agent, firstAt, deps);
+  const scheduling = await loadScheduling(turn, understood, texts, agent, firstAt, settings, deps);
   return {
     agent,
     settings,
@@ -142,6 +142,7 @@ async function loadScheduling(
   texts: { body: string | null }[],
   agent: Record<string, unknown> | null,
   firstAt: string,
+  settings: ReplySettings,
   deps: ReplyDeps,
 ): Promise<PlanInput["scheduling"] | undefined> {
   const sd = deps.scheduling;
@@ -164,7 +165,7 @@ async function loadScheduling(
   const times = waiting && "slots" in waiting ? waiting : null;
   const cancelAsk = waiting && "cancel" in waiting ? waiting.cancel : null;
   return {
-    service: services.length === 1 ? { state: "one", id: services[0].id } : services.length === 0 ? { state: "none" } : { state: "several" },
+    service: chosenService(services, settings),
     offer: times ? times.slots : null,
     rescheduleBookingId: times?.rescheduleBookingId ?? null,
     cancelAsk,
@@ -177,6 +178,13 @@ async function loadScheduling(
     now,
     ...(stored.success ? { act: stored.data as ActResult } : {}),
   };
+}
+
+/** The service to book: the one the business named, if it is active; else the only one; never a guess among several. */
+function chosenService(services: { id: string }[], settings: ReplySettings): NonNullable<PlanInput["scheduling"]>["service"] {
+  const named = settings.bookingServiceId ? services.find((s) => s.id === settings.bookingServiceId) : undefined;
+  if (named) return { state: "one", id: named.id };
+  return services.length === 1 ? { state: "one", id: services[0].id } : services.length === 0 ? { state: "none" } : { state: "several" };
 }
 
 /**

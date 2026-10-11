@@ -6,17 +6,17 @@ import { parseReplySettings } from "./persona";
 
 describe("parseReplySettings", () => {
   it("reads the persona and the tone the dashboard saves", () => {
-    expect(parseReplySettings({ persona: "Maya", tone: "formal" })).toEqual({ persona: "Maya", tone: "formal", kbGapHandoffEnabled: true, askedHumanHandoffEnabled: true, complaintHandoffEnabled: true, privacyNotice: false });
+    expect(parseReplySettings({ persona: "Maya", tone: "formal" })).toEqual({ persona: "Maya", tone: "formal", kbGapHandoffEnabled: true, askedHumanHandoffEnabled: true, complaintHandoffEnabled: true, privacyNotice: false, bookingServiceId: null });
   });
 
   it("uses no persona and the friendly tone when nothing is saved", () => {
     for (const raw of [{}, null, undefined, "text", 5, []]) {
-      expect(parseReplySettings(raw)).toEqual({ persona: null, tone: "friendly", kbGapHandoffEnabled: true, askedHumanHandoffEnabled: true, complaintHandoffEnabled: true, privacyNotice: false });
+      expect(parseReplySettings(raw)).toEqual({ persona: null, tone: "friendly", kbGapHandoffEnabled: true, askedHumanHandoffEnabled: true, complaintHandoffEnabled: true, privacyNotice: false, bookingServiceId: null });
     }
   });
 
   it("ignores a tone that is not offered and a persona that is not text, keeping the rest", () => {
-    expect(parseReplySettings({ persona: 42, tone: "sarcastic" })).toEqual({ persona: null, tone: "friendly", kbGapHandoffEnabled: true, askedHumanHandoffEnabled: true, complaintHandoffEnabled: true, privacyNotice: false });
+    expect(parseReplySettings({ persona: 42, tone: "sarcastic" })).toEqual({ persona: null, tone: "friendly", kbGapHandoffEnabled: true, askedHumanHandoffEnabled: true, complaintHandoffEnabled: true, privacyNotice: false, bookingServiceId: null });
     expect(parseReplySettings({ persona: { x: 1 }, tone: "formal" }).tone).toBe("formal");
   });
 
@@ -44,6 +44,11 @@ describe("parseReplySettings", () => {
     expect(parseReplySettings({ handoffTriggers: [{ key: "asked_human", enabled: false }] })).toMatchObject({ askedHumanHandoffEnabled: false, complaintHandoffEnabled: true });
     expect(parseReplySettings({ handoffTriggers: [{ key: "human", enabled: false }] }).askedHumanHandoffEnabled).toBe(false);
     expect(parseReplySettings({ handoffTriggers: [{ key: "complaint", enabled: false }] })).toMatchObject({ askedHumanHandoffEnabled: true, complaintHandoffEnabled: false });
+  });
+
+  it("reads the service the assistant books (bookingServiceId): an id, or nothing", () => {
+    expect(parseReplySettings({ bookingServiceId: "30000000-0000-0000-0000-000000000003" }).bookingServiceId).toBe("30000000-0000-0000-0000-000000000003");
+    for (const raw of [{}, { bookingServiceId: "site-visit" }, { bookingServiceId: 5 }, { bookingServiceId: null }, { bookingServiceId: "" }]) expect(parseReplySettings(raw).bookingServiceId).toBeNull();
   });
 
   it("reads privacyNotice: off unless it is exactly true", () => {
