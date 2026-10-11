@@ -1,6 +1,6 @@
 import { NonRetriableError } from "inngest";
 import { MessageReceived } from "./events";
-import { decideGate, isReadable, type GateReason } from "./gate";
+import { decideGate, isAnswerable, type GateReason } from "./gate";
 import type { PendingMessage, PipelineStore } from "./store";
 
 // The message pipeline, steps 2 and 3 (docs/handover.md, "Message pipeline"): who wrote, their open lead, and
@@ -141,7 +141,7 @@ export async function runTurn(step: StepRunner, rawEvent: unknown, deps: TurnDep
   if (!gate.open) return { status: "gated_off", reason: gate.reason, leadId: lead.leadId };
 
   // Step 3, for each message: the ones the agent can read are answered; photos and voice notes wait for staff.
-  const messageIds = batch.filter((m) => isReadable(m.kind)).map((m) => m.id);
+  const messageIds = batch.filter((m) => isAnswerable(m.kind)).map((m) => m.id);
   if (messageIds.length === 0) return { status: "gated_off", reason: "unsupported_kind", leadId: lead.leadId };
 
   return {

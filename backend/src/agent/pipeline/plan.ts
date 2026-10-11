@@ -19,6 +19,7 @@ import type { UnderstandResult } from "./understand";
 //   understood, may be leaving but unclear / opt_out < 0.8| the "talk to the team or continue" line|
 //   ... the customer then sends "1"                      | the handover line                      | handoff asked_human (high), chat to a person
 //   understood, wants a person                           | the handover line                      | handoff asked_human (high), if the business has it on
+//   a voice note on its own (nothing typed)              | one line asking the customer to type    | staff told a voice note is waiting; not repeated for the next one
 //   understood, a complaint, or an angry customer        | one short sorry and the handover line  | handoff complaint (high), if the business has it on
 //   understood, asks for a discount or a lower price     | the model: a person will look at it    | handoff negotiation (high), if the business has it on
 //   ... and the lead has just become hot (once)          | the reply of the row it fell in        | hotLead: staff are told once, the chat stays with the AI (no handoff row)
@@ -88,6 +89,10 @@ export interface PlanInput {
    * the alert; when it is missing, nothing is raised (the safe default is silence).
    */
   hotLeadAlerted?: boolean;
+  /** Every message of the burst is a voice note: nothing was typed, and nothing can be listened to yet. */
+  voiceNote?: boolean;
+  /** The chat's previous turn was also a voice note that was answered: a second one right after is not answered again. */
+  voiceNoteRepeat?: boolean;
   /**
    * Booking (steps 5 and 6), only for a business that has booking switched on and a kind of booking that needs a time. Without it
    * nothing about booking is decided (plan-booking.ts has the table).
@@ -132,6 +137,10 @@ export interface Plan {
    * the AI, so there is no handoff row (the inbox would call the chat "needs a person") and no switch of mode.
    */
   hotLead?: boolean;
+  /** A voice note was answered with the request to type: staff are told one is waiting (the reply step emits `voice_note.received`). */
+  voiceNote?: boolean;
+  /** Nothing is sent, but the customer's messages count as answered (a repeated voice note): they must not be picked up again. */
+  markAnswered?: boolean;
   /** The miss count to keep for the next turn of this chat. */
   kbMisses: number;
   /** The row of the table above, for the log (never a customer's words). */
@@ -178,6 +187,11 @@ function decide(input: PlanInput): Plan {
     case "model_unavailable":
       return { reply: fixed("fallback", language), kbMisses: carry, case: "model_unavailable" };
     case "fallback":
+      // A voice note on its own (Raja, 11 Oct): one polite line asking the customer to type, and staff told. Not again for the next one right after.
+      if (understood.reason === "no_text" && input.voiceNote) {
+        if (input.voiceNoteRepeat) return { reply: { mode: "none" }, markAnswered: true, kbMisses: carry, case: "voice_note_repeat" };
+        return { reply: fixed("voice_note", language), voiceNote: true, kbMisses: carry, case: "voice_note" };
+      }
       return { reply: fixed("clarify", language), kbMisses: carry, case: `clarify_${understood.reason}` };
     case "understood":
       break;

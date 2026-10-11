@@ -69,6 +69,8 @@ export interface BatchText {
   createdAt: string;
   /** The id of the reply button or list row the customer tapped (the inbound message's `meta.buttonId`), or null for typed text. */
   buttonId: string | null;
+  /** messages.kind: "text", "interactive", "audio" (a voice note, which has no words) and so on; null on a row from before the column existed. */
+  kind: string | null;
 }
 export interface HistoryItem {
   sender: "customer" | "ai" | "staff";
@@ -192,7 +194,7 @@ const LeadSchema = z.object({ id: z.string(), stage: z.string() });
 const PendingSchema = z.object({ id: z.string(), kind: z.string().nullable() });
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const LeadSchema2 = z.object({ id: z.string(), stage: z.string(), fields: z.unknown() });
-const BatchTextSchema = z.object({ id: z.string(), body: z.string().nullable(), created_at: Iso, meta: z.unknown().optional() });
+const BatchTextSchema = z.object({ id: z.string(), body: z.string().nullable(), created_at: Iso, meta: z.unknown().optional(), kind: z.string().nullable().optional() });
 const TenantInfoSchema = z.object({ name: z.string(), agent_settings: z.unknown() });
 const KbGapResult = z.array(z.object({ gap_id: z.string(), asked_count: z.number().int() })).min(1);
 const HandoffSchema = z.object({ id: z.string() });
@@ -362,7 +364,7 @@ export function createPipelineStore(db: SupabaseClient = supabaseAdmin(), { time
       const { data, error } = await run("read message texts", (signal) =>
         db
           .from("messages")
-          .select("id, body, created_at, meta")
+          .select("id, body, created_at, meta, kind")
           .eq("tenant_id", tenantId)
           .eq("conversation_id", conversationId)
           .eq("sender", "customer")
@@ -371,7 +373,7 @@ export function createPipelineStore(db: SupabaseClient = supabaseAdmin(), { time
           .abortSignal(signal),
       );
       if (error) fail("read message texts", error);
-      return parse(z.array(BatchTextSchema), data ?? [], "read message texts").map((row) => ({ id: row.id, body: row.body, createdAt: row.created_at, buttonId: isObject(row.meta) && typeof row.meta.buttonId === "string" ? row.meta.buttonId : null }));
+      return parse(z.array(BatchTextSchema), data ?? [], "read message texts").map((row) => ({ id: row.id, body: row.body, createdAt: row.created_at, buttonId: isObject(row.meta) && typeof row.meta.buttonId === "string" ? row.meta.buttonId : null, kind: row.kind ?? null }));
     },
 
     async getHistory(tenantId, conversationId, before, limit) {

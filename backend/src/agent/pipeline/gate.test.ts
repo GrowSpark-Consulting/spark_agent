@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideGate, isReadable, SUPPORTED_KINDS, type GateInput } from "./gate";
+import { decideGate, isAnswerable, isReadable, SUPPORTED_KINDS, type GateInput } from "./gate";
 
 // Step 3 of the pipeline: should the AI answer this conversation at all, and which of the customer's messages
 // can it read? Plain code (docs/handover.md, "code decides"). A message the gate turns away is not lost: it stays
@@ -29,6 +29,21 @@ describe("decideGate (the conversation)", () => {
     expect(decideGate(all)).toEqual({ open: false, reason: "opted_out" });
     expect(decideGate({ ...all, optedOut: false })).toEqual({ open: false, reason: "not_ai_mode" });
     expect(decideGate({ ...all, optedOut: false, mode: "ai" })).toEqual({ open: false, reason: "feature_off" });
+  });
+});
+
+describe("isAnswerable (one message): what the assistant replies to, which is more than what it can read", () => {
+  it.each(["text", "interactive", null])("%s is answered", (kind) => {
+    expect(isAnswerable(kind)).toBe(true);
+  });
+
+  it("a voice note is answered (with a polite request to type), though it cannot be read", () => {
+    expect(isAnswerable("audio")).toBe(true);
+    expect(isReadable("audio")).toBe(false);
+  });
+
+  it.each(["image", "location", "document", "unsupported"])("a %s is left for staff", (kind) => {
+    expect(isAnswerable(kind)).toBe(false);
   });
 });
 

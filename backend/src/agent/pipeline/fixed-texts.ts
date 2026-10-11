@@ -7,7 +7,7 @@ import type { Extraction } from "@pakka/types";
 //
 // The wording is Dev 1's (docs/task-notes, "Decisions"); Raja is welcome to change it, and a change is only an edit here.
 
-export type FixedTextKey = "fallback" | "clarify" | "handoff" | "handoff_sorry" | "stop_hint" | "credits_holding" | "consent_notice" | "opt_out_confirmation" | "exit_question" | "exit_prompt";
+export type FixedTextKey = "fallback" | "clarify" | "handoff" | "handoff_sorry" | "voice_note" | "stop_hint" | "credits_holding" | "consent_notice" | "opt_out_confirmation" | "exit_question" | "exit_prompt";
 export type TextLanguage = "en" | "ta" | "ta-en" | "hi";
 
 /** The safe line when a reply cannot be trusted (docs/handover.md, post-check): exactly these words in English. */
@@ -31,6 +31,13 @@ export const FIXED_TEXTS: Record<FixedTextKey, Record<TextLanguage, string>> = {
     ta: "பொறுமைக்கு நன்றி. எங்கள் குழு உறுப்பினர் விரைவில் உங்களைத் தொடர்பு கொள்வார்.",
     "ta-en": "Patience-ku nandri. Engal team member seekkiram ungalai contact pannuvanga.",
     hi: "आपके धैर्य के लिए धन्यवाद। हमारी टीम का कोई सदस्य जल्द ही आपसे संपर्क करेगा।",
+  },
+  // A voice note (Raja, 11 Oct, question 1): said once, asking the customer to type. Draft wording: Raja and a native speaker to check.
+  voice_note: {
+    en: "Sorry, I can't listen to voice notes yet. Could you please type your message?",
+    ta: "மன்னிக்கவும், என்னால் இன்னும் குரல் செய்திகளைக் கேட்க முடியாது. உங்கள் செய்தியை தட்டச்சு செய்ய முடியுமா?",
+    "ta-en": "Sorry, ennala innum voice note ketka mudiyala. Ungal message-a type panna mudiyuma?",
+    hi: "माफ़ कीजिए, मैं अभी वॉइस नोट नहीं सुन सकता। क्या आप अपना संदेश टाइप कर सकते हैं?",
   },
   // An angry customer or a complaint (Raja, 11 Oct): one short sorry, then the handover. Draft wording: Raja and a native speaker to check.
   handoff_sorry: {

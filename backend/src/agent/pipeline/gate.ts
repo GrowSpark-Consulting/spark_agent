@@ -26,3 +26,9 @@ export const SUPPORTED_KINDS: ReadonlySet<string> = new Set(["text", "interactiv
 
 /** One message: `kind` is messages.kind, null on rows from before the column existed, which were text. */
 export const isReadable = (kind: string | null): boolean => kind === null || SUPPORTED_KINDS.has(kind);
+
+/**
+ * What the assistant replies to: what it can read, and a voice note, which it cannot listen to yet (Raja, 11 Oct): it asks the customer, once, to
+ * type. A photo, a document or a location is still left for staff, with no reply.
+ */
+export const isAnswerable = (kind: string | null): boolean => isReadable(kind) || kind === "audio";
