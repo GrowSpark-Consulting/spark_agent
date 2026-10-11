@@ -326,8 +326,8 @@ describe("understood, and the customer wants a person, or is unhappy or angry (R
     ["a complaint", { intent: "complaint" as const }],
     ["an angry customer asking something else", { intent: "question" as const, sentiment: "angry" as const }],
     ["an angry customer who is negotiating", { intent: "price_negotiation" as const, sentiment: "angry" as const }],
-  ])("%s: the handover line and a high-priority complaint handover", (_name, over) => {
-    expect(plan(over)).toEqual({ case: "complaint", reply: { mode: "fixed", text: "handoff", language: "en" }, handoff: { trigger: "complaint", priority: "high" }, kbMisses: 0 });
+  ])("%s: one short sorry, the handover, and a high-priority complaint handover", (_name, over) => {
+    expect(plan(over)).toEqual({ case: "complaint", reply: { mode: "fixed", text: "handoff_sorry", language: "en" }, handoff: { trigger: "complaint", priority: "high" }, kbMisses: 0 });
   });
 
   it("only asking whether it is a bot is answered, not handed over", () => {

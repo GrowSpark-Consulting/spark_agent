@@ -90,6 +90,12 @@ describe("runChat with a booking setup", () => {
     expect(report.failures).toEqual([]);
   });
 
+  it("checks whether staff were told about a hot lead: true passes, and the wrong answer fails", async () => {
+    expect((await runChat(bookingChat([{ ...details, expect: { hotLead: true } }]), { mode: "mock" })).failures).toEqual([]);
+    const wrong = await runChat(bookingChat([{ ...details, expect: { hotLead: false } }]), { mode: "mock" });
+    expect(wrong.failures.join("\n")).toMatch(/hot lead alert this turn: wanted false, got true/);
+  });
+
   it("a chat without a booking setup is unaffected: no calendar, no scoring, the clock is the real one", async () => {
     const report = await runChat(chat({ expect: { aiReplies: 1 }, mockOnly: { leadTemperature: "hot" } }), { mode: "mock" });
     expect(report.failures.join("\n")).toMatch(/lead temperature: wanted hot, got undefined/);

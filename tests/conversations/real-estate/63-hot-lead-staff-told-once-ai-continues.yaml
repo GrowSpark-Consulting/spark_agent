@@ -1,0 +1,33 @@
+name: A lead that turns hot tells staff once, and the assistant keeps helping
+description: "Day 4 (Raja, 11 Oct): a hot lead is good news, not a reason to stop. Staff are told once (the card says hot lead); the chat stays with the AI and the customer is offered times as usual. A later message does not tell staff again."
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, area: Velachery } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+turns:
+  - customer: "I want a 2BHK in Velachery, my budget is around 60 lakh and I plan to buy within 3 months"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { config: 2BHK, location: Velachery, budget: 60L, timeline: 0-3m }, question: null }
+      reply: "That sounds like a great match. I can do Sunday at 10:00 am, Sunday at 3:00 pm or Monday at 5:30 pm for a site visit. Which suits you?"
+    expect:
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      hotLead: true
+      reply: { sent: true, contains: ["3:00 pm"] }
+    mockOnly:
+      case: offer_slots
+      leadTemperature: hot
+  - customer: "the second one"
+    mock:
+      extraction: { language: en, intent: give_details, fields: {}, question: null }
+      reply: "Done! Your site visit is booked for Sunday at 3:00 pm. See you then!"
+    expect:
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      hotLead: false
+      calendar: { confirmed: ["2026-10-11T09:30:00.000Z"] }
+    mockOnly:
+      case: booked

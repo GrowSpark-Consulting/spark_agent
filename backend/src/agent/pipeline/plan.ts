@@ -19,7 +19,9 @@ import type { UnderstandResult } from "./understand";
 //   understood, may be leaving but unclear / opt_out < 0.8| the "talk to the team or continue" line|
 //   ... the customer then sends "1"                      | the handover line                      | handoff asked_human (high), chat to a person
 //   understood, wants a person                           | the handover line                      | handoff asked_human (high), if the business has it on
-//   understood, a complaint, or an angry customer        | the handover line                      | handoff complaint (high), if the business has it on
+//   understood, a complaint, or an angry customer        | one short sorry and the handover line  | handoff complaint (high), if the business has it on
+//   understood, asks for a discount or a lower price     | the model: a person will look at it    | handoff negotiation (high), if the business has it on
+//   ... and the lead has just become hot (once)          | the reply of the row it fell in        | hotLead: staff are told once, the chat stays with the AI (no handoff row)
 //   understood, off topic                                | the model's polite decline             |
 //   understood, gave the detail that fails the lead, and | the model's kind close (no handover)   | the lead's temperature is already "disqualified"
 //   ... asked nothing else                               |                                        |
@@ -39,6 +41,9 @@ import type { UnderstandResult } from "./understand";
 // (`messages.meta.agent.kbMisses`), never on the business-wide gap count, which only feeds the dashboard's most-asked list.
 
 export const KB_MISSES_FOR_HANDOFF = 2;
+
+/** What the reply may say when a customer asks for a discount: no price change, a person will look at it. The only fact it is given. */
+const NEGOTIATION_FACT = "The customer asked for a discount or a lower price. You cannot agree to any price change. A team member will look at it and get back to them.";
 
 /** What the reply may say about why: no amounts, no promises. The pack's hard fail names the field; the words stay general. */
 const NOT_A_FIT = "The business has nothing that fits what the customer is looking for.";
@@ -79,6 +84,11 @@ export interface PlanInput {
   /** The turn's hard stop has passed: no model call, the safe fallback. */
   deadlineExceeded: boolean;
   /**
+   * Staff have already been told that this lead is hot (a hot_lead handoff exists for the chat). Only when this is false does a hot lead raise
+   * the alert; when it is missing, nothing is raised (the safe default is silence).
+   */
+  hotLeadAlerted?: boolean;
+  /**
    * Booking (steps 5 and 6), only for a business that has booking switched on and a kind of booking that needs a time. Without it
    * nothing about booking is decided (plan-booking.ts has the table).
    */
@@ -117,6 +127,11 @@ export interface Plan {
   gap?: { question: string };
   /** The calendar must be looked at or changed before this turn's reply can be written (scheduling/act.ts); `reply` is only the fallback until then. */
   act?: ActRequest;
+  /**
+   * The lead has just turned hot and staff have not been told: announce it once (the reply step emits `lead.hot`). Not a handover: the chat stays with
+   * the AI, so there is no handoff row (the inbox would call the chat "needs a person") and no switch of mode.
+   */
+  hotLead?: boolean;
   /** The miss count to keep for the next turn of this chat. */
   kbMisses: number;
   /** The row of the table above, for the log (never a customer's words). */
@@ -125,7 +140,23 @@ export interface Plan {
 
 const fixed = (text: FixedTextKey, language: TextLanguage): ReplyPlan => ({ mode: "fixed", text, language });
 
+/** The plan for a turn, and, when the lead has just turned hot and staff have not been told, the one alert that goes with whatever the turn does. */
 export function planReply(input: PlanInput): Plan {
+  const plan = decide(input);
+  const { understood } = input;
+  const hot =
+    input.hotLeadAlerted === false &&
+    input.settings.hotLeadAlertEnabled &&
+    understood.status === "understood" &&
+    understood.qualification?.temperature === "hot" &&
+    plan.handoff === undefined &&
+    plan.optOut === undefined &&
+    plan.act === undefined &&
+    plan.reply.mode !== "none";
+  return hot ? { ...plan, hotLead: true } : plan;
+}
+
+function decide(input: PlanInput): Plan {
   const { understood, question, previousMisses, settings } = input;
   const language = textLanguage(understood.status === "understood" ? understood.summary.language : null, input.contactLanguage);
   const carry = previousMisses;
@@ -169,7 +200,17 @@ export function planReply(input: PlanInput): Plan {
     return { reply: fixed("handoff", language), handoff: { trigger: "asked_human", priority: "high" }, kbMisses: 0, case: "asked_human" };
   }
   if ((summary.intent === "complaint" || summary.sentiment === "angry") && settings.complaintHandoffEnabled) {
-    return { reply: fixed("handoff", language), handoff: { trigger: "complaint", priority: "high" }, kbMisses: 0, case: "complaint" };
+    return { reply: fixed("handoff_sorry", language), handoff: { trigger: "complaint", priority: "high" }, kbMisses: 0, case: "complaint" };
+  }
+  // Asks for a discount: the assistant never agrees to a price change (reply prompt rule 3). It says a person will look at it, and a person
+  // is told at once, with the card showing what was asked for.
+  if (summary.intent === "price_negotiation" && settings.negotiationHandoffEnabled) {
+    return {
+      reply: { mode: "model", action: { kind: "handoff", trigger: "negotiation" }, facts: [NEGOTIATION_FACT], language: summary.language },
+      handoff: { trigger: "negotiation", priority: "high" },
+      kbMisses: 0,
+      case: "negotiation",
+    };
   }
 
   const asked = question?.trim() ? question.trim() : "";

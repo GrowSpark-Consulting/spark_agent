@@ -88,6 +88,8 @@ export function fakePipelineStore(
   const maybeFail = (op: keyof PipelineStore) => {
     if (state.failNext.delete(op)) throw new Error(`${op} failed (simulated)`);
   };
+  /** Leads staff were told are hot (the audit row the reply step writes; a test's audit fake adds to it). */
+  const hotAlerted = new Set<string>();
   const isAnsweredAt = (id: string, since: string) => {
     const at = answered.get(id);
     return at !== undefined && at >= Date.parse(since) - DAY_MS;
@@ -237,6 +239,11 @@ export function fakePipelineStore(
       }
       return null;
     },
+    async hasHotLeadAlert(tenantId, leadId) {
+      calls.push("hasHotLeadAlert");
+      maybeFail("hasHotLeadAlert");
+      return leads.get(leadId)?.tenantId === tenantId && hotAlerted.has(leadId);
+    },
     async getPreviousOffer(tenantId, conversationId, before) {
       calls.push("getPreviousOffer");
       maybeFail("getPreviousOffer");
@@ -311,5 +318,5 @@ export function fakePipelineStore(
     },
   };
 
-  return { store, tenants, messages, conversations, contacts, leads, answered, handoffs, gaps, consentLogs, calls, state };
+  return { store, tenants, messages, conversations, contacts, leads, answered, hotAlerted, handoffs, gaps, consentLogs, calls, state };
 }

@@ -23,7 +23,7 @@ const ReplyExpect = z
     /** Exactly one AI reply goes out (true) or none does (false). Not checked when missing (the "at most one" rule is always checked). */
     sent: z.boolean().optional(),
     /** The reply is this fixed line, in this language: "fallback", "clarify", "handoff", "exit_question", ... */
-    fixed: z.object({ key: z.enum(["fallback", "clarify", "handoff", "stop_hint", "credits_holding", "opt_out_confirmation", "exit_question"]), language: z.enum(["en", "ta", "ta-en", "hi"]) }).strict().optional(),
+    fixed: z.object({ key: z.enum(["fallback", "clarify", "handoff", "handoff_sorry", "stop_hint", "credits_holding", "opt_out_confirmation", "exit_question"]), language: z.enum(["en", "ta", "ta-en", "hi"]) }).strict().optional(),
     /** The titles of the reply buttons the message carried, in order ([] = it was plain text). */
     buttons: z.array(z.string()).optional(),
     contains: z.array(z.string()).optional(),
@@ -50,6 +50,8 @@ const Expect = z
     leadStage: z.string().optional(),
     leadFields: z.record(z.string(), Scalar).optional(),
     /** What the code worked out about the lead (hot, warm, cold or disqualified) and its score. */
+    /** Staff were told this turn that the lead turned hot (a lead.hot event), or were not. The chat stays with the AI either way. */
+    hotLead: z.boolean().optional(),
     leadTemperature: z.string().optional(),
     leadScore: z.number().optional(),
     /** The calendar after this turn (needs the chat's `booking`): the start of every confirmed booking, soonest first, and how many were cancelled so far. */

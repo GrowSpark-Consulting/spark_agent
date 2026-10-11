@@ -4,6 +4,7 @@ import type { AuditEntry } from "../lib/audit";
 import type { LlmClient, LlmRequest, LlmResult } from "../agent/llm";
 import { NonRetriableError } from "inngest";
 import { amountsIn } from "../agent/pipeline/postcheck";
+import { HOT_LEAD_ACTION, HOT_LEAD_EVENT } from "../agent/pipeline/events";
 import { fixedText } from "../agent/pipeline/fixed-texts";
 import type { StepRunner, TurnContext } from "../agent/pipeline/process-message";
 import { replyTurn, type ReplyDeps, type ReplyOutcome } from "../agent/pipeline/reply";
@@ -134,6 +135,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
   const audit = async (entry: AuditEntry) => {
     audits.push(entry);
     if (entry.action === "message.answered" && entry.entityId) fake.answered.set(entry.entityId, Date.now());
+    if (entry.action === HOT_LEAD_ACTION && entry.entityId) fake.hotAlerted.add(entry.entityId);
   };
   const systemNotice = {
     send: async (input: { text: string }) => {
@@ -142,8 +144,10 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
     },
   };
   const handoffEvents: string[] = [];
+  const hotLeadEvents: string[] = [];
   const sendEvent: ReplyDeps["sendEvent"] = async (event) => {
     handoffEvents.push(event.id);
+    if (event.name === HOT_LEAD_EVENT) hotLeadEvents.push(event.id);
   };
   const replyDeps: ReplyDeps = {
     store: fake.store,
@@ -184,6 +188,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
     const confirmationsBefore = confirmations.length;
     const logsBefore = fake.consentLogs.length;
     const handoffsBefore = fake.handoffs.length;
+    const hotLeadBefore = hotLeadEvents.length;
 
     const id = messageId("in", index + 1);
     fake.messages.set(id, { id, tenantId: A, conversationId: CONV, direction: "in", sender: "customer", kind: turnSpec.tap ? "interactive" : "text", createdAt: new Date(base + index * 60_000).toISOString(), body: turnSpec.customer, meta: turnSpec.tap ? { buttonId: turnSpec.tap } : {} } as FakeMessage);
@@ -266,6 +271,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
       if (expect.mode !== undefined && fake.conversations.get(CONV)?.mode !== expect.mode) fail(`mode: wanted ${expect.mode}, got ${fake.conversations.get(CONV)?.mode}`);
       if (expect.leadStage !== undefined && fake.leads.get(LEAD)?.stage !== expect.leadStage) fail(`lead stage: wanted ${expect.leadStage}, got ${fake.leads.get(LEAD)?.stage}`);
       if (expect.leadFields) for (const problem of subset(fake.leads.get(LEAD)?.fields as Record<string, unknown> | undefined, expect.leadFields)) fail(`lead field ${problem}`);
+      if (expect.hotLead !== undefined && hotLeadEvents.length - hotLeadBefore > 0 !== expect.hotLead) fail(`hot lead alert this turn: wanted ${expect.hotLead}, got ${hotLeadEvents.length - hotLeadBefore > 0}`);
       if (expect.leadTemperature !== undefined && fake.leads.get(LEAD)?.temperature !== expect.leadTemperature) fail(`lead temperature: wanted ${expect.leadTemperature}, got ${fake.leads.get(LEAD)?.temperature}`);
       if (expect.leadScore !== undefined && fake.leads.get(LEAD)?.score !== expect.leadScore) fail(`lead score: wanted ${expect.leadScore}, got ${fake.leads.get(LEAD)?.score}`);
       if (expect.calendar) {

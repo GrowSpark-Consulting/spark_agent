@@ -836,7 +836,7 @@ describe("a customer who wants a person, or is unhappy or angry", () => {
   ])("%s: the handover line, the chat goes to a person, a high-priority handover and the event", async (_name, over, trigger) => {
     const w = world();
     const out = await replyTurn(runner().step, w.turn, understood({ outcome: "skipped" }, over), Date.now(), w.deps);
-    expect(sentText(w)).toBe(fixedText("handoff", "en"));
+    expect(sentText(w)).toBe(fixedText(trigger === "complaint" ? "handoff_sorry" : "handoff", "en")); // an angry or complaining customer gets one short sorry first
     expect(w.complete).not.toHaveBeenCalled(); // plain code decided; no model wrote anything
     expect(out.handoff).toMatchObject({ trigger, opened: true, switched: true });
     expect(w.handoffs).toEqual([expect.objectContaining({ trigger, priority: "high" })]);

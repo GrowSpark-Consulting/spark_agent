@@ -42,7 +42,7 @@ turns:
 What can be asserted: `stop`, `extracted` (intent, language, sentiment, asksIfHuman, notInterested, fields), `case`,
 `reply` (sent, fixed line and language, buttons, contains, notContains, notice), `noInventedPrice`, `optedOut`, `consent` (the new
 consent_logs of the turn), `handoff` (trigger and priority, or null), `mode`, `leadStage`, `leadFields`, `aiReplies`,
-`confirmations`, and (with a `booking` setup, below) `leadTemperature`, `leadScore` and `calendar`. Every turn also checks, always: at most one AI reply, sent as an `ai_reply` through notify.send, and nothing
+`confirmations`, and (with a `booking` setup, below) `leadTemperature`, `leadScore`, `hotLead` (staff were told this turn that the lead turned hot) and `calendar`. Every turn also checks, always: at most one AI reply, sent as an `ai_reply` through notify.send, and nothing
 sent to a contact who opted out.
 
 ## Booking chats (Day 3)
@@ -86,3 +86,6 @@ A STOP chat's later turns show the gate's opted-out outcome.
   moving a booking (55), a cancellation asked about first and then confirmed (56) or refused (57), out of credits: one holding
   message, nothing spent, a person takes over (58, exit test 4), a budget below the cheapest home (59), and a business with several
   services (60). In `--live` mode only `expect` is checked.
+- `61`-`63`: handoff triggers (Day 4, Raja's answers of 11 Oct): an angry customer gets one short sorry and a person takes over (61), a customer
+  who asks for a discount is never given one and staff are told at once (62), and a lead that turns hot tells staff once while the assistant keeps
+  helping and books the visit (63).
