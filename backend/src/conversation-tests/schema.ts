@@ -49,6 +49,11 @@ const Expect = z
     mode: z.enum(["ai", "human"]).optional(),
     leadStage: z.string().optional(),
     leadFields: z.record(z.string(), Scalar).optional(),
+    /** What the code worked out about the lead (hot, warm, cold or disqualified) and its score. */
+    leadTemperature: z.string().optional(),
+    leadScore: z.number().optional(),
+    /** The calendar after this turn (needs the chat's `booking`): the start of every confirmed booking, soonest first, and how many were cancelled so far. */
+    calendar: z.object({ confirmed: z.array(z.string()).optional(), cancelled: z.number().int().min(0).optional() }).strict().optional(),
     /** How many messages went to the customer this turn through notify.send (the AI reply). Not checked when missing. */
     aiReplies: z.number().int().min(0).optional(),
     /** One confirmation through the system notice. */
@@ -69,6 +74,8 @@ const Turn = z
         reply: z.union([z.string(), z.array(z.string())]).optional(),
         /** The knowledge base for this turn, instead of the chat's own: [] means no answer. */
         kb: z.array(z.string()).optional(),
+        /** The business is out of credits this turn: notify.send refuses the reply (insufficient_credits) and spends nothing. */
+        credits: z.literal("zero").optional(),
       })
       .strict()
       .optional(),
@@ -78,6 +85,27 @@ const Turn = z
   })
   .strict()
   .refine((t) => Object.keys(t.expect ?? {}).length + Object.keys(t.mockOnly ?? {}).length > 0, { message: "a turn must assert something (expect or mockOnly)" });
+
+/** Switches on qualifying and booking for a chat, with a calendar of its own. Without it a chat runs as before. */
+const BookingSetup = z
+  .object({
+    /** The business's clock (ISO), fixed so "tomorrow evening" does not depend on when the test runs. */
+    now: z.string().refine((s) => !Number.isNaN(Date.parse(s)), "not a time"),
+    timeZone: z.string().default("Asia/Kolkata"),
+    /** How many active services the business has. Exactly one is the only case the assistant books on its own. */
+    services: z.number().int().min(0).max(3).default(1),
+    /** The business's catalog: the price bands and areas the pack's scoring compares a customer with. */
+    catalog: z
+      .array(z.object({ type: z.string().default("property"), priceFrom: z.number().nullable().default(null), attributes: z.record(z.string(), z.unknown()).default({}) }).strict())
+      .default([]),
+    /** Free times in the calendar (ISO UTC starts; each lasts an hour). */
+    slots: z.array(z.string()).default([]),
+    /** Times someone else takes first, once, when the customer chooses one of them. */
+    takenWhenChosen: z.array(z.string()).default([]),
+    /** A confirmed booking the customer already has (ISO UTC start). */
+    existing: z.string().optional(),
+  })
+  .strict();
 
 export const Chat = z
   .object({
@@ -91,6 +119,7 @@ export const Chat = z
     contact: z.object({ language: z.string().nullable().default(null), alreadySawNotice: z.boolean().default(true) }).strict().default({ language: null, alreadySawNotice: true }),
     /** The knowledge-base chunks found for a question, unless a turn says otherwise. */
     kb: z.array(z.string()).default([]),
+    booking: BookingSetup.optional(),
     turns: z.array(Turn).min(1),
   })
   .strict();

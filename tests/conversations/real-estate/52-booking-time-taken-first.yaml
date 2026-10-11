@@ -1,0 +1,41 @@
+name: When someone else takes the chosen time first, nothing is booked and the other times are offered
+description: "Day 3 exit test 3 (the application side): the booking engine says the time is taken; the customer is told kindly and offered what is free, then books another."
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, area: Velachery } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+  takenWhenChosen: ["2026-10-11T09:30:00.000Z"]
+turns:
+  - customer: "2BHK in Velachery, around 60 lakh, within 3 months"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { config: 2BHK, location: Velachery, budget: 60L, timeline: 0-3m }, question: null }
+      reply: "Lovely. I can do Sunday at 10:00 am, Sunday at 3:00 pm or Monday at 5:30 pm. Which suits you?"
+    expect:
+      reply: { sent: true, contains: ["3:00 pm"] }
+      aiReplies: 1
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: offer_slots
+  - customer: "3pm please"
+    mock:
+      extraction: { language: en, intent: give_details, fields: {}, question: null }
+      reply: "Sorry, that one was just taken. I can do Sunday at 10:00 am or Monday at 5:30 pm. Which works for you?"
+    expect:
+      reply: { sent: true, contains: ["10:00 am", "5:30 pm"], notContains: ["3:00 pm"] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: offer_retaken
+  - customer: "monday works"
+    mock:
+      extraction: { language: en, intent: give_details, fields: {}, question: null }
+      reply: "Booked! Monday at 5:30 pm. See you then."
+    expect:
+      reply: { sent: true, contains: ["5:30 pm"] }
+      aiReplies: 1
+      leadStage: booked
+      calendar: { confirmed: ["2026-10-12T12:00:00.000Z"] }
+    mockOnly:
+      case: booked

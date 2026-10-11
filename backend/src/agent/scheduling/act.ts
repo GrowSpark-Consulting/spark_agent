@@ -39,6 +39,8 @@ export type ActRequest =
       preferredText: string | null;
       /** The times are for moving this booking, not for a new one. */
       rescheduleBookingId?: string;
+      /** Times (ISO UTC starts) the customer has just turned down: not offered again. */
+      exclude?: string[];
     }
   | { kind: "book"; serviceId: string; bookingKind: BookingKind; slot: OfferedSlot }
   | { kind: "reschedule"; serviceId: string; bookingId: string; slot: OfferedSlot }
@@ -107,15 +109,24 @@ export interface ActContext {
   port: SchedulingPort;
 }
 
-async function offer(serviceId: string, preferredText: string | null, retaken: boolean, rescheduleBookingId: string | undefined, ctx: ActContext): Promise<ActResult> {
+async function offer(
+  serviceId: string,
+  preferredText: string | null,
+  retaken: boolean,
+  rescheduleBookingId: string | undefined,
+  exclude: string[],
+  ctx: ActContext,
+): Promise<ActResult> {
   const preferred = preferredText ? parsePreferredTime(preferredText, { timeZone: ctx.timeZone, now: ctx.now }) : null;
+  const turnedDown = new Set(exclude.map((start) => Date.parse(start)));
   for (const window of searchWindows(preferred, ctx.now, ctx.timeZone)) {
-    const slots = await ctx.port.findSlots(ctx.tenantId, { serviceId, from: window.from, to: window.to });
+    const slots = (await ctx.port.findSlots(ctx.tenantId, { serviceId, from: window.from, to: window.to })).filter((s) => !turnedDown.has(Date.parse(s.start)));
     if (slots.length > 0) {
       return {
         kind: "offered",
         slots: toOffered(slots),
-        asked: window.kind === "asked" && !retaken,
+        // With no time asked for, the soonest times are what was asked for; only a time that was asked for and not free is "the closest".
+        asked: !retaken && (preferred === null || window.kind === "asked"),
         ...(retaken ? { retaken: true } : {}),
         ...(rescheduleBookingId ? { rescheduleBookingId } : {}),
       };
@@ -137,7 +148,7 @@ async function book(request: Extract<ActRequest, { kind: "book" }>, ctx: ActCont
   } catch (error) {
     if (!(error instanceof AppError)) throw error;
     // Someone else took it a moment before: offer what is free now, and say so.
-    if (error.code === "slot_taken") return offer(request.serviceId, null, true, undefined, ctx);
+    if (error.code === "slot_taken") return offer(request.serviceId, null, true, undefined, [], ctx);
     return { kind: "error" };
   }
 }
@@ -153,7 +164,7 @@ async function reschedule(request: Extract<ActRequest, { kind: "reschedule" }>, 
     return { kind: "rescheduled", label: slot.label };
   } catch (error) {
     if (!(error instanceof AppError)) throw error;
-    if (error.code === "slot_taken") return offer(request.serviceId, null, true, bookingId, ctx);
+    if (error.code === "slot_taken") return offer(request.serviceId, null, true, bookingId, [], ctx);
     return { kind: "error" };
   }
 }
@@ -173,7 +184,7 @@ export async function runAct(request: ActRequest, ctx: ActContext): Promise<ActR
   try {
     switch (request.kind) {
       case "offer":
-        return await offer(request.serviceId, request.preferredText, false, request.rescheduleBookingId, ctx);
+        return await offer(request.serviceId, request.preferredText, false, request.rescheduleBookingId, request.exclude ?? [], ctx);
       case "book":
         return await book(request, ctx);
       case "reschedule":

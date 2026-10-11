@@ -42,8 +42,32 @@ turns:
 What can be asserted: `stop`, `extracted` (intent, language, sentiment, asksIfHuman, notInterested, fields), `case`,
 `reply` (sent, fixed line and language, buttons, contains, notContains, notice), `noInventedPrice`, `optedOut`, `consent` (the new
 consent_logs of the turn), `handoff` (trigger and priority, or null), `mode`, `leadStage`, `leadFields`, `aiReplies`,
-`confirmations`. Every turn also checks, always: at most one AI reply, sent as an `ai_reply` through notify.send, and nothing
+`confirmations`, and (with a `booking` setup, below) `leadTemperature`, `leadScore` and `calendar`. Every turn also checks, always: at most one AI reply, sent as an `ai_reply` through notify.send, and nothing
 sent to a contact who opted out.
+
+## Booking chats (Day 3)
+
+A chat with a `booking:` block switches on qualifying and booking, with a small calendar of its own (`backend/src/conversation-tests/calendar.ts`). Without
+the block a chat runs as before.
+
+```yaml
+booking:
+  now: "2026-10-10T04:30:00.000Z"      # the business's clock, fixed: "tomorrow evening" must not depend on when the test runs
+  timeZone: Asia/Kolkata                # default
+  services: 1                           # active services; exactly one is the only case the assistant books on its own
+  catalog:                              # the price bands and areas the pack's scoring compares a customer with
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, area: Velachery } }
+  slots: ["2026-10-11T04:30:00.000Z"]   # free times (ISO UTC); each lasts an hour
+  takenWhenChosen: ["..."]              # someone else takes these first, once, when the customer picks one
+  existing: "2026-10-11T09:30:00.000Z"  # a confirmed booking the customer already has
+```
+
+- `calendar: { confirmed: [starts], cancelled: n }` is what the booking engine holds after the turn. `leadTemperature` and `leadScore`
+  are what the code worked out (they are `mockOnly`: they depend on what the model extracted).
+- A turn can say `mock: { credits: zero }`: notify.send refuses the reply for lack of credits and spends nothing.
+- The calendar copies Dev 2's booking engine only where a chat needs it (a taken time is `slot_taken`, a hold is not a booking until it is
+  confirmed, a lead holds one time at a time). Confirming a booking moves the lead to booked, as Dev 2's `confirm_booking` does in the database.
+  The engine itself is tested by Dev 2's own tests and `supabase/tests`; what these chats test is how the assistant uses it.
 
 Not covered here: the gate's other outcomes (a chat a person has, the AI switched off, a contact who opted out earlier) are tested
 in `gate.test.ts`; the runner starts every chat with the AI in charge. A turn can be a tap on a reply button (`tap: "exit:talk"`, with the button title as the text). A turn must assert something (`expect` or `mockOnly`).
@@ -56,3 +80,9 @@ A STOP chat's later turns show the gate's opted-out outcome.
 - `20`-`45`: Raja's phrase list (`docs/reference/opt-out-handoff-phrases.md`), one opt-out and one handover per language.
   The six languages Raja marked (Telugu, Kannada, Bengali, Marathi, Gujarati, Punjabi) have `needsNativeCheck: true`: a
   native speaker must read them before they are final test data.
+- `50`-`60`: booking (Day 3): the next details asked two at a time and the lead scored (50), three real times offered in a plain
+  message, picked in words and booked (51, exit tests 1 and 2), a time taken by someone else first (52), "tomorrow evening" in the
+  business's own time zone (53, also run with the server in other zones by `booking-timezone.test.ts`, exit test 5), nothing free (54),
+  moving a booking (55), a cancellation asked about first and then confirmed (56) or refused (57), out of credits: one holding
+  message, nothing spent, a person takes over (58, exit test 4), a budget below the cheapest home (59), and a business with several
+  services (60). In `--live` mode only `expect` is checked.

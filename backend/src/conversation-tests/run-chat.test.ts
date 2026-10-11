@@ -43,6 +43,59 @@ describe("runChat", () => {
   });
 });
 
+// The booking setup: a chat that is wrong about the calendar, the score or the credits must FAIL too.
+describe("runChat with a booking setup", () => {
+  const SLOTS = ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"];
+  const bookingChat = (turns: Record<string, unknown>[], booking: Record<string, unknown> = {}) =>
+    Chat.parse({
+      name: "booking",
+      booking: { now: "2026-10-10T04:30:00.000Z", catalog: [{ priceFrom: 6000000, attributes: { price_to: 8000000, area: "Velachery" } }], slots: SLOTS, ...booking },
+      turns,
+    });
+  const details = { customer: "2BHK in Velachery, 60 lakh, within 3 months", mock: { extraction: { intent: "give_details", fields: { location: "Velachery", budget: "60L", timeline: "0-3m" } }, reply: "I can do Sunday at 10:00 am, Sunday at 3:00 pm or Monday at 5:30 pm. Which suits you?" } };
+
+  it("passes when the offer, the score and the calendar are as expected", async () => {
+    const report = await runChat(bookingChat([{ ...details, expect: { reply: { contains: ["3:00 pm"] }, calendar: { confirmed: [], cancelled: 0 }, aiReplies: 1 }, mockOnly: { case: "offer_slots", leadTemperature: "hot", leadScore: 75 } }]), { mode: "mock" });
+    expect(report.failures).toEqual([]);
+  });
+
+  it.each([
+    ["a wrong score", { mockOnly: { leadScore: 80 } }, /lead score: wanted 80, got 75/],
+    ["a wrong temperature", { mockOnly: { leadTemperature: "cold" } }, /lead temperature: wanted cold, got hot/],
+    ["a booking that was not made", { expect: { calendar: { confirmed: [SLOTS[1]] } } }, /calendar confirmed/],
+    ["a cancellation that did not happen", { expect: { calendar: { cancelled: 1 } } }, /calendar cancelled: wanted 1, got 0/],
+  ])("fails %s", async (_name, assertion, message) => {
+    const report = await runChat(bookingChat([{ ...details, ...assertion }]), { mode: "mock" });
+    expect(report.failures.join("\n")).toMatch(message);
+  });
+
+  it("refuses a calendar expectation in a chat that has no booking setup", async () => {
+    const report = await runChat(chat({ expect: { calendar: { confirmed: [] } } }), { mode: "mock" });
+    expect(report.failures.join("\n")).toMatch(/no booking setup/);
+  });
+
+  it("books a time and moves the lead to booked, so the next turn's expectations see it", async () => {
+    const report = await runChat(
+      bookingChat([
+        { ...details, expect: { aiReplies: 1 } },
+        { customer: "the second one", mock: { extraction: { intent: "give_details" }, reply: "Booked for Sunday at 3:00 pm." }, expect: { leadStage: "booked", calendar: { confirmed: [SLOTS[1]] } } },
+      ]),
+      { mode: "mock" },
+    );
+    expect(report.failures).toEqual([]);
+  });
+
+  it("out of credits: nothing is sent and the holding line is the only thing the customer gets", async () => {
+    const report = await runChat(bookingChat([{ ...details, mock: { ...details.mock, credits: "zero" }, expect: { aiReplies: 0, confirmations: 1, handoff: { trigger: "credits_exhausted", priority: "high" }, mode: "human" } }]), { mode: "mock" });
+    expect(report.failures).toEqual([]);
+  });
+
+  it("a chat without a booking setup is unaffected: no calendar, no scoring, the clock is the real one", async () => {
+    const report = await runChat(chat({ expect: { aiReplies: 1 }, mockOnly: { leadTemperature: "hot" } }), { mode: "mock" });
+    expect(report.failures.join("\n")).toMatch(/lead temperature: wanted hot, got undefined/);
+  });
+});
+
 describe("loadChats", () => {
   const dirWith = (files: Record<string, string>) => {
     const dir = mkdtempSync(join(tmpdir(), "chats-"));

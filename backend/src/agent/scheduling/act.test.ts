@@ -51,11 +51,23 @@ describe("offering times", () => {
     expect(p.findSlots.mock.calls.length).toBeGreaterThan(1);
   });
 
-  it("with no preference, looks at the next few days", async () => {
+  it("with no preference, looks at the next few days, and the times are what was asked for (nothing was asked for)", async () => {
     const p = port();
     const result = await runAct({ kind: "offer", serviceId: SERVICE, preferredText: null }, ctx(p));
-    expect(result).toMatchObject({ kind: "offered", asked: false });
+    expect(result).toMatchObject({ kind: "offered", asked: true });
     expect(p.findSlots.mock.calls[0][1].from).toEqual(NOW);
+  });
+
+  it("words that name no time are no preference either: the soonest times, said as what was asked for", async () => {
+    const p = port();
+    expect(await runAct({ kind: "offer", serviceId: SERVICE, preferredText: "I would like to visit" }, ctx(p))).toMatchObject({ kind: "offered", asked: true });
+  });
+
+  it("leaves out the times the customer has just turned down, and looks further when that leaves none", async () => {
+    const p = port({ findSlots: vi.fn<SchedulingPort["findSlots"]>(async (_t, input) => (input.to.getTime() - input.from.getTime() > 4 * 24 * 3_600_000 ? [SUN_10, SUN_15, MON_17] : [SUN_10, SUN_15])) });
+    const result = await runAct({ kind: "offer", serviceId: SERVICE, preferredText: null, exclude: [SUN_10.start, SUN_15.start] }, ctx(p));
+    expect(result).toMatchObject({ kind: "offered", slots: [offered(MON_17)] });
+    expect(p.findSlots.mock.calls.length).toBeGreaterThan(1);
   });
 
   it("is no_slots when nothing is free anywhere it looks", async () => {

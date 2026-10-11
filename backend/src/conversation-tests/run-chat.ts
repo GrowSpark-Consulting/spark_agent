@@ -11,6 +11,7 @@ import { stopCheck } from "../agent/pipeline/stop";
 import { understandTurn, type UnderstandDeps, type UnderstandResult } from "../agent/pipeline/understand";
 import type { SendOutcome } from "../notify/send";
 import { fakePipelineStore, type FakeMessage } from "../test-support/fake-pipeline-store";
+import { createCalendar } from "./calendar";
 import type { Chat, TurnExpect } from "./schema";
 
 // Runs one scripted chat through the real pipeline steps (stop check, understanding, reply) on an in-memory store, as
@@ -71,7 +72,10 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
   const failures: string[] = [];
   const transcript: TurnTranscript[] = [];
 
-  const base = Date.now() - 6 * 3_600_000;
+  // A chat with a `booking` setup runs on its own fixed clock, so "tomorrow evening" does not depend on when the test runs.
+  const setup = chat.booking;
+  const clock = setup ? () => Date.parse(setup.now) : Date.now;
+  const base = clock() - 6 * 3_600_000;
   const fake = fakePipelineStore({
     tenants: [{ id: A, vertical: pack.key, verticalVersion: pack.version }],
     messages: [],
@@ -81,10 +85,26 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
     tenantInfo: { [A]: { name: "Skyline Homes", agentSettings: chat.settings } },
   });
 
+  // The calendar: only for a chat that says so. A booking being confirmed moves the lead to booked (Dev 2's confirm_booking does it in the database).
+  const calendar = setup
+    ? createCalendar({
+        now: setup.now,
+        timeZone: setup.timeZone,
+        slots: setup.slots,
+        takenWhenChosen: setup.takenWhenChosen,
+        existing: setup.existing,
+        onConfirm: () => {
+          const lead = fake.leads.get(LEAD);
+          if (lead) lead.stage = "booked";
+        },
+      })
+    : null;
+
   // Per turn: what the mocked models say, and what the pipeline did.
   let extractionScript: Record<string, unknown> = {};
   let replyScript: string[] = [];
   let kb: string[] = chat.kb;
+  let creditsZero = false;
   const sends: { kind: string; text: string; buttons: string[] }[] = [];
   const confirmations: string[] = [];
   const audits: AuditEntry[] = [];
@@ -102,10 +122,12 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
   if (!llm) throw new Error("live mode needs a language-model client");
 
   const send: ReplyDeps["send"] = async (_tenantId, kind, payload): Promise<SendOutcome> => {
+    // Out of credits: notify.send refuses the reply and spends nothing.
+    if (creditsZero) return { status: "skipped", reason: "insufficient_credits" };
     const interactive = payload.interactive;
     const text = interactive ? interactive.body : (payload.text ?? "");
     sends.push({ kind, text, buttons: interactive?.type === "buttons" ? interactive.buttons.map((b) => b.title) : [] });
-    const sentAt = new Date(Date.now()).toISOString();
+    const sentAt = new Date(clock()).toISOString();
     fake.messages.set(messageId("out", ++outCount), { id: messageId("out", outCount), tenantId: A, conversationId: CONV, direction: "out", sender: "ai", kind: "text", createdAt: sentAt, body: text, meta: {} } as FakeMessage);
     return { status: "sent", messageId: `m-out-${outCount}`, providerMsgId: `wamid.${outCount}`, creditsCharged: 1, usedTemplate: false };
   };
@@ -123,12 +145,32 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
   const sendEvent: ReplyDeps["sendEvent"] = async (event) => {
     handoffEvents.push(event.id);
   };
-  const replyDeps: ReplyDeps = { store: fake.store, llm, send, audit, sendEvent, systemNotice, privacyPolicyUrl: PRIVACY_URL, now: Date.now };
+  const replyDeps: ReplyDeps = {
+    store: fake.store,
+    llm,
+    send,
+    audit,
+    sendEvent,
+    systemNotice,
+    privacyPolicyUrl: PRIVACY_URL,
+    now: clock,
+    ...(setup && calendar
+      ? {
+          scheduling: {
+            port: calendar.port,
+            isEnabled: async () => true,
+            services: async () => Array.from({ length: setup.services }, (_, i) => ({ id: `30000000-0000-0000-0000-${String(i + 3).padStart(12, "0")}` })),
+            timeZone: async () => setup.timeZone,
+          },
+        }
+      : {}),
+  };
   const understandDeps: UnderstandDeps = {
     store: fake.store,
     llm,
     loadPackDefinition: async (key, version) => (key === pack.key && version === pack.version ? (pack as unknown) : null),
     retrieve: async () => kb.map((content, i) => ({ chunkId: `chunk-${i}`, documentId: "doc-1", title: "Knowledge base", content, similarity: 0.8 })),
+    ...(setup ? { scoring: { loadCatalog: async () => setup.catalog, isEnabled: async () => true } } : {}),
   };
 
   for (const [index, turnSpec] of chat.turns.entries()) {
@@ -137,6 +179,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
     extractionScript = turnSpec.mock?.extraction ?? {};
     replyScript = turnSpec.mock?.reply === undefined ? [] : [...(Array.isArray(turnSpec.mock.reply) ? turnSpec.mock.reply : [turnSpec.mock.reply])];
     kb = turnSpec.mock?.kb ?? chat.kb;
+    creditsZero = turnSpec.mock?.credits === "zero";
     const sendsBefore = sends.length;
     const confirmationsBefore = confirmations.length;
     const logsBefore = fake.consentLogs.length;
@@ -158,7 +201,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
         stopped = (await stopCheck(step, turn, { store: fake.store, audit, systemNotice, sendEvent })).status === "opted_out";
         if (!stopped) {
           understood = await understandTurn(step, turn, understandDeps);
-          outcome = await replyTurn(step, turn, understood, Date.now(), replyDeps);
+          outcome = await replyTurn(step, turn, understood, clock(), replyDeps);
         }
       }
     } catch (error) {
@@ -223,6 +266,15 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
       if (expect.mode !== undefined && fake.conversations.get(CONV)?.mode !== expect.mode) fail(`mode: wanted ${expect.mode}, got ${fake.conversations.get(CONV)?.mode}`);
       if (expect.leadStage !== undefined && fake.leads.get(LEAD)?.stage !== expect.leadStage) fail(`lead stage: wanted ${expect.leadStage}, got ${fake.leads.get(LEAD)?.stage}`);
       if (expect.leadFields) for (const problem of subset(fake.leads.get(LEAD)?.fields as Record<string, unknown> | undefined, expect.leadFields)) fail(`lead field ${problem}`);
+      if (expect.leadTemperature !== undefined && fake.leads.get(LEAD)?.temperature !== expect.leadTemperature) fail(`lead temperature: wanted ${expect.leadTemperature}, got ${fake.leads.get(LEAD)?.temperature}`);
+      if (expect.leadScore !== undefined && fake.leads.get(LEAD)?.score !== expect.leadScore) fail(`lead score: wanted ${expect.leadScore}, got ${fake.leads.get(LEAD)?.score}`);
+      if (expect.calendar) {
+        if (!calendar) fail("calendar: the chat has no booking setup");
+        else {
+          if (expect.calendar.confirmed && JSON.stringify(calendar.confirmed()) !== JSON.stringify(expect.calendar.confirmed)) fail(`calendar confirmed: wanted ${JSON.stringify(expect.calendar.confirmed)}, got ${JSON.stringify(calendar.confirmed())}`);
+          if (expect.calendar.cancelled !== undefined && calendar.cancelled() !== expect.calendar.cancelled) fail(`calendar cancelled: wanted ${expect.calendar.cancelled}, got ${calendar.cancelled()}`);
+        }
+      }
       if (expect.aiReplies !== undefined && turnSends.length !== expect.aiReplies) fail(`AI replies: wanted ${expect.aiReplies}, got ${turnSends.length}`);
       if (expect.confirmations !== undefined && confirmations.length - confirmationsBefore !== expect.confirmations) fail(`confirmations: wanted ${expect.confirmations}, got ${confirmations.length - confirmationsBefore}`);
     };

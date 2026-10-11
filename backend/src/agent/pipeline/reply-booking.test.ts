@@ -21,7 +21,7 @@ describe("offering times", () => {
     expect(w.send.mock.calls[0][2]).toEqual({ conversationId: CONV, text: OFFER_TEXT });
     expect(userPrompt(w)).toContain("Free times: Sun 11 Oct, 10:00 am; Sun 11 Oct, 3:00 pm; Mon 12 Oct, 5:30 pm.");
     expect(agentMeta(w).offer).toEqual({ slots: [SUN_10, SUN_15, MON_17].map(plain), at: new Date(NOW).toISOString() });
-    expect(agentMeta(w).act).toMatchObject({ kind: "offered", asked: false });
+    expect(agentMeta(w).act).toMatchObject({ kind: "offered", asked: true });
     expect(agentMeta(w).planCase).toBe("offer_slots");
   });
 

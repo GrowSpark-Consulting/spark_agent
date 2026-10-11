@@ -1,0 +1,35 @@
+name: A customer who only names a type of home is asked for the next two details, and is scored cold
+description: "Qualifying (Day 3): the details are asked casually, two at a time at most, in the pack's order. Nothing is offered yet."
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, area: Velachery } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+turns:
+  - customer: "Hi, I am looking for a 2BHK"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { config: 2BHK }, question: null }
+      reply: "Happy to help with a 2BHK. What budget are you looking at, and which area do you prefer?"
+    expect:
+      reply: { sent: true, buttons: [] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: ask_details
+      leadFields: { config: 2BHK }
+      leadTemperature: cold
+      leadScore: 0
+  - customer: "Around 60 lakh, somewhere in Velachery"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { budget: 60L, location: Velachery }, question: null }
+      reply: "Velachery is a good choice. When are you planning to buy?"
+    expect:
+      reply: { sent: true, buttons: [] }
+      aiReplies: 1
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: ask_details
+      leadFields: { config: 2BHK, budget: 60L, location: Velachery }
+      leadTemperature: warm
+      leadScore: 50

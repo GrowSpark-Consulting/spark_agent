@@ -1,0 +1,29 @@
+name: A customer with a booking moves it to another time
+description: The booking is moved with the booking engine, not made again. The old time is free afterwards.
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, area: Velachery } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+  existing: "2026-10-11T09:30:00.000Z"
+turns:
+  - customer: "can we move my visit to monday evening?"
+    mock:
+      extraction: { language: en, intent: reschedule, fields: {}, question: null, preferredTime: monday evening }
+      reply: "Sure. I can move it to Monday at 5:30 pm. Does that work for you?"
+    expect:
+      reply: { sent: true, contains: ["5:30 pm"] }
+      aiReplies: 1
+      calendar: { confirmed: ["2026-10-11T09:30:00.000Z"] }
+    mockOnly:
+      case: reschedule_offer
+  - customer: "yes that works"
+    mock:
+      extraction: { language: en, intent: give_details, fields: {}, question: null }
+      reply: "Done, your visit is now on Monday at 5:30 pm."
+    expect:
+      reply: { sent: true, contains: ["5:30 pm"] }
+      aiReplies: 1
+      calendar: { confirmed: ["2026-10-12T12:00:00.000Z"], cancelled: 0 }
+    mockOnly:
+      case: rescheduled

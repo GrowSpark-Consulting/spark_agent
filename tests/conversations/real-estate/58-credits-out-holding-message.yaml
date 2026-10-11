@@ -1,0 +1,24 @@
+name: Out of credits, the customer gets one holding message, nothing is spent, and the chat goes to a person
+description: "Day 3 exit test 4: the reply is refused by notify.send for lack of credits. One free holding line goes out, the chat switches to human mode and staff are alerted. A second message from the customer gets no second holding line."
+kb:
+  - "Site visits are free on weekdays."
+turns:
+  - customer: "Do you arrange site visits?"
+    mock:
+      extraction: { language: en, intent: question, question: "Do you arrange site visits?" }
+      reply: "Yes, site visits are free on weekdays."
+      credits: zero
+    expect:
+      aiReplies: 0
+      confirmations: 1
+      handoff: { trigger: credits_exhausted, priority: high }
+      mode: human
+  - customer: "Hello? Anyone there?"
+    mock:
+      extraction: { language: en, intent: greeting, question: null }
+      credits: zero
+    expect:
+      aiReplies: 0
+      confirmations: 0
+      handoff: null
+      mode: human
