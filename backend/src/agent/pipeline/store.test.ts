@@ -530,6 +530,23 @@ describe("getPreviousPlanCase", () => {
   });
 });
 
+describe("saveLeadScore", () => {
+  it("writes the score and temperature of an open lead of this business, by id", async () => {
+    const { db, calls } = fakeDb(() => ({ data: [{ id: LEAD }] }));
+    expect(await createPipelineStore(db).saveLeadScore(T, LEAD, { score: 75, temperature: "hot" })).toBe(true);
+    expect(calls[0].table).toBe("leads");
+    expect(calls[0].op).toBe("update");
+    expect(calls[0].payload).toEqual({ score: 75, temperature: "hot" });
+    tenantFilter(calls[0]);
+    expect(filter(calls[0], "id")).toEqual(["id", "eq", LEAD]);
+    expect(filter(calls[0], "stage")).toEqual(["stage", "in", ["new", "engaged", "qualified", "nurture"]]);
+  });
+
+  it("is false when nothing changed (a booked, won or lost lead keeps its score)", async () => {
+    expect(await createPipelineStore(fakeDb(() => ({ data: [] })).db).saveLeadScore(T, LEAD, { score: 0, temperature: "cold" })).toBe(false);
+  });
+});
+
 describe("markLeadLost", () => {
   it("moves only an open lead of this business, by id: a booked, visited, won or lost one is left alone", async () => {
     const { db, calls } = fakeDb(() => ({ data: [{ id: LEAD }] }));

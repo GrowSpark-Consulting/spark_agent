@@ -47,6 +47,8 @@ export interface FakeLead {
   stage: string;
   createdAt: number;
   fields?: Record<string, unknown>;
+  score?: number | null;
+  temperature?: string | null;
 }
 
 export function fakePipelineStore(
@@ -210,6 +212,15 @@ export function fakePipelineStore(
       const l = leads.get(leadId);
       if (!l || l.tenantId !== tenantId || !["new", "engaged", "qualified", "nurture"].includes(l.stage)) return false;
       l.stage = "lost";
+      return true;
+    },
+    async saveLeadScore(tenantId, leadId, result) {
+      calls.push("saveLeadScore");
+      maybeFail("saveLeadScore");
+      const l = leads.get(leadId);
+      if (!l || l.tenantId !== tenantId || !["new", "engaged", "qualified", "nurture"].includes(l.stage)) return false;
+      l.score = result.score;
+      l.temperature = result.temperature;
       return true;
     },
     async getPreviousPlanCase(tenantId, conversationId, before) {

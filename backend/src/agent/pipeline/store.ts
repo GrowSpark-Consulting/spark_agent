@@ -134,6 +134,11 @@ export interface PipelineStore {
   recordOptOut(tenantId: string, contactId: string, source: OptOutSource, messageId: string | null): Promise<boolean>;
   /** Moves a lead that is still open (new, engaged, qualified, nurture) to `lost`. A booked, visited, won or already lost lead is left alone. True when it changed. */
   markLeadLost(tenantId: string, leadId: string): Promise<boolean>;
+  /**
+   * Keeps the lead's score and temperature (leads.score, leads.temperature: computed by server code, never by the dashboard) while the
+   * lead is still open (new, engaged, qualified, nurture). A booked, visited, won or lost lead keeps what it had. True when it changed.
+   */
+  saveLeadScore(tenantId: string, leadId: string, result: { score: number; temperature: "hot" | "warm" | "cold" | "disqualified" }): Promise<boolean>;
   /** The plan case the chat's latest earlier turn kept on its customer message (`meta.agent.planCase`, before `before`), or null. */
   getPreviousPlanCase(tenantId: string, conversationId: string, before: string): Promise<string | null>;
   /** The business's name and agent settings, or null if it is gone. */
@@ -409,6 +414,14 @@ export function createPipelineStore(db: SupabaseClient = supabaseAdmin(), { time
         db.from("leads").update({ stage: "lost" }).eq("id", leadId).eq("tenant_id", tenantId).in("stage", OPEN_LEAD_STAGES).select("id").abortSignal(signal),
       );
       if (error) fail("mark lead lost", error);
+      return Array.isArray(data) && data.length > 0;
+    },
+
+    async saveLeadScore(tenantId, leadId, result) {
+      const { data, error } = await run("save lead score", (signal) =>
+        db.from("leads").update({ score: result.score, temperature: result.temperature }).eq("id", leadId).eq("tenant_id", tenantId).in("stage", OPEN_LEAD_STAGES).select("id").abortSignal(signal),
+      );
+      if (error) fail("save lead score", error);
       return Array.isArray(data) && data.length > 0;
     },
 

@@ -5,6 +5,8 @@ import type { LlmClient, LlmMessage } from "../llm/anthropic";
 import { LlmError } from "../llm/anthropic";
 import { PackError, resolvePack } from "../packs/load";
 import { buildExtractionMessages, buildExtractionSystem, EXTRACTION_PROMPT } from "../prompts/extraction_v2";
+import { qualify, type AskField, type Qualification } from "../scoring/qualify";
+import { buildReferences, type CatalogRow } from "../scoring/references";
 import { interpretExtraction } from "./extraction";
 import { UNCLEAR_EXIT_MIN_CONFIDENCE } from "./plan";
 import type { StepRunner, TurnContext } from "./process-message";
@@ -31,6 +33,16 @@ export interface UnderstandDeps {
   retrieve: (tenantId: string, query: string) => Promise<KbMatch[]>;
   /** The turn's own deadline: when it passes the model call stops. Not wired in production until PR 6 (the reply step owns the deadline). */
   signal?: AbortSignal;
+  /**
+   * Switches on qualifying (step 5, first half): the lead is scored by code after its details are saved, and the next missing details
+   * are worked out. Without it nothing new happens and the result has no `qualification`.
+   */
+  scoring?: {
+    /** The business's catalog items (read only): the price bands, areas and cheapest price the pack's rules compare a customer with. */
+    loadCatalog: (tenantId: string) => Promise<CatalogRow[]>;
+    /** isEnabled(tenantId, key): "lead_qualification" (qualifying at all) and "custom_scoring" (the business may change weights and thresholds). */
+    isEnabled: (tenantId: string, feature: "lead_qualification" | "custom_scoring") => Promise<boolean>;
+  };
 }
 
 /** What the next steps need to know about the customer's message, without its words. */
@@ -62,8 +74,21 @@ export type Retrieval =
 
 export type FallbackReason = "no_text" | "invalid_output" | "model_declined";
 
+/** What step 5 needs from qualifying: small facts and the pack's own labels, never the customer's words. */
+export interface QualificationSummary {
+  score: number;
+  temperature: Qualification["temperature"];
+  /** The next missing required details to ask for (at most two), with the pack's labels. */
+  ask: AskField[];
+  missingRequired: string[];
+  /** Every required detail is in and the lead is warm or better: a time may be offered. */
+  readyForSlots: boolean;
+  /** Set when the lead is certainly not a fit (a hard fail of the pack). */
+  hardFail: Qualification["hardFail"];
+}
+
 export type UnderstandResult =
-  | { status: "understood"; summary: ExtractionSummary; retrieval: Retrieval }
+  | { status: "understood"; summary: ExtractionSummary; retrieval: Retrieval; qualification?: QualificationSummary }
   | { status: "fallback"; reason: FallbackReason } // ask the customer a clarifying question
   | { status: "model_unavailable" } // the model could not be reached after every retry
   | { status: "no_pack" }; // the business's pack is missing or invalid
@@ -90,13 +115,13 @@ export const BATCH_TEXT_MAX_CHARS = 4000;
 export const OVERWRITE_MIN_CONFIDENCE = 0.5;
 
 /** The business's pack: its definition for the pinned version with its own overrides applied. A missing or invalid pack is `null`. */
-async function loadTurnPack(turn: TurnContext, deps: UnderstandDeps) {
+async function loadTurnPack(turn: TurnContext, deps: UnderstandDeps, allowScoringOverrides = false) {
   const raw = await deps.loadPackDefinition(turn.vertical, turn.verticalVersion); // an unreachable store throws: retried
   if (raw === null || raw === undefined) return null;
   const overrides = await deps.store.getPackOverrides(turn.tenantId);
   try {
-    // Scoring overrides (a Pro-plan feature) play no part in reading a message; the scoring step (Day 3) asks for them.
-    const loaded = resolvePack(raw, overrides, { allowScoringOverrides: false });
+    // Scoring overrides (a Pro-plan feature) play no part in reading a message; only the qualify step asks for them.
+    const loaded = resolvePack(raw, overrides, { allowScoringOverrides });
     return loaded.pack.key === turn.vertical && loaded.pack.version === turn.verticalVersion ? loaded : null;
   } catch (error) {
     if (error instanceof PackError) return null;
@@ -253,6 +278,29 @@ export async function understandTurn(step: StepRunner, turn: TurnContext, deps: 
     return { saved: merged, fieldKeys: Object.keys(patch) };
   });
 
+  // Step 5, first half: score the lead against the business's catalog and work out what to ask next. Not for a customer who is leaving.
+  const scoring = deps.scoring;
+  const qualification =
+    scoring && !LEAVING_INTENTS.has(summary.intent)
+      ? await step.run<QualificationSummary | null>("qualify", async () => {
+          if (!(await scoring.isEnabled(turn.tenantId, "lead_qualification"))) return null;
+          const loaded = await loadTurnPack(turn, deps, await scoring.isEnabled(turn.tenantId, "custom_scoring"));
+          if (!loaded) return null;
+          const lead = await store.getLead(turn.tenantId, turn.leadId);
+          if (!lead) return null;
+          let rows: CatalogRow[] = [];
+          try {
+            rows = await scoring.loadCatalog(turn.tenantId);
+          } catch (error) {
+            // A catalog that cannot be read is not worth failing the customer's message for: the rules that need it earn nothing.
+            console.error(`${TAG} the catalog could not be read (${error instanceof Error ? error.name : "unknown"}; ${where(turn)})`);
+          }
+          const result = qualify(loaded.pack, lead.fields, { references: buildReferences(loaded.pack, rows) });
+          await store.saveLeadScore(turn.tenantId, turn.leadId, { score: result.score, temperature: result.temperature });
+          return { score: result.score, temperature: result.temperature, ask: result.ask, missingRequired: result.missingRequired, readyForSlots: result.readyForSlots, hardFail: result.hardFail };
+        })
+      : null;
+
   const retrieval = await step.run<Retrieval>("retrieve", async () => {
     if (!summary.hasQuestion || !RETRIEVAL_INTENTS.has(summary.intent)) return { outcome: "skipped" };
     const agent = await store.getAgentMeta(turn.tenantId, turn.conversationId, lastMessageId);
@@ -272,5 +320,5 @@ export async function understandTurn(step: StepRunner, turn: TurnContext, deps: 
     }
   });
 
-  return { status: "understood", summary, retrieval };
+  return qualification ? { status: "understood", summary, retrieval, qualification } : { status: "understood", summary, retrieval };
 }

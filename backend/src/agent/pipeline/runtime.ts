@@ -1,11 +1,13 @@
 import { retrieveKb } from "../../kb/retrieve";
 import { inngest } from "../../inngest/client";
+import { isEnabled } from "../../features/is-enabled";
 import { writeAudit } from "../../lib/audit";
 import { serverEnv } from "../../lib/env";
 import { send } from "../../notify/send";
 import { llm } from "../llm";
 import type { PackSource } from "../packs/load";
 import { createDbPackSource } from "../packs/store";
+import { createCatalogLoader } from "../scoring/catalog-db";
 import { createSystemNoticePort } from "./ports";
 import type { ReplyDeps } from "./reply";
 import type { PipelineStore } from "./store";
@@ -57,8 +59,17 @@ export function replyDeps(store: PipelineStore): ReplyDeps {
 }
 
 let packLoader: UnderstandDeps["loadPackDefinition"] | undefined;
+const loadCatalog = createCatalogLoader();
 
 export function understandDeps(store: PipelineStore, signal?: AbortSignal): UnderstandDeps {
   packLoader ??= cachedPackLoader(createDbPackSource());
-  return { store, llm: llm(), loadPackDefinition: packLoader, retrieve: (tenantId, query) => retrieveKb(tenantId, query), signal };
+  return {
+    store,
+    llm: llm(),
+    loadPackDefinition: packLoader,
+    retrieve: (tenantId, query) => retrieveKb(tenantId, query),
+    signal,
+    // Qualifying (step 5): the lead is scored against the business's catalog when its plan has lead_qualification.
+    scoring: { loadCatalog, isEnabled },
+  };
 }
