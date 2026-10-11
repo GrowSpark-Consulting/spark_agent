@@ -133,6 +133,7 @@ describe("fixtures", () => {
       templateStatuses: [],
       qualityUpdates: [],
       accountUpdates: [],
+      echoes: [],
       ignored: [{ field: "payload", reason: "malformed_payload" }],
     });
   });
@@ -360,7 +361,6 @@ describe("template statuses", () => {
 
 describe("fields that are ignored without guessing their shape", () => {
   it.each([
-    "smb_message_echoes",
     "smb_app_state_sync",
     "history",
     "brand_new_field",
@@ -372,6 +372,7 @@ describe("fields that are ignored without guessing their shape", () => {
       templateStatuses: [],
       qualityUpdates: [],
       accountUpdates: [],
+      echoes: [],
       ignored: [{ field, reason: "unsupported_field", wabaId: WABA }],
     });
     expect(JSON.stringify(result)).not.toContain("SHOULD_NOT_LEAK");
