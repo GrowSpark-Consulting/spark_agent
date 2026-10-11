@@ -1,6 +1,9 @@
 import type { Extraction, HandoffTrigger, NextAction } from "@pakka/types";
+import type { ActRequest, ActResult } from "../scheduling/act";
+import type { OfferedSlot } from "../scheduling/offer";
 import { MAX_ASK_FIELDS, type AskField } from "../scoring/qualify";
 import { textLanguage, type FixedTextKey, type TextLanguage } from "./fixed-texts";
+import { planBooking } from "./plan-booking";
 import type { ReplySettings } from "./persona";
 import type { UnderstandResult } from "./understand";
 
@@ -75,6 +78,27 @@ export interface PlanInput {
   talkButtonTapped: boolean;
   /** The turn's hard stop has passed: no model call, the safe fallback. */
   deadlineExceeded: boolean;
+  /**
+   * Booking (steps 5 and 6), only for a business that has booking switched on and a kind of booking that needs a time. Without it
+   * nothing about booking is decided (plan-booking.ts has the table).
+   */
+  scheduling?: {
+    /** The business's active services: exactly one is the only case the assistant books on its own. */
+    service: { state: "one"; id: string } | { state: "none" } | { state: "several" };
+    /** The times waiting for the customer's answer (not older than a day), or null. */
+    offer: OfferedSlot[] | null;
+    /** The lead already has a held or confirmed booking that has not ended. */
+    hasBooking: boolean;
+    /** What the customer wrote last. Only read here, to find which time they picked; never kept. */
+    customerText: string;
+    /** What the extraction copied of when they want it ("tomorrow evening"), or null. */
+    preferredTime: string | null;
+    /** The business's own time zone. */
+    timeZone: string;
+    now: Date;
+    /** What the calendar step found or did for this turn, once it has run. */
+    act?: ActResult;
+  };
 }
 
 export interface Plan {
@@ -85,6 +109,8 @@ export interface Plan {
   handoff?: { trigger: HandoffTrigger; priority: "high" | "normal" };
   /** Record this question as a gap in the knowledge base. */
   gap?: { question: string };
+  /** The calendar must be looked at or changed before this turn's reply can be written (scheduling/act.ts); `reply` is only the fallback until then. */
+  act?: ActRequest;
   /** The miss count to keep for the next turn of this chat. */
   kbMisses: number;
   /** The row of the table above, for the log (never a customer's words). */
@@ -144,6 +170,10 @@ export function planReply(input: PlanInput): Plan {
   const model = (action: NextAction, facts: string[] = [], ask?: AskField[]): ReplyPlan => ({ mode: "model", action, facts, language: summary.language, ...(ask ? { ask } : {}) });
 
   if (summary.intent === "off_topic") return { reply: model({ kind: "decline_off_topic" }), kbMisses: 0, case: "off_topic" };
+
+  // Booking (steps 5 and 6): times to offer, the customer's pick, and what follows a booking. A booking intent comes before the answer.
+  const booking = planBooking({ input, summary, qualification: understood.qualification, retrieval, language });
+  if (booking) return booking;
 
   // Qualifying (step 5): the next missing details to ask for, two at most (the reply prompt's rule 4).
   const qualification = understood.qualification;

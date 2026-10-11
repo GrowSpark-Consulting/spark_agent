@@ -9,14 +9,17 @@ import { stripUnsafeCharacters } from "../../lib/text";
 import type { NotifyPayload, SendOutcome } from "../../notify/send";
 import type { LlmClient, LlmMessage } from "../llm/anthropic";
 import { LlmError } from "../llm/anthropic";
-import { buildReplyMessages, buildReplySystem, REPLY_PROMPT } from "../prompts/reply_v1";
+import { buildReplyMessages, buildReplySystem, REPLY_PROMPT } from "../prompts/reply_v2";
 import { consentNotice, EXIT_BUTTON_IDS, exitQuestionButtons, fixedText, textLanguage } from "./fixed-texts";
 import { parseReplySettings, type ReplySettings } from "./persona";
+import { runAct, ActResultSchema, type ActResult } from "../scheduling/act";
+import { freshOffer } from "../scheduling/state";
 import { planReply, type Plan, type PlanInput, type ReplyPlan } from "./plan";
 import { checkReply } from "./postcheck";
 import type { PortOutcome, SystemNoticePort } from "./ports";
 import type { StepRunner, TurnContext } from "./process-message";
 import type { Interactive } from "../../notify/interactive";
+import type { SchedulingDeps } from "../scheduling/act";
 import type { HandoffPriority, PipelineStore } from "./store";
 import { turnClock } from "./turn-deadline";
 import type { UnderstandResult } from "./understand";
@@ -50,6 +53,11 @@ export interface ReplyDeps {
   /** Inngest's send, for `handoff.opened`. */
   sendEvent: (event: { id: string; name: string; data: Record<string, string> }) => Promise<unknown>;
   systemNotice: SystemNoticePort;
+  /**
+   * Booking (step 6): the calendar and the business's services, through Dev 2's booking functions. Without it nothing about booking
+   * happens and every turn runs as before.
+   */
+  scheduling?: SchedulingDeps;
   /** The link in the privacy notice (PRIVACY_POLICY_URL, https). */
   privacyPolicyUrl: string;
   now?: () => number;
@@ -89,6 +97,8 @@ interface PlanSummary {
   deadlineExceeded: boolean;
   handoff: { trigger: HandoffTrigger; priority: HandoffPriority } | null;
   optOut: { notInterested: boolean } | null;
+  /** The calendar must be looked at or changed before the reply can be written (the "act" step). */
+  needsAct: boolean;
 }
 
 interface Loaded {
@@ -114,13 +124,89 @@ async function loadPlanInput(turn: TurnContext, understood: UnderstandResult, de
   ]);
   const asked = (agent?.extraction as { question?: unknown } | undefined)?.question;
   const settings = parseReplySettings(info?.agentSettings);
+  const scheduling = await loadScheduling(turn, understood, texts, agent, firstAt, deps);
   return {
     agent,
     settings,
     businessName: info?.name ?? null,
     lastAt,
-    input: { understood, question: typeof asked === "string" ? asked : null, contactLanguage: contact?.language ?? null, previousMisses, settings, deadlineExceeded, exitQuestionPending: previousCase === "exit_unclear", customerSaidOne: texts.some((t) => isJustOne(t.body)), talkButtonTapped: texts.some((t) => t.buttonId === EXIT_BUTTON_IDS.talk) },
+    input: { ...(scheduling ? { scheduling } : {}), understood, question: typeof asked === "string" ? asked : null, contactLanguage: contact?.language ?? null, previousMisses, settings, deadlineExceeded, exitQuestionPending: previousCase === "exit_unclear", customerSaidOne: texts.some((t) => isJustOne(t.body)), talkButtonTapped: texts.some((t) => t.buttonId === EXIT_BUTTON_IDS.talk) },
   };
+}
+
+/** The booking part of the plan input, or undefined when booking is off, does not apply to this business, or nothing about it is going on. */
+async function loadScheduling(
+  turn: TurnContext,
+  understood: UnderstandResult,
+  texts: { body: string | null }[],
+  agent: Record<string, unknown> | null,
+  firstAt: string,
+  deps: ReplyDeps,
+): Promise<PlanInput["scheduling"] | undefined> {
+  const sd = deps.scheduling;
+  if (!sd || understood.status !== "understood") return undefined;
+  const q = understood.qualification;
+  if (!q?.bookingKind || q.hardFail) return undefined;
+  if (!(await sd.isEnabled(turn.tenantId, "booking"))) return undefined;
+
+  const now = new Date((deps.now ?? Date.now)());
+  const stored = ActResultSchema.safeParse(agent?.act);
+  const offer = freshOffer(await deps.store.getPreviousOffer(turn.tenantId, turn.conversationId, firstAt), now);
+  // The calendar is only read when something about booking is going on: a time on offer, a booking asked for, a lead that is ready.
+  if (!stored.success && !offer && understood.summary.intent !== "book" && !q.readyForSlots) return undefined;
+
+  const [services, timeZone, active] = await Promise.all([sd.services(turn.tenantId), sd.timeZone(turn.tenantId), sd.port.activeBooking(turn.tenantId, turn.leadId)]);
+  const preferred = (agent?.extraction as { preferredTime?: unknown } | undefined)?.preferredTime;
+  return {
+    service: services.length === 1 ? { state: "one", id: services[0].id } : services.length === 0 ? { state: "none" } : { state: "several" },
+    offer: offer ? offer.slots : null,
+    hasBooking: active !== null,
+    customerText: texts[texts.length - 1]?.body ?? "",
+    preferredTime: typeof preferred === "string" && preferred.trim() ? preferred : null,
+    timeZone,
+    now,
+    ...(stored.success ? { act: stored.data as ActResult } : {}),
+  };
+}
+
+/** What a turn's act step keeps as the offer to answer next: new times, none (the offer is over), or nothing (leave it as it was). */
+function offerAfter(result: ActResult, at: Date): { offer: { slots: unknown[]; at: string } | null } | Record<string, never> {
+  switch (result.kind) {
+    case "offered":
+      return { offer: { slots: result.slots, at: at.toISOString() } };
+    case "booked":
+    case "no_slots":
+      return { offer: null };
+    case "error":
+      return {};
+  }
+}
+
+/** The act step: look at the calendar, or book, as the plan asked, and keep the result on the message. Safe to run again: a result already kept is used. */
+async function performAct(turn: TurnContext, understood: UnderstandResult, deps: ReplyDeps): Promise<{ kind: ActResult["kind"] }> {
+  const loaded = await loadPlanInput(turn, understood, false, deps);
+  const sd = deps.scheduling;
+  const s = loaded.input.scheduling;
+  if (!sd || !s) return keepAct(turn, { kind: "error" }, new Date((deps.now ?? Date.now)()), deps);
+  if (s.act) return { kind: s.act.kind };
+  const request = planReply(loaded.input).act;
+  if (!request) return keepAct(turn, { kind: "error" }, s.now, deps);
+  const result = await runAct(request, { tenantId: turn.tenantId, leadId: turn.leadId, timeZone: s.timeZone, now: s.now, port: sd.port });
+  return keepAct(turn, result, s.now, deps);
+}
+
+async function keepAct(turn: TurnContext, result: ActResult, now: Date, deps: ReplyDeps): Promise<{ kind: ActResult["kind"] }> {
+  await keep(deps, turn, { act: result, ...offerAfter(result, now) });
+  return { kind: result.kind };
+}
+
+/** The plan again, with the act result in hand: what the customer is told, and whether a person must take over. */
+async function replan(turn: TurnContext, understood: UnderstandResult, startedAt: number, deps: ReplyDeps): Promise<PlanSummary> {
+  const clock = turnClock(startedAt, (deps.now ?? Date.now)());
+  const loaded = await loadPlanInput(turn, understood, clock.exceeded, deps);
+  const plan = planReply(loaded.input);
+  await keep(deps, turn, { kbMisses: plan.kbMisses, planCase: plan.case });
+  return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null, needsAct: false };
 }
 
 /** The customer's answer "1" to the question we asked ("Reply 1 to talk to the team"): the digit alone, in any of the usual forms, with or without a full stop. */
@@ -138,7 +224,7 @@ async function keep(deps: ReplyDeps, turn: TurnContext, agent: Record<string, un
 export async function replyTurn(step: StepRunner, turn: TurnContext, understood: UnderstandResult, startedAt: number, deps: ReplyDeps): Promise<ReplyOutcome> {
   const now = deps.now ?? Date.now;
 
-  const planned = await step.run<PlanSummary>("plan", async () => {
+  let planned = await step.run<PlanSummary>("plan", async () => {
     const clock = turnClock(startedAt, now());
     const loaded = await loadPlanInput(turn, understood, clock.exceeded, deps);
     const plan = planReply(loaded.input);
@@ -153,8 +239,14 @@ export async function replyTurn(step: StepRunner, turn: TurnContext, understood:
       }
     }
     await keep(deps, turn, { kbMisses: plan.kbMisses, planCase: plan.case });
-    return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null };
+    return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null, needsAct: plan.act !== undefined };
   });
+
+  // The calendar is looked at or changed once (step 6), its result kept on the message, and the plan made again with it in hand.
+  if (planned.needsAct) {
+    await step.run("act", () => performAct(turn, understood, deps));
+    planned = await step.run<PlanSummary>("plan-act", () => replan(turn, understood, startedAt, deps));
+  }
 
   // A clear request to stop that the model read: opted out like a STOP phrase, nothing else is sent (and no credit is spent).
   if (planned.optOut) {

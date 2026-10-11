@@ -85,6 +85,8 @@ export interface QualificationSummary {
   readyForSlots: boolean;
   /** Set when the lead is certainly not a fit (a hard fail of the pack). */
   hardFail: Qualification["hardFail"];
+  /** The kind of booking the pack's business takes that needs a time and someone's calendar, or null (no such booking, so no times are offered). */
+  bookingKind?: "slot" | "site_visit" | null;
 }
 
 export type UnderstandResult =
@@ -297,7 +299,8 @@ export async function understandTurn(step: StepRunner, turn: TurnContext, deps: 
           }
           const result = qualify(loaded.pack, lead.fields, { references: buildReferences(loaded.pack, rows) });
           await store.saveLeadScore(turn.tenantId, turn.leadId, { score: result.score, temperature: result.temperature });
-          return { score: result.score, temperature: result.temperature, ask: result.ask, missingRequired: result.missingRequired, readyForSlots: result.readyForSlots, hardFail: result.hardFail };
+          const bookingKind = loaded.pack.bookingModes.find((mode): mode is "slot" | "site_visit" => mode === "slot" || mode === "site_visit") ?? null;
+          return { score: result.score, temperature: result.temperature, ask: result.ask, missingRequired: result.missingRequired, readyForSlots: result.readyForSlots, hardFail: result.hardFail, bookingKind };
         })
       : null;
 

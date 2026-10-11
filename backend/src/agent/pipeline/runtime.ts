@@ -7,6 +7,7 @@ import { send } from "../../notify/send";
 import { llm } from "../llm";
 import type { PackSource } from "../packs/load";
 import { createDbPackSource } from "../packs/store";
+import { createSchedulingDeps } from "../scheduling/port-db";
 import { createCatalogLoader } from "../scoring/catalog-db";
 import { createSystemNoticePort } from "./ports";
 import type { ReplyDeps } from "./reply";
@@ -45,6 +46,8 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+const scheduling = createSchedulingDeps();
+
 /** The real dependencies of the reply step: notify.send (including the system notice), the audit and the queue. Owners are alerted by the handoff-alert job, not here. */
 export function replyDeps(store: PipelineStore): ReplyDeps {
   return {
@@ -55,6 +58,8 @@ export function replyDeps(store: PipelineStore): ReplyDeps {
     sendEvent: (event) => inngest.send(event),
     systemNotice: createSystemNoticePort((tenantId, kind, payload) => send(tenantId, kind, payload)),
     privacyPolicyUrl: serverEnv().PRIVACY_POLICY_URL,
+    // Booking (step 6): Dev 2's booking functions, used only when the business has the booking feature on.
+    scheduling,
   };
 }
 

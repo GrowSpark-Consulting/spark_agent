@@ -530,6 +530,35 @@ describe("getPreviousPlanCase", () => {
   });
 });
 
+describe("getPreviousOffer", () => {
+  const rows = (...metas: unknown[]) => ({ data: metas.map((meta) => ({ meta })) });
+  const SLOT = { start: "2026-10-13T04:30:00.000Z", end: "2026-10-13T05:30:00.000Z", resourceId: "20000000-0000-0000-0000-000000000002", serviceId: "10000000-0000-0000-0000-000000000001", label: "Tue 13 Oct, 10:00 am" };
+  const offer = { slots: [SLOT], at: "2026-10-10T04:30:00.000Z" };
+
+  it("reads the newest earlier customer messages of this chat, for this business", async () => {
+    const { db, calls } = fakeDb(() => rows({}));
+    await createPipelineStore(db).getPreviousOffer(T, CONV, "2026-10-08T10:00:00.000Z");
+    tenantFilter(calls[0]);
+    expect(filter(calls[0], "conversation_id")).toEqual(["conversation_id", "eq", CONV]);
+    expect(filter(calls[0], "sender")).toEqual(["sender", "eq", "customer"]);
+    expect(filter(calls[0], "created_at")).toEqual(["created_at", "lt", "2026-10-08T10:00:00.000Z"]);
+    expect(calls[0].limit).toBe(20);
+  });
+
+  it("is the offer the latest turn that spoke of one left, skipping messages that say nothing about it", async () => {
+    expect(await createPipelineStore(fakeDb(() => rows({ agent: { planCase: "kb_miss" } }, { agent: { offer } }, { agent: { offer: null } })).db).getPreviousOffer(T, CONV, "2026-10-09T00:00:00.000Z")).toEqual(offer);
+  });
+
+  it("is no offer when the newest turn ended it, even if an older one made one", async () => {
+    expect(await createPipelineStore(fakeDb(() => rows({ agent: { offer: null } }, { agent: { offer } })).db).getPreviousOffer(T, CONV, "2026-10-09T00:00:00.000Z")).toBeNull();
+  });
+
+  it("is no offer when there is none, or what is kept cannot be read", async () => {
+    expect(await createPipelineStore(fakeDb(() => rows({}, null, { agent: { planCase: "x" } })).db).getPreviousOffer(T, CONV, "2026-10-09T00:00:00.000Z")).toBeNull();
+    expect(await createPipelineStore(fakeDb(() => rows({ agent: { offer: { slots: "x" } } }, { agent: { offer } })).db).getPreviousOffer(T, CONV, "2026-10-09T00:00:00.000Z")).toBeNull();
+  });
+});
+
 describe("saveLeadScore", () => {
   it("writes the score and temperature of an open lead of this business, by id", async () => {
     const { db, calls } = fakeDb(() => ({ data: [{ id: LEAD }] }));
