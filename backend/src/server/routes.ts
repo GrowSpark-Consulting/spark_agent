@@ -1,4 +1,5 @@
 import type { StartTrialResult } from "@pakka/types";
+import { handleHandoffLink } from "../agent/handoff/takeover";
 import { getLeadCard } from "../agent/leadcard/route";
 import { getBalance } from "../billing/credits";
 import { startTrialFor } from "../billing/start-trial";
@@ -165,6 +166,8 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/whatsapp/webhook-config", browser: true, methods: { GET: (request, deps) => whatsappWebhookConfig(request, deps.userClient) } },
   { path: "/api/whatsapp/manual", browser: true, methods: { POST: (request, deps) => whatsappManualConnect(request, deps.userClient) } },
   { path: "/api/admin/whatsapp/manual", browser: true, methods: { POST: (request, deps) => adminManualConnect(request, deps.userClient) } },
+  // The two buttons of a staff alert (module 6). No login: the signed token says who tapped and which handoff. Answers are redirects or friendly pages.
+  { path: "/h/:token", secretParams: ["token"], methods: { GET: (request, _deps, params) => handleHandoffLink(request, { token: params.token }) } },
   { path: "/api/calendar/google/connect", browser: true, methods: { GET: googleConnect } },
   // Google sends the browser here after consent (no login: the signed state says who asked). Every answer
   // is a redirect back to the dashboard. The code and state are in the query string, which is never logged.
