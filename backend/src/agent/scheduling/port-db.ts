@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { confirmBooking, findSlots, holdSlot } from "../../booking/bookings";
+import { cancelBooking, confirmBooking, findSlots, holdSlot, rescheduleBooking } from "../../booking/bookings";
 import { isEnabled } from "../../features/is-enabled";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { withTimeout } from "../../lib/timeout";
@@ -13,6 +13,8 @@ export interface BookingFunctions {
   findSlots: typeof findSlots;
   holdSlot: typeof holdSlot;
   confirmBooking: typeof confirmBooking;
+  rescheduleBooking: typeof rescheduleBooking;
+  cancelBooking: typeof cancelBooking;
 }
 
 const READ_TIMEOUT_MS = 5000;
@@ -37,7 +39,7 @@ export function createSchedulingDeps(
   options: { db?: SupabaseClient; functions?: BookingFunctions; isEnabled?: SchedulingDeps["isEnabled"]; now?: () => Date } = {},
 ): SchedulingDeps {
   const db = () => options.db ?? supabaseAdmin();
-  const functions: BookingFunctions = options.functions ?? { findSlots, holdSlot, confirmBooking };
+  const functions: BookingFunctions = options.functions ?? { findSlots, holdSlot, confirmBooking, rescheduleBooking, cancelBooking };
   const now = options.now ?? (() => new Date());
   // The code only: a row can hold the business's own text.
   const failed = (what: string, error: { code?: string }) => new Error(`${what} (database error ${error.code || "none"})`);
@@ -53,6 +55,11 @@ export function createSchedulingDeps(
         const confirmed = await functions.confirmBooking(tenantId, bookingId);
         return { id: confirmed.id };
       },
+      async rescheduleBooking(tenantId, bookingId, slot) {
+        const moved = await functions.rescheduleBooking(tenantId, bookingId, { start: slot.start, end: slot.end, resourceId: slot.resourceId });
+        return { id: moved.id };
+      },
+      cancelBooking: (tenantId, bookingId, reason) => functions.cancelBooking(tenantId, bookingId, reason),
       async activeBooking(tenantId, leadId) {
         const at = now();
         const { data, error } = await withTimeout(

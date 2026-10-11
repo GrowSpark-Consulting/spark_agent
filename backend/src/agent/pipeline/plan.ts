@@ -89,6 +89,12 @@ export interface PlanInput {
     offer: OfferedSlot[] | null;
     /** The lead already has a held or confirmed booking that has not ended. */
     hasBooking: boolean;
+    /** The lead's confirmed booking, with its time as the customer reads it (a time still only held cannot be moved or cancelled by chat). */
+    booking?: { id: string; label: string } | null;
+    /** The offer of times is for moving this booking, not for a new one. */
+    rescheduleBookingId?: string | null;
+    /** We asked whether to cancel this booking and are waiting for yes or no. */
+    cancelAsk?: { bookingId: string; label: string } | null;
     /** What the customer wrote last. Only read here, to find which time they picked; never kept. */
     customerText: string;
     /** What the extraction copied of when they want it ("tomorrow evening"), or null. */

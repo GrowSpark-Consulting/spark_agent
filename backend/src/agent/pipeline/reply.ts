@@ -13,6 +13,7 @@ import { buildReplyMessages, buildReplySystem, REPLY_PROMPT } from "../prompts/r
 import { consentNotice, EXIT_BUTTON_IDS, exitQuestionButtons, fixedText, textLanguage } from "./fixed-texts";
 import { parseReplySettings, type ReplySettings } from "./persona";
 import { runAct, ActResultSchema, type ActResult } from "../scheduling/act";
+import { slotLabel } from "../../booking/time";
 import { freshOffer } from "../scheduling/state";
 import { planReply, type Plan, type PlanInput, type ReplyPlan } from "./plan";
 import { checkReply } from "./postcheck";
@@ -146,21 +147,30 @@ async function loadScheduling(
   const sd = deps.scheduling;
   if (!sd || understood.status !== "understood") return undefined;
   const q = understood.qualification;
-  if (!q?.bookingKind || q.hardFail) return undefined;
+  if (!q?.bookingKind) return undefined;
   if (!(await sd.isEnabled(turn.tenantId, "booking"))) return undefined;
 
   const now = new Date((deps.now ?? Date.now)());
   const stored = ActResultSchema.safeParse(agent?.act);
-  const offer = freshOffer(await deps.store.getPreviousOffer(turn.tenantId, turn.conversationId, firstAt), now);
-  // The calendar is only read when something about booking is going on: a time on offer, a booking asked for, a lead that is ready.
-  if (!stored.success && !offer && understood.summary.intent !== "book" && !q.readyForSlots) return undefined;
+  const waiting = freshOffer(await deps.store.getPreviousOffer(turn.tenantId, turn.conversationId, firstAt), now);
+  const intent = understood.summary.intent;
+  // The calendar is only read when something about booking is going on: something waiting for an answer, a booking asked for, moved or
+  // cancelled, or a lead that is ready.
+  const aboutBooking = intent === "book" || intent === "reschedule" || intent === "cancel" || q.readyForSlots;
+  if (!stored.success && !waiting && !aboutBooking) return undefined;
 
   const [services, timeZone, active] = await Promise.all([sd.services(turn.tenantId), sd.timeZone(turn.tenantId), sd.port.activeBooking(turn.tenantId, turn.leadId)]);
   const preferred = (agent?.extraction as { preferredTime?: unknown } | undefined)?.preferredTime;
+  const times = waiting && "slots" in waiting ? waiting : null;
+  const cancelAsk = waiting && "cancel" in waiting ? waiting.cancel : null;
   return {
     service: services.length === 1 ? { state: "one", id: services[0].id } : services.length === 0 ? { state: "none" } : { state: "several" },
-    offer: offer ? offer.slots : null,
+    offer: times ? times.slots : null,
+    rescheduleBookingId: times?.rescheduleBookingId ?? null,
+    cancelAsk,
     hasBooking: active !== null,
+    // Only a confirmed booking can be moved or cancelled by chat; a time that is still only held cannot.
+    booking: active && active.status === "confirmed" ? { id: active.id, label: slotLabel(new Date(active.start), timeZone) } : null,
     customerText: texts[texts.length - 1]?.body ?? "",
     preferredTime: typeof preferred === "string" && preferred.trim() ? preferred : null,
     timeZone,
@@ -169,12 +179,20 @@ async function loadScheduling(
   };
 }
 
-/** What a turn's act step keeps as the offer to answer next: new times, none (the offer is over), or nothing (leave it as it was). */
-function offerAfter(result: ActResult, at: Date): { offer: { slots: unknown[]; at: string } | null } | Record<string, never> {
+/**
+ * What a turn's act step keeps as what waits for the customer's answer next: new times (for a booking, or for moving one), the question
+ * whether to cancel, nothing (what was waiting is over), or no change at all (leave it as it was).
+ */
+function offerAfter(result: ActResult, at: Date): { offer: Record<string, unknown> | null } | Record<string, never> {
   switch (result.kind) {
     case "offered":
-      return { offer: { slots: result.slots, at: at.toISOString() } };
+      return { offer: { slots: result.slots, at: at.toISOString(), ...(result.rescheduleBookingId ? { rescheduleBookingId: result.rescheduleBookingId } : {}) } };
+    case "cancel_asked":
+      return { offer: { cancel: { bookingId: result.bookingId, label: result.label }, at: at.toISOString() } };
     case "booked":
+    case "rescheduled":
+    case "cancelled":
+    case "kept":
     case "no_slots":
       return { offer: null };
     case "error":

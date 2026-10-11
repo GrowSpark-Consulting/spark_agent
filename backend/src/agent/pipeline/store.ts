@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { NonRetriableError } from "inngest";
 import { z } from "zod";
 import { AppError } from "../../lib/errors";
-import { parseOfferState, type OfferState } from "../scheduling/state";
+import { parsePendingState, type PendingState } from "../scheduling/state";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { TimeoutError, withTimeout } from "../../lib/timeout";
 import { ANSWERED_ACTION } from "./events";
@@ -145,7 +145,7 @@ export interface PipelineStore {
    * customer message that turn answered, before `before`): the newest message that says anything about an offer decides, and `null` (the
    * offer was ended) or an unreadable value is no offer. Staleness is the caller's (scheduling/state.ts freshOffer).
    */
-  getPreviousOffer(tenantId: string, conversationId: string, before: string): Promise<OfferState | null>;
+  getPreviousOffer(tenantId: string, conversationId: string, before: string): Promise<PendingState | null>;
   /** The plan case the chat's latest earlier turn kept on its customer message (`meta.agent.planCase`, before `before`), or null. */
   getPreviousPlanCase(tenantId: string, conversationId: string, before: string): Promise<string | null>;
   /** The business's name and agent settings, or null if it is gone. */
@@ -469,7 +469,7 @@ export function createPipelineStore(db: SupabaseClient = supabaseAdmin(), { time
       if (error) fail("read previous offer", error);
       for (const row of Array.isArray(data) ? data : []) {
         const agent = isObject(row) && isObject(row.meta) && isObject(row.meta.agent) ? row.meta.agent : null;
-        if (agent && Object.hasOwn(agent, "offer")) return parseOfferState(agent.offer);
+        if (agent && Object.hasOwn(agent, "offer")) return parsePendingState(agent.offer);
       }
       return null;
     },

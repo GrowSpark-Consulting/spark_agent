@@ -1,5 +1,5 @@
 import type { HandoffPriority, TenantReplyInfo } from "../agent/pipeline/store";
-import { parseOfferState } from "../agent/scheduling/state";
+import { parsePendingState } from "../agent/scheduling/state";
 import type { BatchText, ContactRow, ConversationRow, HistoryItem, InboundMessage, LeadRow, LeadState, PendingMessage, PipelineStore, TenantRow } from "../agent/pipeline/store";
 
 // An in-memory PipelineStore for tests. It enforces the same filtering the real store does: a message,
@@ -246,7 +246,7 @@ export function fakePipelineStore(
         .slice(0, 20);
       for (const m of earlier) {
         const agent = m.meta?.agent as Record<string, unknown> | undefined;
-        if (agent && Object.hasOwn(agent, "offer")) return parseOfferState(agent.offer);
+        if (agent && Object.hasOwn(agent, "offer")) return parsePendingState(agent.offer);
       }
       return null;
     },
