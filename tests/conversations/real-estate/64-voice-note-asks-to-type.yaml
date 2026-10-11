@@ -1,0 +1,39 @@
+name: A voice note is answered once with a request to type, and staff are told
+description: "Day 4 (Raja, 11 Oct): the assistant cannot listen to voice notes yet. One polite line, once, however many voice notes follow; staff are told one is waiting; the chat stays with the AI. After the customer types, a later voice note is answered again."
+kb:
+  - "2BHK of 950 sq ft in Velachery starts at ₹78 lakh."
+turns:
+  - customer: "[voice note]"
+    voice: true
+    expect:
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      voiceNoteAlert: true
+      reply: { sent: true }
+    mockOnly:
+      case: voice_note
+      reply: { fixed: { key: voice_note, language: en } }
+  - customer: "[another voice note]"
+    voice: true
+    expect:
+      aiReplies: 0
+      mode: ai
+      voiceNoteAlert: false
+    mockOnly:
+      case: voice_note_repeat
+  - customer: "What is the price of a 2BHK in Velachery?"
+    mock:
+      extraction: { language: en, intent: question, fields: { location: Velachery, config: 2BHK }, question: "What is the price of a 2BHK in Velachery?" }
+      reply: "A 2BHK in Velachery starts at ₹78 lakh."
+    expect:
+      aiReplies: 1
+      voiceNoteAlert: false
+      reply: { sent: true, contains: ["₹78 lakh"] }
+  - customer: "[a voice note again]"
+    voice: true
+    expect:
+      aiReplies: 1
+      voiceNoteAlert: true
+    mockOnly:
+      case: voice_note

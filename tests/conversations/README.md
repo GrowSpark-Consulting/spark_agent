@@ -42,7 +42,7 @@ turns:
 What can be asserted: `stop`, `extracted` (intent, language, sentiment, asksIfHuman, notInterested, fields), `case`,
 `reply` (sent, fixed line and language, buttons, contains, notContains, notice), `noInventedPrice`, `optedOut`, `consent` (the new
 consent_logs of the turn), `handoff` (trigger and priority, or null), `mode`, `leadStage`, `leadFields`, `aiReplies`,
-`confirmations`, and (with a `booking` setup, below) `leadTemperature`, `leadScore`, `hotLead` (staff were told this turn that the lead turned hot) and `calendar`. Every turn also checks, always: at most one AI reply, sent as an `ai_reply` through notify.send, and nothing
+`confirmations`, and (with a `booking` setup, below) `leadTemperature`, `leadScore`, `hotLead` (staff were told this turn that the lead turned hot), `voiceNoteAlert` (staff were told a voice note is waiting) and `calendar`. Every turn also checks, always: at most one AI reply, sent as an `ai_reply` through notify.send, and nothing
 sent to a contact who opted out.
 
 ## Booking chats (Day 3)
@@ -70,7 +70,7 @@ booking:
   The engine itself is tested by Dev 2's own tests and `supabase/tests`; what these chats test is how the assistant uses it.
 
 Not covered here: the gate's other outcomes (a chat a person has, the AI switched off, a contact who opted out earlier) are tested
-in `gate.test.ts`; the runner starts every chat with the AI in charge. A turn can be a tap on a reply button (`tap: "exit:talk"`, with the button title as the text). A turn must assert something (`expect` or `mockOnly`).
+in `gate.test.ts`; the runner starts every chat with the AI in charge. A turn can be a tap on a reply button (`tap: "exit:talk"`, with the button title as the text) or a voice note (`voice: true`: an audio message with no words). A turn must assert something (`expect` or `mockOnly`).
 A STOP chat's later turns show the gate's opted-out outcome.
 
 ## The files
@@ -89,3 +89,5 @@ A STOP chat's later turns show the gate's opted-out outcome.
 - `61`-`63`: handoff triggers (Day 4, Raja's answers of 11 Oct): an angry customer gets one short sorry and a person takes over (61), a customer
   who asks for a discount is never given one and staff are told at once (62), and a lead that turns hot tells staff once while the assistant keeps
   helping and books the visit (63).
+- `64`: a voice note (Day 4, Raja, 11 Oct): one polite line asking the customer to type, once however many voice notes follow, staff told, the chat stays
+  with the AI, and a later voice note after the customer typed is answered again.

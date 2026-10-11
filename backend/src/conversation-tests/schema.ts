@@ -23,7 +23,7 @@ const ReplyExpect = z
     /** Exactly one AI reply goes out (true) or none does (false). Not checked when missing (the "at most one" rule is always checked). */
     sent: z.boolean().optional(),
     /** The reply is this fixed line, in this language: "fallback", "clarify", "handoff", "exit_question", ... */
-    fixed: z.object({ key: z.enum(["fallback", "clarify", "handoff", "handoff_sorry", "stop_hint", "credits_holding", "opt_out_confirmation", "exit_question"]), language: z.enum(["en", "ta", "ta-en", "hi"]) }).strict().optional(),
+    fixed: z.object({ key: z.enum(["fallback", "clarify", "handoff", "handoff_sorry", "voice_note", "stop_hint", "credits_holding", "opt_out_confirmation", "exit_question"]), language: z.enum(["en", "ta", "ta-en", "hi"]) }).strict().optional(),
     /** The titles of the reply buttons the message carried, in order ([] = it was plain text). */
     buttons: z.array(z.string()).optional(),
     contains: z.array(z.string()).optional(),
@@ -52,6 +52,8 @@ const Expect = z
     /** What the code worked out about the lead (hot, warm, cold or disqualified) and its score. */
     /** Staff were told this turn that the lead turned hot (a lead.hot event), or were not. The chat stays with the AI either way. */
     hotLead: z.boolean().optional(),
+    /** Staff were told this turn that a voice note is waiting (a voice_note.received event), or were not. */
+    voiceNoteAlert: z.boolean().optional(),
     leadTemperature: z.string().optional(),
     leadScore: z.number().optional(),
     /** The calendar after this turn (needs the chat's `booking`): the start of every confirmed booking, soonest first, and how many were cancelled so far. */
@@ -68,6 +70,8 @@ const Turn = z
     customer: z.string().min(1),
     /** The customer tapped a reply button or list row with this id (the text is then its title): the inbound message has kind `interactive` and `meta.buttonId`. */
     tap: z.string().min(1).optional(),
+    /** The customer sent a voice note: an audio message with no words. `customer` is only the label shown in a failure. */
+    voice: z.literal(true).optional(),
     mock: z
       .object({
         /** What the mocked extraction model returns; missing keys get quiet defaults (an English question, 0.9). */

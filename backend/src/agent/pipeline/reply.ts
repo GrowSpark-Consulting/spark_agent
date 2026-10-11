@@ -3,7 +3,7 @@ import { NonRetriableError } from "inngest";
 import { normaliseQuestion } from "../../kb/question";
 import type { AuditEntry } from "../../lib/audit";
 import { recordAnswered } from "./answered";
-import { HOT_LEAD_ACTION, HOT_LEAD_EVENT } from "./events";
+import { HOT_LEAD_ACTION, HOT_LEAD_EVENT, VOICE_NOTE_EVENT } from "./events";
 import { recordHandoff } from "./handoff";
 import { applyStop, completeOptOut } from "./stop";
 import { stripUnsafeCharacters } from "../../lib/text";
@@ -89,6 +89,8 @@ export interface ReplyOutcome {
   handoff: HandoffSummary | null;
   /** Staff were told that this lead turned hot ("announced"), or already had been ("already"). Absent when the lead did not just turn hot. */
   hotLead?: "announced" | "already";
+  /** Staff were told a voice note is waiting. Absent when the turn was not a voice note. */
+  voiceNote?: "alerted";
 }
 
 const TAG = "[pipeline]";
@@ -105,6 +107,8 @@ interface PlanSummary {
   needsAct: boolean;
   /** The lead has just turned hot and staff have not been told: announce it once, after the reply. */
   hotLead: boolean;
+  /** A voice note was answered with the request to type: tell staff one is waiting, after the reply. */
+  voiceNote: boolean;
 }
 
 interface Loaded {
@@ -133,12 +137,14 @@ async function loadPlanInput(turn: TurnContext, understood: UnderstandResult, de
   const scheduling = await loadScheduling(turn, understood, texts, agent, firstAt, settings, deps);
   // Only a lead that is hot can raise the alert, so only then is it looked up whether staff were already told.
   const hotLeadAlerted = understood.status === "understood" && understood.qualification?.temperature === "hot" ? await store.hasHotLeadAlert(turn.tenantId, turn.leadId) : undefined;
+  // A voice note has no words: every message of the burst is audio. Only then is it a voice note, and only a repeat if the last turn was one too.
+  const voiceNote = texts.length > 0 && texts.every((t) => t.kind === "audio");
   return {
     agent,
     settings,
     businessName: info?.name ?? null,
     lastAt,
-    input: { ...(scheduling ? { scheduling } : {}), ...(hotLeadAlerted === undefined ? {} : { hotLeadAlerted }), understood, question: typeof asked === "string" ? asked : null, contactLanguage: contact?.language ?? null, previousMisses, settings, deadlineExceeded, exitQuestionPending: previousCase === "exit_unclear", customerSaidOne: texts.some((t) => isJustOne(t.body)), talkButtonTapped: texts.some((t) => t.buttonId === EXIT_BUTTON_IDS.talk) },
+    input: { ...(scheduling ? { scheduling } : {}), ...(hotLeadAlerted === undefined ? {} : { hotLeadAlerted }), ...(voiceNote ? { voiceNote, voiceNoteRepeat: previousCase === "voice_note" } : {}), understood, question: typeof asked === "string" ? asked : null, contactLanguage: contact?.language ?? null, previousMisses, settings, deadlineExceeded, exitQuestionPending: previousCase === "exit_unclear", customerSaidOne: texts.some((t) => isJustOne(t.body)), talkButtonTapped: texts.some((t) => t.buttonId === EXIT_BUTTON_IDS.talk) },
   };
 }
 
@@ -156,6 +162,13 @@ async function announceHotLead(turn: TurnContext, deps: ReplyDeps): Promise<"ann
     console.error(`${TAG} could not record the hot lead alert (business ${turn.tenantId})`);
   }
   return "announced";
+}
+
+/** Tells whoever sends staff alerts that a voice note is waiting (an event with ids only). A repeat is dropped by its id. */
+async function announceVoiceNote(turn: TurnContext, deps: ReplyDeps): Promise<"alerted"> {
+  const lastMessageId = turn.messageIds[turn.messageIds.length - 1];
+  await deps.sendEvent({ id: `voice_note:${lastMessageId}`, name: VOICE_NOTE_EVENT, data: { tenantId: turn.tenantId, conversationId: turn.conversationId, leadId: turn.leadId } });
+  return "alerted";
 }
 
 /** The booking part of the plan input, or undefined when booking is off, does not apply to this business, or nothing about it is going on. */
@@ -255,7 +268,7 @@ async function replan(turn: TurnContext, understood: UnderstandResult, startedAt
   const loaded = await loadPlanInput(turn, understood, clock.exceeded, deps);
   const plan = planReply(loaded.input);
   await keep(deps, turn, { kbMisses: plan.kbMisses, planCase: plan.case });
-  return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null, needsAct: false, hotLead: plan.hotLead === true };
+  return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null, needsAct: false, hotLead: plan.hotLead === true, voiceNote: plan.voiceNote === true };
 }
 
 /** The customer's answer "1" to the question we asked ("Reply 1 to talk to the team"): the digit alone, in any of the usual forms, with or without a full stop. */
@@ -288,7 +301,7 @@ export async function replyTurn(step: StepRunner, turn: TurnContext, understood:
       }
     }
     await keep(deps, turn, { kbMisses: plan.kbMisses, planCase: plan.case });
-    return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null, needsAct: plan.act !== undefined, hotLead: plan.hotLead === true };
+    return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null, needsAct: plan.act !== undefined, hotLead: plan.hotLead === true, voiceNote: plan.voiceNote === true };
   });
 
   // The calendar is looked at or changed once (step 6), its result kept on the message, and the plan made again with it in hand.
@@ -318,7 +331,10 @@ export async function replyTurn(step: StepRunner, turn: TurnContext, understood:
   const answered = reply.status === "sent" || reply.status === "sent_unknown" || reply.status === "already_answered";
   const hotLead = planned.hotLead && answered ? await step.run<"announced" | "already">("hot-lead", () => announceHotLead(turn, deps)) : null;
 
-  return { case: planned.case, reply, handoff, ...(hotLead ? { hotLead } : {}) };
+  // A voice note that was answered: staff are told one is waiting, so someone can listen to it. One event per message (its id), ids only.
+  const voiceAlert = planned.voiceNote && answered ? await step.run<"alerted">("voice-alert", () => announceVoiceNote(turn, deps)) : null;
+
+  return { case: planned.case, reply, handoff, ...(hotLead ? { hotLead } : {}), ...(voiceAlert ? { voiceNote: voiceAlert } : {}) };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -392,7 +408,14 @@ async function sendReply(turn: TurnContext, understood: UnderstandResult, starte
 
   const clock = turnClock(startedAt, now());
   const plan = planReply(loaded.input);
-  if (plan.reply.mode === "none") return { status: "not_sent", reason: "opted_out" }; // the opt-out step handles it (replyTurn); nothing to send here
+  if (plan.reply.mode === "none") {
+    // A repeated voice note: nothing is sent, but the messages are answered, so they are not picked up again.
+    if (plan.markAnswered) {
+      await recordAnswered(turn, deps);
+      return { status: "already_answered" };
+    }
+    return { status: "not_sent", reason: "opted_out" }; // the opt-out step handles it (replyTurn); nothing to send here
+  }
   const { text, source } = await compose(plan, loaded, turn, clock.exceeded, clock.signal, deps);
 
   // Staff may have taken over, or the customer sent STOP, since the gate looked.

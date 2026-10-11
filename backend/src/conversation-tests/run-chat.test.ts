@@ -102,6 +102,19 @@ describe("runChat with a booking setup", () => {
   });
 });
 
+describe("runChat with a voice note", () => {
+  const voiceChat = (expectation: Record<string, unknown>) => Chat.parse({ name: "voice", turns: [{ customer: "[voice note]", voice: true, expect: expectation }] });
+
+  it("answers it once and tells staff: the expectations that say so pass", async () => {
+    expect((await runChat(voiceChat({ aiReplies: 1, voiceNoteAlert: true, mode: "ai" }), { mode: "mock" })).failures).toEqual([]);
+  });
+
+  it("fails an expectation that says nobody is told", async () => {
+    const report = await runChat(voiceChat({ voiceNoteAlert: false }), { mode: "mock" });
+    expect(report.failures.join("\n")).toMatch(/voice note alert this turn: wanted false, got true/);
+  });
+});
+
 describe("loadChats", () => {
   const dirWith = (files: Record<string, string>) => {
     const dir = mkdtempSync(join(tmpdir(), "chats-"));

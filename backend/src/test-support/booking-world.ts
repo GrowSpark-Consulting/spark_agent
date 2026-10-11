@@ -62,6 +62,11 @@ export function runner() {
 export interface Options {
   /** What the customer wrote this turn. */
   text?: string;
+  /** The kind of the customer message (default text); an audio message has no words (body null). */
+  kind?: string;
+  body?: string | null;
+  /** Messages the customer sent before this turn, oldest first (their agent meta is what the earlier turns kept). */
+  earlier?: { body: string | null; kind?: string; agent?: Record<string, unknown> }[];
   preferredTime?: string | null;
   /** An offer made earlier in this chat. */
   offer?: typeof OFFER | null;
@@ -76,12 +81,13 @@ export interface Options {
 }
 
 export function world(over: Options = {}) {
-  const customer = (id: string, secondsAgo: number, body: string, agent: Record<string, unknown>): FakeMessage => ({
-    id, tenantId: A, conversationId: CONV, direction: "in", sender: "customer", kind: "text", createdAt: at(secondsAgo), body, meta: { agent },
+  const customer = (id: string, secondsAgo: number, body: string | null, agent: Record<string, unknown>, kind = "text"): FakeMessage => ({
+    id, tenantId: A, conversationId: CONV, direction: "in", sender: "customer", kind, createdAt: at(secondsAgo), body, meta: { agent },
   });
   const messages: FakeMessage[] = [];
   if (over.offer) messages.push(customer(PREVIOUS, 120, "earlier", { offer: over.offer }));
-  messages.push(customer(M1, 3, over.text ?? WORDS, { extraction: { question: null, preferredTime: over.preferredTime ?? null }, ...over.agent }));
+  (over.earlier ?? []).forEach((e, i) => messages.push(customer(`a0000000-0000-0000-0000-00000000010${i}`, 600 - i * 60, e.body, e.agent ?? {}, e.kind ?? "text")));
+  messages.push(customer(M1, 3, over.body === undefined ? (over.text ?? WORDS) : over.body, { extraction: { question: null, preferredTime: over.preferredTime ?? null }, ...over.agent }, over.kind ?? "text"));
   const fake = fakePipelineStore({
     tenants: [{ id: A, vertical: "sample-pack", verticalVersion: 1 }],
     messages,

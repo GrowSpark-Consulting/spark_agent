@@ -321,22 +321,28 @@ describe("getBatchTexts", () => {
   it("tells which button or list row a tap was (the inbound message's meta.buttonId), and nothing else of the meta", async () => {
     const { db } = fakeDb(() => ({ data: [{ id: "m1", body: "Talk to the team", created_at: "2026-10-08T10:00:00+00:00", meta: { buttonId: "exit:talk", other: "x" } }, { id: "m2", body: "hi", created_at: "2026-10-08T10:00:02+00:00", meta: { buttonId: 5 } }] }));
     expect(await createPipelineStore(db).getBatchTexts(T, CONV, ["m1", "m2"])).toEqual([
-      { id: "m1", body: "Talk to the team", createdAt: "2026-10-08T10:00:00.000Z", buttonId: "exit:talk" },
-      { id: "m2", body: "hi", createdAt: "2026-10-08T10:00:02.000Z", buttonId: null },
+      { id: "m1", body: "Talk to the team", createdAt: "2026-10-08T10:00:00.000Z", buttonId: "exit:talk", kind: null },
+      { id: "m2", body: "hi", createdAt: "2026-10-08T10:00:02.000Z", buttonId: null, kind: null },
     ]);
   });
 
   it("reads the text of these customer messages of this conversation, oldest first", async () => {
     const { db, calls } = fakeDb(() => ({ data: [{ id: "m1", body: "hi", created_at: "2026-10-08T10:00:00+00:00" }, { id: "m2", body: null, created_at: "2026-10-08T10:00:02+00:00" }] }));
     expect(await createPipelineStore(db).getBatchTexts(T, CONV, ["m1", "m2"])).toEqual([
-      { id: "m1", body: "hi", createdAt: "2026-10-08T10:00:00.000Z", buttonId: null },
-      { id: "m2", body: null, createdAt: "2026-10-08T10:00:02.000Z", buttonId: null },
+      { id: "m1", body: "hi", createdAt: "2026-10-08T10:00:00.000Z", buttonId: null, kind: null },
+      { id: "m2", body: null, createdAt: "2026-10-08T10:00:02.000Z", buttonId: null, kind: null },
     ]);
     tenantFilter(calls[0]);
     expect(filter(calls[0], "conversation_id")).toEqual(["conversation_id", "eq", CONV]);
     expect(filter(calls[0], "id")).toEqual(["id", "in", ["m1", "m2"]]);
     expect(filter(calls[0], "sender")).toEqual(["sender", "eq", "customer"]);
     expect(calls[0].order).toEqual(["created_at", true]);
+  });
+
+  it("tells the kind of each message (a voice note is an audio message with no words), and null for a row from before the column existed", async () => {
+    const { db } = fakeDb(() => ({ data: [{ id: "m1", body: null, created_at: "2026-10-08T10:00:00+00:00", kind: "audio" }, { id: "m2", body: "hi", created_at: "2026-10-08T10:00:02+00:00", kind: "text" }] }));
+    const texts = await createPipelineStore(db).getBatchTexts(T, CONV, ["m1", "m2"]);
+    expect(texts.map((t) => t.kind)).toEqual(["audio", "text"]);
   });
 
   it("asks nothing for no ids", async () => {

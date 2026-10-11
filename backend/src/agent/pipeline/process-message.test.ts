@@ -155,15 +155,21 @@ describe("a photo or voice note in the burst", () => {
 
   it("answers the texts around it", async () => {
     const w = world({ messages: [message({ id: M1, createdAt: at(-4) }), message({ id: M2, kind: "audio", createdAt: at(-2) }), message({ id: M3, createdAt: at(0) })] });
-    expect(await runTurn(runner().step, { ...event, messageId: M3 }, w.deps)).toMatchObject({ turn: { messageIds: [M1, M3] } });
+    // the voice note is answered with the rest: one reply covers the burst
+    expect(await runTurn(runner().step, { ...event, messageId: M3 }, w.deps)).toMatchObject({ turn: { messageIds: [M1, M2, M3] } });
   });
 
   it("is gated off, the lead still made, when nothing in the burst can be read", async () => {
-    for (const kind of ["image", "audio", "document", "location", "unsupported"]) {
+    for (const kind of ["image", "document", "location", "unsupported"]) {
       const w = world({ messages: [message({ kind })] });
       expect(await runTurn(runner().step, event, w.deps)).toEqual({ status: "gated_off", reason: "unsupported_kind", leadId: expect.any(String) });
       expect(w.leads.size).toBe(1);
     }
+  });
+
+  it("a voice note on its own is answered: the burst is ready, with the voice note in it", async () => {
+    const w = world({ messages: [message({ id: M1, kind: "audio", createdAt: at(0) })] });
+    expect(await runTurn(runner().step, { ...event, messageId: M1 }, w.deps)).toMatchObject({ status: "ready", turn: { messageIds: [M1] } });
   });
 
   it("lets a tapped list or button reply through", async () => {

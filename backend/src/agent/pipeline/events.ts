@@ -15,3 +15,6 @@ export const HOT_LEAD_ACTION = "lead.hot_alerted";
 
 /** The event the reply step emits when a lead turns hot (ids only). Whoever sends staff alerts listens to it; nothing is changed by it. */
 export const HOT_LEAD_EVENT = "lead.hot";
+
+/** The event the reply step emits when a customer sent a voice note that was answered with the request to type (ids only), so staff can listen to it. */
+export const VOICE_NOTE_EVENT = "voice_note.received";
