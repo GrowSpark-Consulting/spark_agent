@@ -8,6 +8,7 @@ import { googleConnectUrl, handleGoogleCallback } from "../booking/google-calend
 import { sendTestMessage } from "../channels/whatsapp/test-message";
 import { handleWhatsAppWebhook } from "../channels/whatsapp/inbound";
 import { connectManual } from "../channels/whatsapp/connect/manual";
+import { disconnectConnection, recheckConnection } from "../channels/whatsapp/connect/recheck";
 import { getWebhookConfig } from "../channels/whatsapp/connect/webhook-token";
 import { handleWhatsAppHandshake } from "../channels/whatsapp/verify-challenge";
 import { setConversationMode } from "../conversations/mode";
@@ -143,6 +144,16 @@ const whatsappManualConnect = tenantRoute(
   },
   { status: 201 },
 );
+// no body → 200 connection. Owner or admin of the business that owns it. The browser sends a POST with no body, so (like the gap routes) these
+// authenticate themselves and let the app turn a thrown error into the envelope.
+const whatsappRecheck: RouteHandler = async (request, deps, params) => {
+  const { context } = await requireTenant(request, deps.userClient);
+  return Response.json(await recheckConnection(context, params.id));
+};
+const whatsappDisconnect: RouteHandler = async (request, deps, params) => {
+  const { context } = await requireTenant(request, deps.userClient);
+  return Response.json(await disconnectConnection(context, params.id));
+};
 // { tenantId, ... } → 201 connection. Platform admin only (docs/whatsapp-connection-contract.md).
 const adminManualConnect = adminRoute(({ admin, body }) => connectManual(body, admin.actor), { status: 201 });
 
@@ -165,6 +176,8 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/kb/gaps/:id/dismiss", browser: true, methods: { POST: kbDismissGap } },
   { path: "/api/whatsapp/webhook-config", browser: true, methods: { GET: (request, deps) => whatsappWebhookConfig(request, deps.userClient) } },
   { path: "/api/whatsapp/manual", browser: true, methods: { POST: (request, deps) => whatsappManualConnect(request, deps.userClient) } },
+  { path: "/api/whatsapp/connections/:id/recheck", browser: true, methods: { POST: whatsappRecheck } },
+  { path: "/api/whatsapp/connections/:id/disconnect", browser: true, methods: { POST: whatsappDisconnect } },
   { path: "/api/admin/whatsapp/manual", browser: true, methods: { POST: (request, deps) => adminManualConnect(request, deps.userClient) } },
   // The two buttons of a staff alert (module 6). No login: the signed token says who tapped and which handoff. Answers are redirects or friendly pages.
   { path: "/h/:token", secretParams: ["token"], methods: { GET: (request, _deps, params) => handleHandoffLink(request, { token: params.token }) } },

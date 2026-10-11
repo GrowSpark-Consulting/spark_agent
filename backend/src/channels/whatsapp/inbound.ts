@@ -5,6 +5,7 @@ import { stripUnsafeCharacters } from "../../lib/text";
 import { storeEchoedMessage, type EchoArgs, type EchoOutcome } from "./echo";
 import * as db from "./inbound-db";
 import { WebhookDbError, type ConnectionRow, type StoreInboundArgs } from "./inbound-db";
+import { noteWebhookSeen } from "./connect/webhook-seen";
 import { parseWebhook, type ParsedMessage } from "./parse";
 import { verifySignature } from "./signature";
 import { supabaseAdmin } from "../../lib/supabase-admin";
@@ -69,6 +70,11 @@ export interface WebhookDeps {
    */
   storeEchoedMessage?: (args: EchoArgs) => Promise<EchoOutcome>;
   sendEvent: (event: { id: string; name: string; data: Record<string, string> }) => Promise<unknown>;
+  /**
+   * A request signed with a manual_byo connection's own app secret named this connection: proof for its webhook check (connect/webhook-seen.ts).
+   * Best effort, never awaited by the answer. Optional so that a caller built before it still works.
+   */
+  noteWebhookSeen?: (tenantId: string, connectionId: string) => Promise<void>;
 }
 
 // Looked up when called (not when the module loads), so a test that replaces inbound-db or the queue is honoured.
@@ -83,6 +89,7 @@ const realDeps = (): WebhookDeps => ({
   updateConnectionHealth: db.updateConnectionHealth,
   storeEchoedMessage: (args) => storeEchoedMessage(supabaseAdmin(), args),
   sendEvent: (event) => inngest.send(event),
+  noteWebhookSeen: (tenantId, connectionId) => noteWebhookSeen(tenantId, connectionId),
 });
 
 export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps = realDeps()): Promise<Response> {
@@ -151,6 +158,11 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
     connections = new Map((await deps.findConnections(ids)).map((c) => [c.phoneNumberId, c]));
   } catch (err) {
     fail(err);
+  }
+  if (deps.noteWebhookSeen) {
+    for (const connection of connections.values()) {
+      if (byoVerified.has(connection.id)) void deps.noteWebhookSeen(connection.tenantId, connection.id).catch(() => undefined);
+    }
   }
 
   // Which connection may act on an item: signed by our app, for this account, and active.

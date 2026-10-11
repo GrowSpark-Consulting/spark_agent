@@ -144,8 +144,7 @@ Built for the wizard's "Use my own Meta app" path; they go beyond the admin-only
 - `POST /api/admin/whatsapp/manual` (platform admin) now exists and shares the same service.
 - Meta's GET handshake accepts the platform token or any business's own verify token. A POST signed with a
   `manual_byo` connection's own app secret is accepted for that connection's numbers only.
-- `last_check` for a manual connection: `token_permissions` and `number_registered` are checked against the
-  Graph API (UNVERIFIED against a live account); `webhook_subscribed` and the rest are `not_verified`.
+- `last_check` for a manual connection has all six checks (Day 5): `token_permissions` (both WhatsApp permissions, via `debug_token`), `number_registered` (in the account and on the Cloud API), `webhook_subscribed` (an app is subscribed and, for `manual_byo`, a webhook signed with the connection's own app secret has arrived; until then `not_verified`), `display_name_approved`, `payment_method` (`warn` when missing) and `test_message_delivered` (a `test_message` to the owner's number through `notify.send`, run once the number is active; `not_verified` if the owner has not written to the number in 24 hours; it never changes the status). A check Meta does not answer is `not_verified`. All of it is UNVERIFIED against a live account.
 
 ### Recheck and disconnect
 

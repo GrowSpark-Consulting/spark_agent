@@ -6,6 +6,9 @@ import { serverEnv } from "../../../lib/env";
 import { writeAudit, type AuditEntry } from "../../../lib/audit";
 import { AppError, zodFieldErrors } from "../../../lib/errors";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { graph as realGraph, runGraphChecks, withTestMessage, type Check, type Graph, type LastCheck, type NumberFacts } from "./checks";
+import { checkTestMessage } from "./test-message-check";
+import { webhookWasSeen } from "./webhook-seen";
 
 // Manual connection (method `manual_byo`): a business that runs its own Meta app gives us the account id,
 // the number's id, a token and the app secret (docs/whatsapp-connection-contract.md, "Admin: manual
@@ -24,10 +27,8 @@ const StrictInput = ManualConnectInput.extend({
   appSecret: secretText("Enter the app secret without spaces.", 256),
 });
 
-export type CheckStatus = "pass" | "warn" | "fail" | "not_verified" | "skipped";
-export type CheckKey = "token_permissions" | "number_registered" | "webhook_subscribed" | "display_name_approved" | "payment_method" | "test_message_delivered";
-export type Check = { key: CheckKey; status: CheckStatus; message: string; checked_at: string };
-export type LastCheck = { ran_at: string; overall: "pass" | "warn" | "fail"; checks: Check[] };
+// The six checks are in checks.ts (and the sixth in test-message-check.ts); the types are kept importable from here.
+export type { Check, CheckKey, CheckStatus, LastCheck } from "./checks";
 
 export type ConnectionRecord = {
   id: string;
@@ -53,9 +54,11 @@ export interface ManualConnectDb {
   channelIdFor(tenantId: string): Promise<string>;
   /** Writes the record (insert, or update when `replace` is true) and returns the public row. */
   save(record: ConnectionRecord, replace: boolean): Promise<unknown>;
+  /** Replaces `last_check` of one connection of this business (the sixth check, once the number is active). */
+  updateLastCheck(connectionId: string, tenantId: string, lastCheck: LastCheck): Promise<void>;
 }
 
-export type NumberInfo = { displayPhone: string | null; verifiedName: string | null; qualityRating: string | null };
+export type NumberInfo = { displayPhone: string | null; verifiedName: string | null; qualityRating: string | null; facts?: NumberFacts };
 export type MetaProbe =
   | { state: "ok"; info: NumberInfo; numberInAccount: boolean }
   | { state: "rejected" } // Meta answered, and the token or ids are not accepted
@@ -69,6 +72,12 @@ export type ManualConnectDeps = {
   newId: () => string;
   /** Records who connected the number. Never given a secret. */
   audit: (entry: AuditEntry) => Promise<void>;
+  /** Meta's Graph API, for the checks after the first read (checks.ts). */
+  graph: Graph;
+  /** Whether a signed webhook from this connection's own app has arrived (webhook-seen.ts). */
+  webhookSeen: (tenantId: string, connectionId: string) => Promise<boolean>;
+  /** The sixth check: a test message to the owner's number, through notify.send (test-message-check.ts). */
+  testMessage: (tenantId: string, actor: string) => Promise<Check>;
 };
 
 /**
@@ -86,7 +95,7 @@ export async function probeMeta(args: { wabaId: string; phoneNumberId: string; t
     return { ok: res.ok, status: res.status, body: (await res.json().catch(() => null)) as unknown };
   };
   try {
-    const number = await get(`${args.phoneNumberId}?fields=display_phone_number,verified_name,quality_rating`);
+    const number = await get(`${args.phoneNumberId}?fields=display_phone_number,verified_name,quality_rating,name_status,platform_type`);
     if (number.status >= 500 || number.status === 429) return { state: "unreachable" };
     if (!number.ok) return { state: "rejected" };
     const n = (number.body ?? {}) as Record<string, unknown>;
@@ -97,41 +106,17 @@ export async function probeMeta(args: { wabaId: string; phoneNumberId: string; t
     const list = account.ok ? ((account.body as { data?: { id?: unknown }[] } | null)?.data ?? []) : [];
     return {
       state: "ok",
-      info: { displayPhone: text(n.display_phone_number), verifiedName: text(n.verified_name), qualityRating: text(n.quality_rating) },
+      info: {
+        displayPhone: text(n.display_phone_number),
+        verifiedName: text(n.verified_name),
+        qualityRating: text(n.quality_rating),
+        facts: { nameStatus: text(n.name_status), platformType: text(n.platform_type) },
+      },
       numberInAccount: list.some((item) => String(item?.id) === args.phoneNumberId),
     };
   } catch {
     return { state: "unreachable" };
   }
-}
-
-const SAFE = {
-  tokenPass: "Meta accepted the access token for this number.",
-  tokenFail: "Meta did not accept the access token or the Phone number ID. Check both, and that the token can manage this WhatsApp account.",
-  numberPass: "The number belongs to this WhatsApp Business Account.",
-  numberFail: "This number isn't in that WhatsApp Business Account. Check the Account ID and the Phone number ID.",
-  webhook: "Waiting for Meta: this is confirmed when your app's webhook delivers a first message to Spark Agent.",
-  later: "Not checked yet.",
-} as const;
-
-function buildChecks(probe: Extract<MetaProbe, { state: "ok" | "rejected" }>, at: string): LastCheck {
-  const ok = probe.state === "ok";
-  const registered = ok && probe.numberInAccount;
-  const checks: Check[] = [
-    { key: "token_permissions", status: ok ? "pass" : "fail", message: ok ? SAFE.tokenPass : SAFE.tokenFail, checked_at: at },
-    {
-      key: "number_registered",
-      status: !ok ? "skipped" : registered ? "pass" : "fail",
-      message: !ok ? SAFE.later : registered ? SAFE.numberPass : SAFE.numberFail,
-      checked_at: at,
-    },
-    { key: "webhook_subscribed", status: "not_verified", message: SAFE.webhook, checked_at: at },
-    { key: "display_name_approved", status: "not_verified", message: SAFE.later, checked_at: at },
-    { key: "payment_method", status: "not_verified", message: SAFE.later, checked_at: at },
-    { key: "test_message_delivered", status: "not_verified", message: SAFE.later, checked_at: at },
-  ];
-  const overall = checks.some((c) => c.status === "fail") ? "fail" : checks.some((c) => c.status === "warn" || c.status === "not_verified") ? "warn" : "pass";
-  return { ran_at: at, overall, checks };
 }
 
 /**
@@ -142,7 +127,17 @@ function buildChecks(probe: Extract<MetaProbe, { state: "ok" | "rejected" }>, at
 export async function connectManual(
   rawInput: unknown,
   actor: string,
-  deps: ManualConnectDeps = { db: realDb(), probe: probeMeta, encrypt: encryptSecret, now: () => new Date(), newId: randomUUID, audit: writeAudit },
+  deps: ManualConnectDeps = {
+    db: realDb(),
+    probe: probeMeta,
+    encrypt: encryptSecret,
+    now: () => new Date(),
+    newId: randomUUID,
+    audit: writeAudit,
+    graph: realGraph,
+    webhookSeen: (tenantId, connectionId) => webhookWasSeen(supabaseAdmin(), tenantId, connectionId),
+    testMessage: (tenantId, actor) => checkTestMessage(tenantId, actor),
+  },
 ): Promise<WhatsAppConnectionPublic> {
   const parsed = StrictInput.safeParse(rawInput);
   if (!parsed.success) throw new AppError("validation_failed", "Some details need fixing.", zodFieldErrors(parsed.error));
@@ -160,9 +155,22 @@ export async function connectManual(
   const probe = await deps.probe({ wabaId: input.wabaId, phoneNumberId: input.phoneNumberId, token: input.token });
   if (probe.state === "unreachable") throw new AppError("upstream_failed", "We couldn't reach Meta to check these details. Try again in a moment.");
 
-  const lastCheck = buildChecks(probe, deps.now().toISOString());
   const id = existing?.id ?? deps.newId();
   const info = probe.state === "ok" ? probe.info : { displayPhone: null, verifiedName: null, qualityRating: null };
+  // The five checks that need only Meta's answers. The sixth (a test message) waits until the number is saved as active.
+  const lastCheck = await runGraphChecks(
+    {
+      wabaId: input.wabaId,
+      token: input.token,
+      method: "manual_byo",
+      accepted: probe.state === "ok",
+      inAccount: probe.state === "ok" && probe.numberInAccount,
+      facts: { nameStatus: info.facts?.nameStatus ?? null, platformType: info.facts?.platformType ?? null },
+      webhookSeen: () => deps.webhookSeen(input.tenantId, id),
+    },
+    deps.graph,
+    deps.now(),
+  );
 
   const record: ConnectionRecord = {
     id,
@@ -198,7 +206,17 @@ export async function connectManual(
   } catch {
     console.error("[whatsapp-connect] audit write failed");
   }
-  return saved.data;
+
+  // The sixth check, only for a number that is active (notify.send refuses any other). It never changes the status; a failure here keeps the connection as saved.
+  if (saved.data.status !== "active") return saved.data;
+  try {
+    const withSixth = withTestMessage(lastCheck, await deps.testMessage(saved.data.tenant_id, actor));
+    await deps.db.updateLastCheck(saved.data.id, saved.data.tenant_id, withSixth);
+    return { ...saved.data, last_check: withSixth };
+  } catch {
+    console.error("[whatsapp-connect] the test message check could not be recorded");
+    return saved.data;
+  }
 }
 
 const PUBLIC_COLUMNS =
@@ -255,6 +273,10 @@ function realDb(): ManualConnectDb {
       const row = await db.from("whatsapp_connections").select(PUBLIC_COLUMNS).eq("id", r.id).eq("tenant_id", r.tenantId).single();
       if (row.error) throw fail("read the connection");
       return row.data;
+    },
+    async updateLastCheck(connectionId, tenantId, lastCheck) {
+      const { error } = await db.from("whatsapp_connections").update({ last_check: lastCheck }).eq("id", connectionId).eq("tenant_id", tenantId);
+      if (error) throw fail("save the check");
     },
   };
 }
