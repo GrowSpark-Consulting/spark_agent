@@ -41,3 +41,15 @@ export function ownNumberGreeting(language: string | null, who: Pick<Handler, "n
   const template = GREETING[textLanguage(language)];
   return fill(first ? template.withName : template.plain, { name: who.name, business: who.business, customer: first });
 }
+
+const EXTERNAL: Record<TextLanguage, string> = {
+  en: "{name} is looking after your chat and will reply to you shortly.",
+  ta: "{name} உங்கள் உரையாடலைப் பார்த்துக்கொள்கிறார், விரைவில் உங்களுக்குப் பதிலளிப்பார்.",
+  "ta-en": "{name} ungal chat-a paathukkitu irukkanga, seekkiram reply pannuvanga.",
+  hi: "{name} आपकी चैट देख रहे हैं और जल्द ही आपको जवाब देंगे।",
+};
+
+/** What a customer reads when they write again while a staff member handles the chat from their own number (Raja, 11 Oct, question 4). */
+export function externalNotice(language: string | null, name: string): string {
+  return fill(EXTERNAL[textLanguage(language)], { name });
+}

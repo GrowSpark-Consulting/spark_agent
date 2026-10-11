@@ -1,3 +1,4 @@
+import { tellCustomerTeamIsHandling } from "../agent/handoff/external-notice";
 import { MESSAGE_RECEIVED_EVENT, MessageReceived } from "../agent/pipeline/events";
 import { answerRunThatGaveUp } from "../agent/pipeline/give-up";
 import { runTurn } from "../agent/pipeline/process-message";
@@ -62,6 +63,11 @@ export const processMessage = inngest.createFunction(
         if (ids.success) {
           const stop = await stopCheckAfterGate(steps, ids.data, replyDeps(store));
           if (stop.status === "opted_out") console.log(`[pipeline] opted out while gated off (confirmation ${stop.confirmation})`);
+          // A chat a team member handles from their own number: the customer hears so, at most every 30 minutes (agent/handoff/external-notice.ts).
+          else if (turn.reason === "not_ai_mode") {
+            const told = await step.run("external-notice", () => tellCustomerTeamIsHandling(ids.data));
+            console.log(`[pipeline] external notice: ${told.status === "told" ? "told" : told.reason}`);
+          }
         }
       }
       return turn;
