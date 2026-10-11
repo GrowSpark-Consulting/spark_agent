@@ -1,0 +1,198 @@
+import type { TenantContext } from "@pakka/types";
+import { describe, expect, it, vi } from "vitest";
+import { AppError } from "../../../lib/errors";
+import { fakeTables, type Row } from "../../../test-support/fake-tables";
+import type { Check, Graph, GraphAnswer } from "./checks";
+import type { MetaProbe } from "./manual";
+import { disconnectConnection, recheckConnection, type RecheckDeps } from "./recheck";
+
+// Recheck and disconnect (Day 5): who may, what the status does, what Meta is asked, and that a number never ends up stuck in `validating`.
+
+const A = "e0000000-0000-4000-8000-00000000000a";
+const B = "e0000000-0000-4000-8000-00000000000b";
+const USER = "f1000000-0000-4000-8000-000000000001";
+const CONN = "d4000000-0000-4000-8000-0000000000a1";
+const NOW = new Date("2026-10-12T09:00:00.000Z");
+const TOKEN = "EAAB-synthetic-access-token";
+const BOTH = ["whatsapp_business_management", "whatsapp_business_messaging"];
+
+const context = (role: "owner" | "admin" | "staff", tenantId = A): TenantContext =>
+  ({ user: { id: USER, email: "o@example.test" }, tenant: { id: tenantId, name: "Sunrise Homes" }, role }) as unknown as TenantContext;
+
+const answered = (body: unknown, ok = true, status = 200): GraphAnswer => ({ state: "answered", ok, status, body });
+const healthy: Graph = async (method, path) => {
+  if (method === "DELETE") return answered({ success: true });
+  if (path.startsWith("debug_token")) return answered({ data: { is_valid: true, scopes: BOTH } });
+  if (path.endsWith("/subscribed_apps")) return answered({ data: [{ id: "1" }] });
+  return answered({ primary_funding_id: "1" });
+};
+const GOOD: MetaProbe = { state: "ok", numberInAccount: true, info: { displayPhone: "+91 98765 43210", verifiedName: "Skyline Homes", qualityRating: "GREEN", facts: { nameStatus: "APPROVED", platformType: "CLOUD_API" } } };
+const SIXTH: Check = { key: "test_message_delivered", status: "pass", message: "sent", checked_at: NOW.toISOString() };
+
+const row = (over: Row = {}): Row => ({
+  id: CONN, tenant_id: A, method: "manual_byo", waba_id: "100", phone_number_id: "200", display_phone: null, verified_name: null, coexistence: false, status: "active",
+  last_check: {}, quality_rating: null, messaging_limit: null, created_at: "2026-10-01T00:00:00Z", token_enc: "enc:token", ...over,
+});
+
+function world(rows: Row[] = [row()], over: { probe?: MetaProbe; graph?: Graph; webhookSeen?: boolean; decrypt?: () => string } = {}) {
+  const t = fakeTables({ whatsapp_connections: rows });
+  const audits: { action: string; diff: unknown; actor: string; tenantId: string | null }[] = [];
+  const graph = vi.fn(over.graph ?? healthy);
+  const deps: RecheckDeps = {
+    db: t.db,
+    probe: vi.fn(async () => over.probe ?? GOOD),
+    graph,
+    decrypt: (over.decrypt ?? (() => TOKEN)) as RecheckDeps["decrypt"],
+    webhookSeen: async () => over.webhookSeen ?? true,
+    testMessage: vi.fn(async () => SIXTH),
+    audit: vi.fn(async (entry) => {
+      audits.push({ action: entry.action, diff: entry.diff, actor: entry.actor, tenantId: entry.tenantId });
+    }),
+    now: () => NOW,
+  };
+  return { ...t, deps, audits, graph, conn: () => t.tables.whatsapp_connections[0] };
+}
+const codeOf = async (p: Promise<unknown>) => ((await p.then(() => null, (e: unknown) => e)) as AppError | null)?.code;
+
+describe("recheck", () => {
+  it("runs the checks again, saves them, and leaves an active number active", async () => {
+    const w = world();
+    const result = await recheckConnection(context("owner"), CONN, w.deps);
+    expect(result.status).toBe("active");
+    expect(w.conn()).toMatchObject({ status: "active", display_phone: "+91 98765 43210", verified_name: "Skyline Homes", quality_rating: "GREEN" });
+    const last = w.conn().last_check as { ran_at: string; overall: string; checks: { key: string; status: string }[] };
+    expect(last.ran_at).toBe(NOW.toISOString());
+    expect(last.checks.map((c) => `${c.key}:${c.status}`)).toEqual([
+      "token_permissions:pass", "number_registered:pass", "webhook_subscribed:pass", "display_name_approved:pass", "payment_method:pass", "test_message_delivered:pass",
+    ]);
+    expect(last.overall).toBe("pass");
+  });
+
+  it("an admin may too; staff may not, and nothing is read or changed for them", async () => {
+    expect((await recheckConnection(context("admin"), CONN, world().deps)).id).toBe(CONN);
+    const w = world();
+    expect(await codeOf(recheckConnection(context("staff"), CONN, w.deps))).toBe("forbidden");
+    expect(w.calls).toEqual([]);
+  });
+
+  it("a failing check makes the number `failed`, with the reason, and sends no test message", async () => {
+    const w = world([row()], { probe: { state: "rejected" } });
+    const result = await recheckConnection(context("owner"), CONN, w.deps);
+    expect(result.status).toBe("failed");
+    expect(w.conn().status).toBe("failed");
+    expect((w.conn().last_check as { checks: { status: string }[] }).checks[0].status).toBe("fail");
+    expect(w.deps.testMessage).not.toHaveBeenCalled();
+  });
+
+  it("a failed number that is now right becomes active again", async () => {
+    const w = world([row({ status: "failed" })]);
+    expect((await recheckConnection(context("owner"), CONN, w.deps)).status).toBe("active");
+  });
+
+  it("a number whose test message could not be sent stays active with a note, never failed", async () => {
+    const w = world();
+    (w.deps.testMessage as ReturnType<typeof vi.fn>).mockResolvedValue({ ...SIXTH, status: "not_verified", message: "later" });
+    const result = await recheckConnection(context("owner"), CONN, w.deps);
+    expect(result.status).toBe("active");
+    expect((w.conn().last_check as { overall: string }).overall).toBe("warn");
+  });
+
+  it("goes through `validating`, and never leaves it behind when Meta cannot be reached: the old status comes back", async () => {
+    const seen: unknown[] = [];
+    const w = world([row()], { probe: { state: "unreachable" } });
+    w.deps.probe = vi.fn(async () => {
+      seen.push(w.conn().status);
+      return { state: "unreachable" } as MetaProbe;
+    });
+    expect(await codeOf(recheckConnection(context("owner"), CONN, w.deps))).toBe("upstream_failed");
+    expect(seen).toEqual(["validating"]);
+    expect(w.conn().status).toBe("active");
+  });
+
+  it("the old status also comes back when the saved token cannot be read, with a message that says to connect again", async () => {
+    const w = world([row({ status: "failed" })], { decrypt: () => { throw new Error("bad key"); } });
+    const error = (await recheckConnection(context("owner"), CONN, w.deps).then(() => null, (e: unknown) => e)) as AppError;
+    expect(error.code).toBe("upstream_failed");
+    expect(error.message).toContain("Connect the number again");
+    expect(w.conn().status).toBe("failed");
+  });
+
+  it("a check already running is not started twice", async () => {
+    const w = world([row({ status: "validating" })]);
+    expect(await codeOf(recheckConnection(context("owner"), CONN, w.deps))).toBe("conflict");
+    expect(w.deps.probe).not.toHaveBeenCalled();
+  });
+
+  it("a disconnected number is not rechecked", async () => {
+    const w = world([row({ status: "disconnected" })]);
+    expect(await codeOf(recheckConnection(context("owner"), CONN, w.deps))).toBe("conflict");
+  });
+
+  it("another business's connection, an unknown id and one of our own platform numbers are refused", async () => {
+    expect(await codeOf(recheckConnection(context("owner", B), CONN, world().deps))).toBe("not_found");
+    expect(await codeOf(recheckConnection(context("owner"), "d4000000-0000-4000-8000-0000000000ff", world().deps))).toBe("not_found");
+    expect(await codeOf(recheckConnection(context("owner"), CONN, world([row({ method: "platform" })]).deps))).toBe("forbidden");
+  });
+
+  it("every query names the business, and the token and its secret never appear in the answer or the audit row", async () => {
+    const w = world();
+    const result = await recheckConnection(context("owner"), CONN, w.deps);
+    expect(w.calls.every((c) => c.filters.some((f) => f.column === "tenant_id" && f.value === A))).toBe(true);
+    expect(JSON.stringify(result)).not.toMatch(/token_enc|enc:token|app_secret/);
+    expect(JSON.stringify(w.audits)).not.toContain(TOKEN);
+  });
+
+  it("is audited with who and what changed", async () => {
+    const w = world([row({ status: "failed" })]);
+    await recheckConnection(context("owner"), CONN, w.deps);
+    expect(w.audits).toEqual([{ action: "whatsapp_connection.rechecked", actor: USER, tenantId: A, diff: { from: "failed", to: "active" } }]);
+  });
+});
+
+describe("disconnect", () => {
+  it("marks the number disconnected (which is what pauses the AI on it) and takes our app off the account's webhooks", async () => {
+    const w = world();
+    const result = await disconnectConnection(context("owner"), CONN, w.deps);
+    expect(result.status).toBe("disconnected");
+    expect(w.conn().status).toBe("disconnected");
+    expect(w.graph).toHaveBeenCalledWith("DELETE", "100/subscribed_apps", TOKEN);
+    expect(w.audits).toEqual([{ action: "whatsapp_connection.disconnected", actor: USER, tenantId: A, diff: { from: "active", to: "disconnected", unsubscribed: true } }]);
+  });
+
+  it("works from any live status", async () => {
+    for (const status of ["pending", "validating", "failed"]) {
+      expect((await disconnectConnection(context("owner"), CONN, world([row({ status })]).deps)).status).toBe("disconnected");
+    }
+  });
+
+  it("stands even when the unsubscribe cannot be done (a revoked token, Meta down, a key that does not open)", async () => {
+    for (const w of [
+      world([row()], { graph: async () => answered({}, false, 401) }),
+      world([row()], { graph: async () => ({ state: "unreachable" }) }),
+      world([row()], { decrypt: () => { throw new Error("bad key"); } }),
+    ]) {
+      expect((await disconnectConnection(context("owner"), CONN, w.deps)).status).toBe("disconnected");
+      expect(w.audits[0].diff).toMatchObject({ unsubscribed: false });
+    }
+  });
+
+  it("done twice gives the same answer and does nothing the second time", async () => {
+    const w = world([row({ status: "disconnected" })]);
+    expect((await disconnectConnection(context("owner"), CONN, w.deps)).status).toBe("disconnected");
+    expect(w.graph).not.toHaveBeenCalled();
+    expect(w.audits).toEqual([]);
+  });
+
+  it("staff may not, another business's connection is not found, our own platform number is refused", async () => {
+    expect(await codeOf(disconnectConnection(context("staff"), CONN, world().deps))).toBe("forbidden");
+    expect(await codeOf(disconnectConnection(context("owner", B), CONN, world().deps))).toBe("not_found");
+    expect(await codeOf(disconnectConnection(context("admin"), CONN, world([row({ method: "platform" })]).deps))).toBe("forbidden");
+  });
+
+  it("a number that is disconnected is no longer one a message goes to or comes from: both sides read status = active", async () => {
+    // The proof is in the code that sends and receives, not here: this pins the value they compare with.
+    const w = world();
+    const result = await disconnectConnection(context("owner"), CONN, w.deps);
+    expect(result.status).not.toBe("active");
+  });
+});

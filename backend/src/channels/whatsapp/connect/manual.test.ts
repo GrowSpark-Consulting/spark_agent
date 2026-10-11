@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { connectionSecretContext, decryptSecret, encryptSecret } from "../../../lib/crypto";
+import type { Check, Graph, GraphAnswer } from "./checks";
 import { connectManual, type ConnectionRecord, type ManualConnectDb, type MetaProbe } from "./manual";
 
 const KEY = { ENCRYPTION_KEY: randomBytes(32).toString("base64") };
@@ -18,12 +19,26 @@ const NEW_ID = "d0000000-0000-4000-8000-0000000000d1";
 const TOKEN = "EAAB-synthetic-access-token";
 const APP_SECRET = "synthetic0app0secret0value";
 const INPUT = { tenantId: A, wabaId: "100000000000001", phoneNumberId: "200000000000001", token: TOKEN, tokenType: "system_user", appSecret: APP_SECRET };
-const GOOD: MetaProbe = { state: "ok", numberInAccount: true, info: { displayPhone: "+91 98765 43210", verifiedName: "Skyline Homes", qualityRating: "GREEN" } };
+const GOOD: MetaProbe = {
+  state: "ok",
+  numberInAccount: true,
+  info: { displayPhone: "+91 98765 43210", verifiedName: "Skyline Homes", qualityRating: "GREEN", facts: { nameStatus: "APPROVED", platformType: "CLOUD_API" } },
+};
+const answered = (body: unknown): GraphAnswer => ({ state: "answered", ok: true, status: 200, body });
+/** Meta, as a healthy account answers: both permissions, an app subscribed, a payment method. */
+const healthyGraph: Graph = async (_method, path) => {
+  if (path.startsWith("debug_token")) return answered({ data: { is_valid: true, scopes: ["whatsapp_business_management", "whatsapp_business_messaging"] } });
+  if (path.endsWith("/subscribed_apps")) return answered({ data: [{ id: "1" }] });
+  if (path.includes("primary_funding_id")) return answered({ primary_funding_id: "123" });
+  return { state: "unreachable" };
+};
+const SIXTH_OK: Check = { key: "test_message_delivered", status: "pass", message: "A test message was sent to the owner's number.", checked_at: "2026-10-09T00:00:00.000Z" };
 
 type Existing = { id: string; tenantId: string; channelId: string; method: string; status: string };
 
-function setup(probe: MetaProbe = GOOD, existing: Existing | null = null) {
+function setup(probe: MetaProbe = GOOD, existing: Existing | null = null, over: { graph?: Graph; webhookSeen?: boolean; sixth?: Check } = {}) {
   const saved: { record: ConnectionRecord; replace: boolean }[] = [];
+  const updates: { id: string; tenantId: string; lastCheck: unknown }[] = [];
   const db: ManualConnectDb = {
     async tenantExists(id) {
       return id === A || id === B;
@@ -42,11 +57,25 @@ function setup(probe: MetaProbe = GOOD, existing: Existing | null = null) {
         last_check: record.lastCheck, quality_rating: record.qualityRating, messaging_limit: null, created_at: "2026-10-09T00:00:00Z",
       };
     },
+    async updateLastCheck(id, tenantId, lastCheck) {
+      updates.push({ id, tenantId, lastCheck });
+    },
   };
   const probeFn = vi.fn(async () => probe);
   const audit = vi.fn(async () => {});
-  const deps = { db, probe: probeFn, audit, encrypt: encryptSecret, now: () => new Date("2026-10-09T00:00:00Z"), newId: () => NEW_ID };
-  return { saved, probeFn, audit, run: (input: unknown = INPUT, actor = "user-1") => connectManual(input, actor, deps) };
+  const testMessage = vi.fn(async () => over.sixth ?? SIXTH_OK);
+  const deps = {
+    db,
+    probe: probeFn,
+    audit,
+    encrypt: encryptSecret,
+    now: () => new Date("2026-10-09T00:00:00Z"),
+    newId: () => NEW_ID,
+    graph: over.graph ?? healthyGraph,
+    webhookSeen: async () => over.webhookSeen ?? true,
+    testMessage,
+  };
+  return { saved, updates, testMessage, probeFn, audit, run: (input: unknown = INPUT, actor = "user-1") => connectManual(input, actor, deps) };
 }
 
 describe("connectManual", () => {
@@ -77,9 +106,8 @@ describe("connectManual", () => {
     const { last_check } = await s.run();
     const checks = (last_check as { checks: { key: string; status: string }[]; overall: string }).checks;
     expect(checks.map((c) => c.key)).toEqual(["token_permissions", "number_registered", "webhook_subscribed", "display_name_approved", "payment_method", "test_message_delivered"]);
-    expect(checks.slice(0, 2).map((c) => c.status)).toEqual(["pass", "pass"]);
-    expect(checks.find((c) => c.key === "webhook_subscribed")?.status).toBe("not_verified");
-    expect((last_check as { overall: string }).overall).toBe("warn");
+    expect(checks.map((c) => c.status)).toEqual(["pass", "pass", "pass", "pass", "pass", "pass"]);
+    expect((last_check as { overall: string }).overall).toBe("pass");
   });
 
   it("saves a failed connection, with safe words, when Meta rejects the token", async () => {
@@ -186,5 +214,66 @@ describe("connectManual", () => {
       expect(s.saved[0].replace).toBe(true);
       expect(s.saved[0].record.id).toBe("e0000000-0000-4000-8000-0000000000e1");
     });
+  });
+});
+
+describe("the six checks when a number is connected", () => {
+  const statusesOf = (last_check: unknown) => (last_check as { checks: { status: string }[] }).checks.map((c) => c.status);
+
+  it("records the sixth check, a test message to the owner, after the number is saved as active, and never before", async () => {
+    const s = setup();
+    const result = await s.run();
+    expect(result.status).toBe("active");
+    expect(s.testMessage).toHaveBeenCalledWith(A, "user-1");
+    expect(s.saved[0].record.lastCheck.checks[5].status).toBe("not_verified"); // as first saved
+    expect(s.updates).toEqual([{ id: NEW_ID, tenantId: A, lastCheck: expect.objectContaining({ overall: "pass" }) }]);
+    expect(statusesOf(result.last_check)[5]).toBe("pass");
+  });
+
+  it("a number that failed its checks is saved as failed and no test message is sent to anyone", async () => {
+    const s = setup({ state: "rejected" });
+    const result = await s.run();
+    expect(result.status).toBe("failed");
+    expect(s.testMessage).not.toHaveBeenCalled();
+    expect(s.updates).toEqual([]);
+  });
+
+  it("waits, without failing, for the webhook of the business's own app: the number is active with a warning", async () => {
+    const s = setup(GOOD, null, { webhookSeen: false });
+    const result = await s.run();
+    expect(result.status).toBe("active");
+    expect(statusesOf(result.last_check)).toEqual(["pass", "pass", "not_verified", "pass", "pass", "pass"]);
+    expect((result.last_check as { overall: string }).overall).toBe("warn");
+  });
+
+  it("a payment method that is missing is a warning and the number still connects", async () => {
+    const noPayment: Graph = async (m, path) => (path.includes("primary_funding_id") ? answered({ id: "1" }) : healthyGraph(m, path, ""));
+    const result = await setup(GOOD, null, { graph: noPayment }).run();
+    expect(result.status).toBe("active");
+    expect(statusesOf(result.last_check)[4]).toBe("warn");
+  });
+
+  it("a token without both WhatsApp permissions fails the connection, with the reason in plain words", async () => {
+    const weak: Graph = async (m, path) => (path.startsWith("debug_token") ? answered({ data: { is_valid: true, scopes: ["whatsapp_business_messaging"] } }) : healthyGraph(m, path, ""));
+    const result = await setup(GOOD, null, { graph: weak }).run();
+    expect(result.status).toBe("failed");
+    expect(JSON.stringify(result.last_check)).toContain("whatsapp_business_management");
+  });
+
+  it("a failure to record the sixth check keeps the connection as it was saved", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const s = setup();
+    s.testMessage.mockRejectedValue(new Error("down"));
+    const result = await s.run();
+    expect(result.status).toBe("active");
+    expect(s.updates).toEqual([]);
+  });
+
+  it("never puts the token or the app secret in anything it saves, audits or returns", async () => {
+    const s = setup();
+    const result = await s.run();
+    const everything = JSON.stringify([result, s.updates, s.audit.mock.calls]);
+    expect(everything).not.toContain(TOKEN);
+    expect(everything).not.toContain(APP_SECRET);
   });
 });

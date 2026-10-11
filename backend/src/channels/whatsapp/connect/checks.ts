@@ -1,0 +1,162 @@
+import { serverEnv } from "../../../lib/env";
+
+// The six validation checks of a WhatsApp connection (docs/whatsapp-connection-contract.md, `last_check`). Each one is a small function that answers with a
+// `Check`; `runGraphChecks` runs the five that need only Meta's answers (the sixth, the test message, goes through notify.send and is in test-message-check.ts).
+//
+// UNVERIFIED against a live Meta account: the Graph paths and field names below follow Meta's documentation as we understand it and must be confirmed with a
+// real number. A check that cannot be answered (Meta did not say, or the field is missing) is `not_verified`, never a guess and never a block (Day 5 fallback).
+// Every message is fixed text: nothing Meta said, and no token, is ever put in a message.
+
+export type CheckStatus = "pass" | "warn" | "fail" | "not_verified" | "skipped";
+export type CheckKey = "token_permissions" | "number_registered" | "webhook_subscribed" | "display_name_approved" | "payment_method" | "test_message_delivered";
+export type Check = { key: CheckKey; status: CheckStatus; message: string; checked_at: string };
+export type LastCheck = { ran_at: string; overall: "pass" | "warn" | "fail"; checks: Check[] };
+
+/** Meta's answer to one Graph call: a status and a body, or nothing at all when it could not be reached. */
+export type GraphAnswer = { state: "answered"; ok: boolean; status: number; body: unknown } | { state: "unreachable" };
+export type Graph = (method: "GET" | "DELETE", path: string, token: string) => Promise<GraphAnswer>;
+
+/** The real Graph client: the pinned version, the client's own token, ten seconds at most. */
+export const graph: Graph = async (method, path, token) => {
+  try {
+    const res = await fetch(`https://graph.facebook.com/${serverEnv().META_GRAPH_API_VERSION}/${path}`, {
+      method,
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const answer: GraphAnswer = { state: "answered", ok: res.ok, status: res.status, body: await res.json().catch(() => null) };
+    return answer.status >= 500 || answer.status === 429 ? { state: "unreachable" } : answer;
+  } catch {
+    return { state: "unreachable" };
+  }
+};
+
+export const REQUIRED_SCOPES = ["whatsapp_business_management", "whatsapp_business_messaging"] as const;
+
+export const SAFE = {
+  tokenPass: "Meta accepted the access token for this number.",
+  tokenFail: "Meta did not accept the access token or the Phone number ID. Check both, and that the token can manage this WhatsApp account.",
+  tokenScopes: "The access token is missing a WhatsApp permission. It needs both whatsapp_business_management and whatsapp_business_messaging.",
+  tokenUnknown: "Meta accepted the token, but we could not confirm which permissions it has.",
+  numberPass: "The number belongs to this WhatsApp Business Account and is set up for the Cloud API.",
+  numberNotInAccount: "This number isn't in that WhatsApp Business Account. Check the Account ID and the Phone number ID.",
+  numberNotCloud: "This number is not registered for the WhatsApp Cloud API yet. Register it in Meta's WhatsApp Manager, then check again.",
+  webhookNone: "Your Meta app is not subscribed to this account's webhooks. Subscribe it in your app's WhatsApp settings, then check again.",
+  webhookWaiting: "Your app is subscribed. This is confirmed when a webhook from your app arrives: send a message to this number from a phone, or use Test in Meta's webhook settings, then check again.",
+  webhookPass: "Your app is subscribed, and a signed webhook from it has arrived.",
+  webhookPassPlatform: "Spark Agent's app is subscribed to this account's webhooks.",
+  webhookUnknown: "We could not read this account's webhook subscriptions.",
+  namePass: "The display name is approved.",
+  namePending: "The display name is waiting for Meta's review. Messages can still be sent while it is reviewed.",
+  nameFail: "Meta declined the display name. Change it in WhatsApp Manager and submit it again.",
+  nameUnknown: "We could not read the display name's approval status.",
+  paymentPass: "A payment method is on this WhatsApp Business Account.",
+  paymentWarn: "No payment method is on this WhatsApp Business Account. The number is connected, but template messages will not send until one is added in Meta's billing settings.",
+  paymentUnknown: "We could not read this account's payment method.",
+  later: "Not checked yet.",
+} as const;
+
+const asRecord = (value: unknown): Record<string, unknown> => (typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {});
+const text = (value: unknown): string | null => (typeof value === "string" && value !== "" ? value : null);
+const at = (now: Date) => now.toISOString();
+const make = (key: CheckKey, status: CheckStatus, message: string, now: Date): Check => ({ key, status, message, checked_at: at(now) });
+
+/** What the number's own record says (one Graph read, made by `probeMeta` in manual.ts). */
+export interface NumberFacts {
+  nameStatus: string | null;
+  platformType: string | null;
+}
+
+/** 1. The token is valid and carries both WhatsApp permissions (`debug_token`, asked with the token itself). */
+export async function checkToken(args: { token: string; accepted: boolean }, call: Graph, now: Date): Promise<Check> {
+  if (!args.accepted) return make("token_permissions", "fail", SAFE.tokenFail, now);
+  const answer = await call("GET", `debug_token?input_token=${encodeURIComponent(args.token)}`, args.token);
+  if (answer.state !== "answered" || !answer.ok) return make("token_permissions", "not_verified", SAFE.tokenUnknown, now);
+  const data = asRecord(asRecord(answer.body).data);
+  if (data.is_valid === false) return make("token_permissions", "fail", SAFE.tokenFail, now);
+  if (!Array.isArray(data.scopes)) return make("token_permissions", "not_verified", SAFE.tokenUnknown, now);
+  const scopes = new Set(data.scopes.map(String));
+  return REQUIRED_SCOPES.every((s) => scopes.has(s)) ? make("token_permissions", "pass", SAFE.tokenPass, now) : make("token_permissions", "fail", SAFE.tokenScopes, now);
+}
+
+/** 2. The number is in the account and is registered for the Cloud API (`platform_type` of the number, when Meta says it). */
+export function checkNumber(args: { accepted: boolean; inAccount: boolean; facts: NumberFacts }, now: Date): Check {
+  if (!args.accepted) return make("number_registered", "skipped", SAFE.later, now);
+  if (!args.inAccount) return make("number_registered", "fail", SAFE.numberNotInAccount, now);
+  if (args.facts.platformType !== null && args.facts.platformType !== "CLOUD_API") return make("number_registered", "fail", SAFE.numberNotCloud, now);
+  return make("number_registered", "pass", SAFE.numberPass, now);
+}
+
+/**
+ * 3. Our app is subscribed to the account's webhooks (`subscribed_apps`). For `manual_byo` the client's own app is the one subscribed, so a signed webhook
+ * from it must also have arrived (`webhookSeen`); until then the check waits instead of failing.
+ */
+export async function checkWebhook(args: { wabaId: string; token: string; method: string; webhookSeen: () => Promise<boolean> }, call: Graph, now: Date): Promise<Check> {
+  const answer = await call("GET", `${args.wabaId}/subscribed_apps`, args.token);
+  if (answer.state !== "answered" || !answer.ok) return make("webhook_subscribed", "not_verified", SAFE.webhookUnknown, now);
+  const apps = asRecord(answer.body).data;
+  if (!Array.isArray(apps)) return make("webhook_subscribed", "not_verified", SAFE.webhookUnknown, now);
+  if (apps.length === 0) return make("webhook_subscribed", "fail", SAFE.webhookNone, now);
+  if (args.method !== "manual_byo") return make("webhook_subscribed", "pass", SAFE.webhookPassPlatform, now);
+  return (await args.webhookSeen()) ? make("webhook_subscribed", "pass", SAFE.webhookPass, now) : make("webhook_subscribed", "not_verified", SAFE.webhookWaiting, now);
+}
+
+/** 4. The display name is approved (`name_status` of the number). Waiting for review is a warning; a decline fails. */
+export function checkDisplayName(facts: NumberFacts, now: Date): Check {
+  const status = facts.nameStatus?.toUpperCase() ?? null;
+  if (status === null) return make("display_name_approved", "not_verified", SAFE.nameUnknown, now);
+  if (status === "APPROVED" || status === "AVAILABLE_WITHOUT_REVIEW") return make("display_name_approved", "pass", SAFE.namePass, now);
+  if (status === "DECLINED" || status === "REJECTED") return make("display_name_approved", "fail", SAFE.nameFail, now);
+  return make("display_name_approved", "warn", SAFE.namePending, now);
+}
+
+/** 5. A payment method is on the account (`primary_funding_id`). Missing is only a warning: the number still connects. */
+export async function checkPayment(args: { wabaId: string; token: string }, call: Graph, now: Date): Promise<Check> {
+  const answer = await call("GET", `${args.wabaId}?fields=primary_funding_id`, args.token);
+  if (answer.state !== "answered" || !answer.ok) return make("payment_method", "not_verified", SAFE.paymentUnknown, now);
+  return text(asRecord(answer.body).primary_funding_id) !== null ? make("payment_method", "pass", SAFE.paymentPass, now) : make("payment_method", "warn", SAFE.paymentWarn, now);
+}
+
+/** `fail` if any check fails; `warn` if none fail but any warns or is not verified; otherwise `pass`. */
+export function overallOf(checks: readonly Check[]): LastCheck["overall"] {
+  if (checks.some((c) => c.status === "fail")) return "fail";
+  return checks.some((c) => c.status === "warn" || c.status === "not_verified") ? "warn" : "pass";
+}
+
+/** The sixth check as it stands before the test message is tried. */
+export const testMessageNotYet = (now: Date): Check => make("test_message_delivered", "not_verified", SAFE.later, now);
+
+/** Puts a new sixth check into a result and works out `overall` again. */
+export function withTestMessage(last: LastCheck, check: Check): LastCheck {
+  const checks = last.checks.map((c) => (c.key === "test_message_delivered" ? check : c));
+  return { ...last, checks, overall: overallOf(checks) };
+}
+
+export interface GraphChecksInput {
+  wabaId: string;
+  token: string;
+  method: string;
+  /** The Graph answered for the number and the account (manual.ts `probeMeta`). */
+  accepted: boolean;
+  inAccount: boolean;
+  facts: NumberFacts;
+  webhookSeen: () => Promise<boolean>;
+}
+
+/** The first five checks, in the contract's order, and the sixth as "not checked yet". The checks are independent: one failing never hides another. */
+export async function runGraphChecks(input: GraphChecksInput, call: Graph, now: Date): Promise<LastCheck> {
+  const [token, webhook, payment] = await Promise.all([
+    checkToken({ token: input.token, accepted: input.accepted }, call, now),
+    input.accepted ? checkWebhook({ wabaId: input.wabaId, token: input.token, method: input.method, webhookSeen: input.webhookSeen }, call, now) : Promise.resolve(make("webhook_subscribed", "skipped", SAFE.later, now)),
+    input.accepted ? checkPayment({ wabaId: input.wabaId, token: input.token }, call, now) : Promise.resolve(make("payment_method", "skipped", SAFE.later, now)),
+  ]);
+  const checks: Check[] = [
+    token,
+    checkNumber({ accepted: input.accepted, inAccount: input.inAccount, facts: input.facts }, now),
+    webhook,
+    input.accepted ? checkDisplayName(input.facts, now) : make("display_name_approved", "skipped", SAFE.later, now),
+    payment,
+    testMessageNotYet(now),
+  ];
+  return { ran_at: at(now), overall: overallOf(checks), checks };
+}
