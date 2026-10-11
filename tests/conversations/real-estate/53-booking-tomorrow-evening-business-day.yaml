@@ -1,0 +1,20 @@
+name: Tomorrow evening is the business's tomorrow, not the server's
+description: "Day 3 exit test 5. It is 01:30 on Sunday 11 Oct in Chennai but still Saturday 10 Oct in UTC. 'Tomorrow evening' must be Monday 12 Oct (5:30 pm), not Sunday (6:00 pm). booking-timezone.test.ts runs this chat with the server's own time zone set to others."
+booking:
+  now: "2026-10-10T20:00:00.000Z"
+  timeZone: Asia/Kolkata
+  catalog:
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, area: Velachery } }
+  slots: ["2026-10-11T12:30:00.000Z", "2026-10-12T12:00:00.000Z", "2026-10-13T12:30:00.000Z"]
+turns:
+  - customer: "I would like to visit tomorrow evening, 2BHK in Velachery around 60 lakh, buying within 3 months"
+    mock:
+      extraction: { language: en, intent: book, fields: { config: 2BHK, location: Velachery, budget: 60L, timeline: 0-3m }, question: null, preferredTime: tomorrow evening }
+      reply: "I have Monday at 5:30 pm free for a site visit. Does that work for you?"
+    expect:
+      reply: { sent: true, contains: ["5:30 pm"], notContains: ["6:00 pm"] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: offer_slots

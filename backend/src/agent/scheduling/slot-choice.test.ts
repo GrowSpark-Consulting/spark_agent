@@ -128,6 +128,16 @@ describe("a plain yes", () => {
     expect(pick("ok")).toEqual({ kind: "unclear" });
     expect(pick("yes")).toEqual({ kind: "unclear" });
   });
+
+  it.each([["yes that works"], ["ok that works for me"], ["sounds good"], ["perfect, thanks"], ["yes, please go ahead"], ["great"], ["seri"], ["aama"], ["👍"], ["Yes!"]])("%s says yes to the one time offered", (text) => {
+    expect(pick(text, [offered[1]])).toEqual(chosen(0));
+    expect(pick(text)).toEqual({ kind: "unclear" }); // with three on offer, a yes does not say which
+  });
+
+  it("a yes with something else in it is not a plain yes", () => {
+    expect(pick("yes but what is the address", [offered[1]])).toEqual({ kind: "unclear" });
+    expect(pick("ok let me ask my wife first", [offered[1]])).toEqual({ kind: "unclear" });
+  });
 });
 
 describe("none of them", () => {

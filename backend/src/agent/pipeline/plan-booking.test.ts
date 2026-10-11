@@ -130,7 +130,7 @@ describe("the customer answers the offer", () => {
   });
 
   it("wants another time: the search is asked for again, from their words", () => {
-    expect(answer("none of these, can we do saturday morning").act).toEqual({ kind: "offer", serviceId: SERVICE, preferredText: "none of these, can we do saturday morning" });
+    expect(answer("none of these, can we do saturday morning").act).toEqual({ kind: "offer", serviceId: SERVICE, preferredText: "none of these, can we do saturday morning", exclude: OFFER.map((o) => o.start) });
     expect(answer("how about tuesday 4 pm").act).toMatchObject({ kind: "offer", preferredText: "how about tuesday 4 pm" });
   });
 

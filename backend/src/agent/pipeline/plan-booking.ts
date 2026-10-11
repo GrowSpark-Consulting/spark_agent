@@ -126,7 +126,10 @@ export function planBooking(args: Args): Plan | null {
         : pending({ kind: "book", serviceId: slot.serviceId, bookingKind, slot }, language);
     }
     if (pick.kind === "other") {
-      return pending({ kind: "offer", serviceId: offer[0].serviceId, preferredText: s.customerText, ...(s.rescheduleBookingId ? { rescheduleBookingId: s.rescheduleBookingId } : {}) }, language);
+      return pending(
+        { kind: "offer", serviceId: offer[0].serviceId, preferredText: s.customerText, exclude: offer.map((o) => o.start), ...(s.rescheduleBookingId ? { rescheduleBookingId: s.rescheduleBookingId } : {}) },
+        language,
+      );
     }
     // Not clear. A question the knowledge base can answer is answered first, and the offer waits for the next message.
     if (answerFirst) return null;

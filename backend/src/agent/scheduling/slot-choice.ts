@@ -22,12 +22,16 @@ export type SlotPick = { kind: "chosen"; index: number } | { kind: "other" } | {
 
 const MAX_TEXT = 300;
 const NEAR_MIN = 30;
+// An English ordinal counts as a place only where a customer names one ("the first", "option 2", "I will take the third", or the message starts with it):
+// "let me ask my wife first" uses the same word for something else, and must not pick a time.
+const LEAD = String.raw`(?:^|\b(?:the|option|number|slot|choice|take|pick|choose|go with|with|ok|okay|yes|yeah|please|prefer)\s+)`;
+const place = (words: string) => new RegExp(LEAD + String.raw`(?:${words})\b`);
 const ORDINALS: [RegExp, number][] = [
-  [/\b(?:first|1st|mudhal\w*|muthal\w*)\b|முதல்/u, 1],
-  [/\b(?:second|2nd|rend\w*vath\w*|rend\w*vadh\w*|irand\w*vath\w*|irand\w*vadh\w*)\b|இரண்டாவது/u, 2],
-  [/\b(?:third|3rd|moon\w*vath\w*|moon\w*vadh\w*|moondr\w*)\b|மூன்றாவது/u, 3],
-  [/\b(?:fourth|4th)\b/, 4],
-  [/\b(?:fifth|5th)\b/, 5],
+  [new RegExp(place("first|1st").source + "|" + String.raw`\b(?:mudhal\w*|muthal\w*)\b|முதல்`, "u"), 1],
+  [new RegExp(place("second|2nd").source + "|" + String.raw`\b(?:rend\w*vath\w*|rend\w*vadh\w*|irand\w*vath\w*|irand\w*vadh\w*)\b|இரண்டாவது`, "u"), 2],
+  [new RegExp(place("third|3rd").source + "|" + String.raw`\b(?:moon\w*vath\w*|moon\w*vadh\w*|moondr\w*)\b|மூன்றாவது`, "u"), 3],
+  [place("fourth|4th"), 4],
+  [place("fifth|5th"), 5],
 ];
 const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5 };
 
@@ -37,7 +41,9 @@ const NEGATIVE_WHOLE = /^\W*(?:no|nope|nahi|illa|illai|venam)\W*$/;
 const ANY = /\b(?:any(?: one| time| slot)?(?: is| will be| would be| works?| should)?(?: fine| ok| okay| good| works?)?|whichever(?: works| is fine| one)?|you pick|your choice|up to you|no preference)\W*$/;
 const EARLIEST = /\b(?:earliest|first available|soonest|as early as possible|asap)\b/;
 const LATEST = /\b(?:latest|later one|the later|last one|last|kadaisi|kadasi)\b|கடைசி/u;
-const YES = /^\W*(?:ok(?:ay)?|yes(?: please)?|yeah|yep|sure|fine|done|confirm(?:ed)?|sounds good|works(?: for me)?|that works)\W*$/;
+// A plain yes: nothing but agreeing words ("yes that works", "ok sounds good", "perfect, thanks"), so a yes with a question in it is not one.
+const AGREE = String.raw`(?:ok(?:ay)?|yes|yeah|yep|yup|sure|fine|done|confirm(?:ed)?|sounds good|works(?: for me| fine)?|that works(?: for me| fine)?|that is fine|that's fine|perfect|great|good|nice|please|thanks|thank you|go ahead|seri|sari|aama|aam|haan|han|ஆமா|ஆம்|சரி|👍)`;
+const YES = new RegExp(String.raw`^\W*(?:${AGREE}\W*)+$`, "u");
 
 const chosen = (index: number): SlotPick => ({ kind: "chosen", index });
 const UNCLEAR: SlotPick = { kind: "unclear" };

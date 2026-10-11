@@ -1,0 +1,21 @@
+name: A budget far below the cheapest home is told kindly, with no times offered
+description: "The pack's hard fail (a budget below the cheapest price), checked by code against the business's catalog. The lead is disqualified, the customer is not offered a visit, and nothing is booked."
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, area: Velachery } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+turns:
+  - customer: "I have a budget of 20 lakh for a 2BHK in Velachery"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { config: 2BHK, location: Velachery, budget: 20L }, question: null }
+      reply: "Thank you for asking. I am sorry, we do not have anything that fits right now."
+    expect:
+      reply: { sent: true, buttons: [], notContains: ["10:00 am", "3:00 pm", "5:30 pm"] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: disqualified
+      leadTemperature: disqualified
+      leadScore: 0

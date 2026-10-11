@@ -1,0 +1,29 @@
+name: A customer who says no to cancelling keeps the booking
+description: The question is asked, the answer is no, and nothing is cancelled.
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, area: Velachery } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+  existing: "2026-10-11T09:30:00.000Z"
+turns:
+  - customer: "I think I need to cancel the visit"
+    mock:
+      extraction: { language: en, intent: cancel, fields: {}, question: null, confidence: 0.9 }
+      reply: "I can do that. Shall I cancel your visit on Sunday at 3:00 pm? Yes or no?"
+    expect:
+      reply: { sent: true }
+      aiReplies: 1
+      calendar: { confirmed: ["2026-10-11T09:30:00.000Z"], cancelled: 0 }
+    mockOnly:
+      case: cancel_ask
+  - customer: "no, keep it"
+    mock:
+      extraction: { language: en, intent: give_details, fields: {}, question: null }
+      reply: "No problem, your visit on Sunday at 3:00 pm stays as it is."
+    expect:
+      reply: { sent: true }
+      aiReplies: 1
+      calendar: { confirmed: ["2026-10-11T09:30:00.000Z"], cancelled: 0 }
+    mockOnly:
+      case: kept

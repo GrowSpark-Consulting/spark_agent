@@ -1,0 +1,29 @@
+name: A cancellation is asked about first, and only a clear yes cancels it
+description: A first message that mentions cancelling changes nothing. The customer is asked, and the booking is cancelled only after yes.
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, area: Velachery } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+  existing: "2026-10-11T09:30:00.000Z"
+turns:
+  - customer: "I want to cancel my site visit"
+    mock:
+      extraction: { language: en, intent: cancel, fields: {}, question: null, confidence: 0.95 }
+      reply: "Sure. Do you want me to cancel your visit on Sunday at 3:00 pm? Please reply yes or no."
+    expect:
+      reply: { sent: true, contains: ["3:00 pm"] }
+      aiReplies: 1
+      calendar: { confirmed: ["2026-10-11T09:30:00.000Z"], cancelled: 0 }
+    mockOnly:
+      case: cancel_ask
+  - customer: "yes please"
+    mock:
+      extraction: { language: en, intent: give_details, fields: {}, question: null }
+      reply: "Done, your visit is cancelled. You are welcome to book again anytime."
+    expect:
+      reply: { sent: true }
+      aiReplies: 1
+      calendar: { confirmed: [], cancelled: 1 }
+    mockOnly:
+      case: cancelled
