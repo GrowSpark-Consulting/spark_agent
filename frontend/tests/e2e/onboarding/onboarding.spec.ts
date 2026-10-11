@@ -286,6 +286,38 @@ test("own Meta app: a backend error on connect is shown and nothing is claimed",
   await expect(page.getByRole("button", { name: "Connect number" })).toBeEnabled();
 });
 
+// The signed-in owner belongs to one business (Test Realty in support/mock-supabase.mjs). Both WhatsApp calls must name
+// it in X-Pakka-Tenant, next to the user's own token. The header is the browser's request, not authorization: the
+// real API checks the membership, which this mocked run cannot prove (no real database, no live Meta).
+const OWNER_TENANT = "10000000-0000-0000-0000-000000000001";
+
+test("own Meta app: webhook details and connect both name the signed-in owner's business and send the user's token", async ({ page }) => {
+  const seen: { path: string; tenant: string | undefined; authorization: string | undefined }[] = [];
+  const note = (route: import("@playwright/test").Route) => {
+    const headers = route.request().headers();
+    seen.push({ path: new URL(route.request().url()).pathname, tenant: headers["x-pakka-tenant"], authorization: headers["authorization"] });
+  };
+  await page.route(/\/api\/whatsapp\/manual/, (route) => {
+    if (route.request().method() === "OPTIONS") return route.fallback();
+    note(route);
+    return route.fulfill(ok(201, CONNECTION));
+  });
+  await openOwnApp(page, (route) => {
+    if (route.request().method() === "OPTIONS") return route.fallback();
+    note(route);
+    return route.fulfill(ok(200, { webhookUrl: WEBHOOK_URL, verifyToken: VERIFY_TOKEN, partnerBusinessId: null }));
+  });
+  await expect(page.getByText(VERIFY_TOKEN, { exact: true })).toBeVisible();
+  await fillOwnApp(page);
+  await page.getByRole("button", { name: "Connect number" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Connected" })).toBeVisible();
+  expect(seen.map((r) => r.path)).toEqual(["/api/whatsapp/webhook-config", "/api/whatsapp/manual"]);
+  for (const request of seen) {
+    expect(request.tenant, request.path).toBe(OWNER_TENANT);
+    expect(request.authorization, request.path).toMatch(/^Bearer \S+$/);
+  }
+});
+
 test("partner access shows Spark Agent's portfolio ID when the API has it, and stays a labelled preview", async ({ page }) => {
   await page.route(/\/api\/whatsapp\/webhook-config/, (route) => route.fulfill(ok(200, { webhookUrl: WEBHOOK_URL, verifyToken: VERIFY_TOKEN, partnerBusinessId: "123456789012345" })));
   await openOnboarding(page);

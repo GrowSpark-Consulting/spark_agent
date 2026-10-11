@@ -9,6 +9,7 @@ import { CheckRow, CopyRow, RuleHeading, type CheckMark } from "@/components/onb
 import type { WhatsAppConnectionPublic, TokenType } from "@pakka/types";
 import {
   checkLines,
+  resolveWhatsAppTenant,
   submitManualConnect,
   type ManualConnectForm,
   type WebhookConfigResult,
@@ -24,11 +25,14 @@ const STATUS_WORD: Record<string, string> = { pass: "Done", fail: "Failed", warn
 
 export function OwnAppConnect({
   config,
+  tenantId,
   onRetryConfig,
   copied,
   onCopy,
 }: {
   config: WebhookConfigResult | null;
+  /** The business `config` was read for. The details are sent to this business only. */
+  tenantId: string | null;
   onRetryConfig: () => void;
   copied: string | null;
   onCopy: (label: string, value: string) => void;
@@ -48,7 +52,21 @@ export function OwnAppConnect({
     setPending(true);
     setError(null);
     setFields({});
-    const result = await submitManualConnect(form);
+    // The business is worked out again now, not trusted from earlier: if it is gone, unclear or no longer the one
+    // the webhook details above were made for, nothing is sent (the details would belong to another business).
+    const tenant = await resolveWhatsAppTenant();
+    if (tenant.state !== "ready") {
+      setPending(false);
+      setError(tenant.message);
+      return;
+    }
+    if (tenant.tenantId !== tenantId) {
+      setPending(false);
+      setError("Your business changed since these webhook details were shown. We've reloaded them; check them in Meta, then connect again.");
+      onRetryConfig();
+      return;
+    }
+    const result = await submitManualConnect(form, tenant.tenantId);
     setPending(false);
     if (result.state === "rejected") {
       setError(result.message);

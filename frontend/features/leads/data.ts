@@ -79,8 +79,11 @@ export type LeadRow = z.input<typeof LeadRow>;
 
 export const LEAD_COLUMNS = "id, tenant_id, contact_id, stage, score, temperature, fields, owner_user_id, created_at, updated_at, contacts (name, phone)";
 
-/** Newest-updated leads loaded on the board; older ones need paging (not built). */
-export const LEAD_LIMIT = 500;
+/**
+ * Leads read per page, newest-updated first. The board loads one page and offers "Load more": nothing assumes every
+ * lead fits in one answer. Large enough that a typical business never sees the button, small enough to stay quick.
+ */
+export const LEAD_PAGE_SIZE = 200;
 
 export interface Lead {
   id: string;
@@ -300,11 +303,44 @@ export function formatAgo(iso: string, now: Date, timeZone: string): string {
 
 // Reads ------------------------------------------------------------------------------------------------
 
-export async function fetchLeads(client: SupabaseClient, tenantId: string): Promise<{ leads: Lead[]; truncated: boolean }> {
-  const { data, error } = await client.from("leads").select(LEAD_COLUMNS).eq("tenant_id", tenantId).order("updated_at", { ascending: false }).limit(LEAD_LIMIT);
+/**
+ * Where the next page starts: the last lead of the previous page, by the two columns the page is ordered by. These are
+ * the stored strings exactly as the database sent them (a Date would drop the microseconds and could skip or repeat a
+ * lead that was updated in the same millisecond). Leads that change or arrive while someone is paging move to the
+ * front, so a page boundary by position (an offset) would repeat or skip rows; a boundary by value does neither.
+ */
+export interface LeadCursor {
+  updatedAt: string;
+  id: string;
+}
+
+export interface LeadsPage {
+  leads: Lead[];
+  /** The cursor for the next page, or null when this was the last (it held fewer rows than asked for). */
+  next: LeadCursor | null;
+}
+
+const CursorRow = z.object({ updated_at: z.string().min(1), id: z.guid() });
+
+/**
+ * One page of the business's leads, newest-updated first (then by id, so the order never ties). Plain PostgREST
+ * reads under RLS, like every other screen: no new endpoint. Rows of another business are dropped even if they arrive.
+ */
+export async function fetchLeadsPage(client: SupabaseClient, tenantId: string, cursor: LeadCursor | null = null, pageSize = LEAD_PAGE_SIZE): Promise<LeadsPage> {
+  let query = client.from("leads").select(LEAD_COLUMNS).eq("tenant_id", tenantId);
+  if (cursor) {
+    // Strictly older than the last lead shown: an older update, or the same moment with a smaller id.
+    query = query.or(`updated_at.lt.${cursor.updatedAt},and(updated_at.eq.${cursor.updatedAt},id.lt.${cursor.id})`);
+  }
+  const { data, error } = await query.order("updated_at", { ascending: false }).order("id", { ascending: false }).limit(pageSize);
   if (error) throw error;
-  const leads = parseLeads(data, tenantId);
-  return { leads, truncated: leads.length >= LEAD_LIMIT };
+  const rows: unknown[] = Array.isArray(data) ? data : [];
+  const leads = parseLeads(rows, tenantId);
+  if (rows.length < pageSize) return { leads, next: null };
+  // A full page: there may be more. The cursor comes from the last row as sent; without a usable one, say so instead of guessing.
+  const last = CursorRow.safeParse(rows[rows.length - 1]);
+  if (!last.success) throw new LeadDataError("lead");
+  return { leads, next: { updatedAt: last.data.updated_at, id: last.data.id } };
 }
 
 /** One lead, or null when it isn't the business's (RLS shows nothing) or doesn't exist. */

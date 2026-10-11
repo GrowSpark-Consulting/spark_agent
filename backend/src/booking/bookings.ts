@@ -3,6 +3,7 @@ import { z } from "zod";
 import { inngest } from "../inngest/client";
 import { AppError } from "../lib/errors";
 import { supabaseAdmin } from "../lib/supabase-admin";
+import { googleBusyTimes } from "./google-sync";
 import { freeSlots, MAX_WINDOW_DAYS, spreadSlots, WeeklyHours, type BusyTime, type SlotResource } from "./slots";
 import { slotLabel } from "./time";
 
@@ -48,9 +49,16 @@ export interface BookingDeps {
   db: SupabaseClient;
   now: () => Date;
   send: (event: { id: string; name: string; data: Record<string, unknown> }) => Promise<unknown>;
+  /** Busy times from the resources' Google Calendars (booking/google-sync.ts); without it only bookings count. */
+  googleBusy?: (tenantId: string, resourceIds: string[], from: Date, to: Date) => Promise<BusyTime[]>;
 }
 
-const defaults = (): BookingDeps => ({ db: supabaseAdmin(), now: () => new Date(), send: (event) => inngest.send(event) });
+const defaults = (): BookingDeps => ({
+  db: supabaseAdmin(),
+  now: () => new Date(),
+  send: (event) => inngest.send(event),
+  googleBusy: (tenantId, resourceIds, from, to) => googleBusyTimes(tenantId, resourceIds, from, to),
+});
 
 const Id = z.guid();
 const DAY_MS = 24 * 60 * 60_000;
@@ -233,6 +241,17 @@ export async function findSlots(tenantId: string, rawInput: FindSlotsInput, deps
     .parse(busyResult.data ?? [])
     .filter((b) => !(b.status === "held" && b.hold_expires_at !== null && Date.parse(b.hold_expires_at) <= now.getTime()))
     .map((b) => ({ resourceId: b.resource_id, start: new Date(b.start_at), end: new Date(b.end_at) }));
+  // Staff with a connected Google Calendar are also busy when Google says so. Google can only take times away; a
+  // failure there never stops slot search (googleBusyTimes skips what it can't read, and this catches the rest).
+  if (deps.googleBusy) {
+    try {
+      const windowFrom = new Date(input.from.getTime() - bufferMs);
+      const windowTo = new Date(input.to.getTime() + bufferMs);
+      busy.push(...(await deps.googleBusy(tenant, resources.map((r) => r.id), windowFrom, windowTo)));
+    } catch (e) {
+      console.error(`[booking] Google busy times skipped: ${e instanceof Error ? e.message : "unknown error"}`);
+    }
+  }
 
   const free = freeSlots({
     timeZone,

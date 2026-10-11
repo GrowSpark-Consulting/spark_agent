@@ -83,6 +83,14 @@ describe("staffAlertContent", () => {
     expect(one.headline).toContain("waited 1 minute and");
   });
 
+  it("asks the staff member how their own-number chat went", async () => {
+    const outcome = await staffAlertContent(TENANT, { kind: "own_number_outcome", conversationId: CONVERSATION }, deps());
+    expect(outcome).toEqual({
+      headline: "How did your WhatsApp chat with Asha Raman go? Update the lead.",
+      link: `https://app.test/dashboard/inbox?conversation=${CONVERSATION}`,
+    });
+  });
+
   it("tells staff a customer opted out, so they call instead of messaging", async () => {
     const outcome = await staffAlertContent(TENANT, { kind: "opted_out", conversationId: CONVERSATION }, deps());
     expect(outcome.headline).toBe("Asha Raman sent STOP, so the assistant won't message them again. Call them if you need to.");

@@ -18,7 +18,8 @@ export type StaffAlertKind =
   | "setup_problem"
   | "opted_out"
   | "visit_outcome"
-  | "low_rating";
+  | "low_rating"
+  | "own_number_outcome";
 
 export interface StaffAlert {
   kind: StaffAlertKind;
@@ -99,6 +100,9 @@ export async function staffAlertContent(
   const who = await customerLabel(tenantId, alert.conversationId, deps.db);
   const link = alert.conversationId ? `${app}/dashboard/inbox?conversation=${alert.conversationId}` : `${app}/dashboard/inbox`;
   const what = oneLine(alert.what ?? "visit", 40);
+  if (alert.kind === "own_number_outcome") {
+    return { headline: `How did your WhatsApp chat with ${who} go? Update the lead.`, link };
+  }
   if (alert.kind === "opted_out") {
     return { headline: `${who} sent STOP, so the assistant won't message them again. Call them if you need to.`, link };
   }

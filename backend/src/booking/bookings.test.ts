@@ -111,6 +111,23 @@ describe("findSlots", () => {
     expect(new Set(slots.map((s) => s.resourceId))).toEqual(new Set([R2]));
   });
 
+  it("also skips times the person's Google Calendar says are busy, and ignores a Google failure", async () => {
+    // R1 is free on Friday in the bookings table, but Google says 10 am to 6 pm is taken: only R2 remains.
+    const googleBusy = vi.fn<NonNullable<BookingDeps["googleBusy"]>>(async () => [
+      { resourceId: R1, start: new Date("2026-10-09T04:30:00Z"), end: new Date("2026-10-09T12:30:00Z") },
+    ]);
+    const slots = await findSlots(TENANT, { serviceId: SERVICE, ...FRIDAY }, { ...deps(), googleBusy });
+    expect(new Set(slots.map((s) => s.resourceId))).toEqual(new Set([R2]));
+    expect(googleBusy).toHaveBeenCalledWith(TENANT, [R1, R2], new Date(FRIDAY.from), new Date(FRIDAY.to));
+    const failing = vi.fn<NonNullable<BookingDeps["googleBusy"]>>(async () => {
+      throw new Error("google down");
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(findSlots(TENANT, { serviceId: SERVICE, ...FRIDAY }, { ...deps(), googleBusy: failing })).resolves.toHaveLength(3);
+    expect(error).toHaveBeenCalledTimes(1);
+    error.mockRestore();
+  });
+
   it("keeps field visits to people whose service area has the pincode (or who have none set)", async () => {
     tables.resources = ok([
       { id: R1, name: "Designer 1", working_hours: OPEN_ALL_DAY, service_area: { pincodes: ["600041"] } },

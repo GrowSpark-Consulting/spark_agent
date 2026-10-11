@@ -321,6 +321,27 @@ test.describe("Inbox", () => {
     await expect(page.locator(".app-inbox-row")).toHaveCount(4);
   });
 
+  test("says it is loading chats while they are read, then lists them", async ({ page }) => {
+    await mockRealtime(page);
+    // Hold the chats read until the test lets it go (the rest of the traffic goes straight through).
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(/\/rest\/v1\/conversations(\?|$)/, async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await gate;
+      return route.fallback();
+    });
+    await openInbox(page);
+    await expect(page.getByRole("status").filter({ hasText: "Loading chats" })).toBeVisible();
+    await expect(page.locator(".app-inbox-row")).toHaveCount(0);
+    await expect(page.getByText("No conversations yet")).toHaveCount(0); // not mistaken for an empty inbox
+    release();
+    await expect(page.locator(".app-inbox-row")).toHaveCount(4);
+    await expect(page.getByRole("status").filter({ hasText: "Loading chats" })).toHaveCount(0);
+  });
+
   test("an inbox with no chats says so", async ({ page }) => {
     await mockRealtime(page);
     await openInbox(page, "owner@test.local");

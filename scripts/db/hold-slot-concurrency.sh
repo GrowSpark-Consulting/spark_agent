@@ -42,13 +42,15 @@ for i in $(seq 1 "$CALLBACKS"); do
 done
 wait
 
+# Counted with `|| true` inside the pipelines: a count of 0 must reach the check below, not stop the script silently.
 won=$(cat "$out"/hold-* | grep -cx t || true)
-refused=$(grep -l "violates exclusion constraint" "$out"/hold-* | wc -l | tr -d ' ')
+refused=$({ grep -l "violates exclusion constraint" "$out"/hold-* || true; } | wc -l | tr -d ' ')
+deadlocks=$({ grep -l "deadlock detected" "$out"/hold-* "$out"/callback-* || true; } | wc -l | tr -d ' ')
 callbacks=$(cat "$out"/callback-* | grep -cx t || true)
 held=$(q "select count(*) from public.bookings where tenant_id = '$TENANT' and resource_id = '$RESOURCE' and status = 'held';")
 q "delete from public.tenants where id = '$TENANT';"
 
-echo "holds=$HOLDS won=$won refused=$refused held_rows=$held callbacks=$CALLBACKS callbacks_ok=$callbacks"
+echo "holds=$HOLDS won=$won refused=$refused deadlocks=$deadlocks held_rows=$held callbacks=$CALLBACKS callbacks_ok=$callbacks"
 if [ "$won" = 1 ] && [ "$refused" = "$((HOLDS - 1))" ] && [ "$held" = 1 ] && [ "$callbacks" = "$CALLBACKS" ]; then
   echo "PASS exactly one hold wins the race; callbacks with no person never clash"
 else

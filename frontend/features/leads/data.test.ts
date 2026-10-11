@@ -9,7 +9,7 @@ import {
   buildTimeline,
   fetchLead,
   fetchLeadActivity,
-  fetchLeads,
+  fetchLeadsPage,
   fetchPackFields,
   formatAnswer,
   groupByStage,
@@ -90,7 +90,7 @@ describe("lead rows", () => {
 
   it("reads the session's business's leads only", async () => {
     const { client, calls } = fakeClient({ leads: { data: [leadRow(), leadRow({ id: id(2), tenant_id: OTHER })], error: null } });
-    const { leads } = await fetchLeads(client, TENANT);
+    const { leads } = await fetchLeadsPage(client, TENANT);
     expect(calls).toContainEqual(["leads", "eq", ["tenant_id", TENANT]]);
     expect(leads.map((l) => l.id)).toEqual([id(1)]);
   });
@@ -103,7 +103,7 @@ describe("lead rows", () => {
   });
 
   it("refuses rows of the wrong shape", async () => {
-    await expect(fetchLeads(fakeClient({ leads: { data: [{ id: "x" }], error: null } }).client, TENANT)).rejects.toThrow(/unexpected shape/);
+    await expect(fetchLeadsPage(fakeClient({ leads: { data: [{ id: "x" }], error: null } }).client, TENANT)).rejects.toThrow(/unexpected shape/);
   });
 });
 

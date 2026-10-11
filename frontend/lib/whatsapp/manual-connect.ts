@@ -1,12 +1,45 @@
 import { WhatsAppConnectionPublic, type TokenType } from "@pakka/types";
 import { z } from "zod";
 import { apiFetch } from "@/lib/api/client";
+import { resolveBrowserTenant, type BrowserTenant } from "@/lib/api/tenant";
 import { apiErrorFrom, formatError } from "@/lib/errors";
 
 // The browser's side of connecting a business's OWN Meta app: read the webhook details to paste into Meta,
 // then post the account details once. Both go to the API (Railway) through lib/api/client.ts; nothing is
 // read from the database here, and the answer decides what the screen says. The access token and app secret
 // are sent once and are never returned, logged or stored by this code.
+//
+// Both calls name the business in X-Pakka-Tenant. The id comes from resolveWhatsAppTenant (the signed-in
+// user's own memberships, read under RLS, through the same resolveTenant the API uses), is passed in by the
+// caller and is checked here before anything is sent: an empty or malformed id sends no request at all. The
+// header is a request, not proof; the API checks the membership again and is the only authority.
+
+const MISSING_TENANT = "We couldn't tell which business to connect. Reload the page and try again.";
+const validTenant = (tenantId: unknown): tenantId is string => z.guid().safeParse(tenantId).success;
+
+export type WhatsAppTenantResult =
+  | { state: "ready"; tenantId: string }
+  /** Nothing is sent: the message says why, and `retryable` whether trying again can help. */
+  | { state: "error"; message: string; retryable: boolean };
+
+const TENANT_MESSAGES: Record<Exclude<BrowserTenant["status"], "ok">, { message: string; retryable: boolean }> = {
+  signed_out: { message: "Your session has ended. Sign in again.", retryable: false },
+  no_business: { message: "Add your business details first, then connect WhatsApp.", retryable: false },
+  choose: {
+    message: "Your account belongs to more than one business, so we can't tell which one to connect. Choose one from your dashboard first.",
+    retryable: false,
+  },
+  error: { message: "We couldn't load your business. Try again in a moment.", retryable: true },
+};
+
+/** The business a WhatsApp call is for, or why there isn't one. Read fresh every time, never remembered. */
+export async function resolveWhatsAppTenant(resolve: () => Promise<BrowserTenant> = resolveBrowserTenant): Promise<WhatsAppTenantResult> {
+  const found = await resolve();
+  if (found.status === "ok") {
+    return validTenant(found.tenantId) ? { state: "ready", tenantId: found.tenantId } : { state: "error", message: MISSING_TENANT, retryable: false };
+  }
+  return { state: "error", ...TENANT_MESSAGES[found.status] };
+}
 
 /** GET /api/whatsapp/webhook-config. */
 export const WebhookConfig = z.object({
@@ -24,9 +57,10 @@ export type WebhookConfigResult =
 
 const UNEXPECTED = "We couldn't load your webhook details. Try again in a moment.";
 
-export async function loadWebhookConfig(signal?: AbortSignal): Promise<WebhookConfigResult> {
+export async function loadWebhookConfig(tenantId: string, signal?: AbortSignal): Promise<WebhookConfigResult> {
+  if (!validTenant(tenantId)) return { state: "error", message: MISSING_TENANT, retryable: false };
   try {
-    const res = await apiFetch("/api/whatsapp/webhook-config", { method: "GET", signal });
+    const res = await apiFetch("/api/whatsapp/webhook-config", { method: "GET", tenantId, signal });
     if (!res.ok) {
       const err = await apiErrorFrom(res);
       const shown = formatError(err);
@@ -55,7 +89,8 @@ export type ManualConnectResult =
   | { state: "rejected"; message: string; fields: Record<string, string> };
 
 /** POST /api/whatsapp/manual. The connection state shown afterwards is the one the API returned. */
-export async function submitManualConnect(form: ManualConnectForm): Promise<ManualConnectResult> {
+export async function submitManualConnect(form: ManualConnectForm, tenantId: string): Promise<ManualConnectResult> {
+  if (!validTenant(tenantId)) return { state: "rejected", message: MISSING_TENANT, fields: {} };
   const body = {
     wabaId: form.wabaId.trim(),
     phoneNumberId: form.phoneNumberId.trim(),
@@ -64,7 +99,7 @@ export async function submitManualConnect(form: ManualConnectForm): Promise<Manu
     appSecret: form.appSecret.trim(),
   };
   try {
-    const res = await apiFetch("/api/whatsapp/manual", { method: "POST", body });
+    const res = await apiFetch("/api/whatsapp/manual", { method: "POST", body, tenantId });
     if (!res.ok) {
       const shown = formatError(await apiErrorFrom(res));
       return { state: "rejected", message: shown.message, fields: shown.fields ?? {} };

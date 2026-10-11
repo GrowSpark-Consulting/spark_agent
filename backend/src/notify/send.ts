@@ -36,6 +36,11 @@ export type NotifyPayload = {
   interactive?: Interactive;
   /** Template variables in {{1}}… order, used outside the window. */
   templateParams?: string[];
+  /**
+   * staff_reply only: an approved template a staff member chose (the inbox's template picker), by its exact versioned
+   * name and language, with its body variables in {{1}}… order. Sent whatever the window; free, like any staff reply.
+   */
+  template?: { name: string; language: string; params: string[] };
   /** The staff user who sent it (staff_reply, test_message); recorded in audit_logs. */
   actorId?: string;
   /**
@@ -75,6 +80,29 @@ const Target = z.object({
   recent_test_messages: z.number().int(),
 });
 const Template = z.object({ name: z.string(), language: z.string(), category: z.string() });
+
+// A staff-chosen template: Meta's name and language formats; the adapter checks each variable's text.
+const ChosenTemplate = z.object({
+  name: z.string().regex(/^[a-z0-9_]{1,512}$/),
+  language: z.string().regex(/^[a-z]{2,3}(_[A-Z]{2})?$/),
+  params: z.array(z.string()).max(20),
+});
+const ApprovedTemplate = Template.extend({ components: z.unknown() });
+
+/**
+ * How many {{n}} variables a template's body has, from `whatsapp_templates.components`: as submitted ({ body, … }) or
+ * as Meta lists it ([{ type: "BODY", text }]). Null when the body can't be found, so the count is left to Meta.
+ */
+export function templateVariableCount(components: unknown): number | null {
+  let body: unknown;
+  if (Array.isArray(components)) {
+    body = components.find((c) => typeof c === "object" && c !== null && String((c as { type?: unknown }).type).toUpperCase() === "BODY")?.text;
+  } else if (typeof components === "object" && components !== null) {
+    body = (components as { body?: unknown }).body;
+  }
+  if (typeof body !== "string") return null;
+  return new Set([...body.matchAll(/\{\{\s*(\d+)\s*\}\}/g)].map((m) => m[1])).size;
+}
 
 const failed = (
   code: string,
@@ -128,6 +156,11 @@ export async function send(tenantId: string, kind: NotificationKind, payload: No
   if (payload.interactive !== undefined && !Interactive.safeParse(payload.interactive).success) {
     return failed("validation_failed", "The buttons or list don't fit WhatsApp's limits, so the message was not sent.");
   }
+  const chosen = payload.template;
+  if (chosen !== undefined) {
+    if (!kindConfig.chosenTemplate) throw new Error(`notify.send(${kind}): only a staff reply can send a chosen template`);
+    if (!ChosenTemplate.safeParse(chosen).success) return failed("validation_failed", "Choose an approved template and fill in its values.");
+  }
 
   const db = supabaseAdmin();
   // Before anything else: a message that has already gone out is never sent again, whatever changed since.
@@ -173,7 +206,26 @@ export async function send(tenantId: string, kind: NotificationKind, payload: No
   const lastCustomerMessage = target.last_customer_msg_at ? Date.parse(target.last_customer_msg_at) : null;
   const insideWindow = lastCustomerMessage !== null && Date.now() - lastCustomerMessage < WINDOW_MS;
   let template: z.infer<typeof Template> | undefined;
-  if (!(insideWindow && (payload.interactive ?? payload.text))) {
+  if (chosen) {
+    // Only an approved template of this business's connected number, with exactly the values its body asks for.
+    const found = await db
+      .from("whatsapp_templates")
+      .select("name, language, category, components")
+      .eq("tenant_id", tenantId)
+      .eq("connection_id", target.connection_id)
+      .eq("name", chosen.name)
+      .eq("language", chosen.language)
+      .eq("status", "approved")
+      .limit(1);
+    if (found.error) throw new Error(`notify.send: template read failed: ${found.error.message}`);
+    const [approved] = z.array(ApprovedTemplate).max(1).parse(found.data ?? []);
+    if (!approved) return failed("not_found", "That template isn't approved for this WhatsApp number.");
+    const needed = templateVariableCount(approved.components);
+    if (needed !== null && needed !== chosen.params.length) {
+      return failed("validation_failed", `This template needs ${needed} value${needed === 1 ? "" : "s"}.`);
+    }
+    template = { name: approved.name, language: approved.language, category: approved.category };
+  } else if (!(insideWindow && (payload.interactive ?? payload.text))) {
     if (!kindConfig.template) return { status: "skipped", reason: "outside_window" };
     const templateResult = await db.rpc("notify_template", {
       p_connection_id: target.connection_id,
@@ -205,7 +257,7 @@ export async function send(tenantId: string, kind: NotificationKind, payload: No
   let providerMsgId: string;
   try {
     const sent = template
-      ? await sender.sendTemplate(target.to_phone, template.name, template.language, payload.templateParams ?? [])
+      ? await sender.sendTemplate(target.to_phone, template.name, template.language, chosen ? chosen.params : (payload.templateParams ?? []))
       : payload.interactive
         ? await sender.sendInteractive(target.to_phone, payload.interactive)
         : await sender.sendText(target.to_phone, payload.text as string);

@@ -7,13 +7,20 @@ import { ScoreBadge } from "@/features/leads/score-badge";
 import type { FormattedError } from "@/lib/errors";
 import { handoffReason, type ConversationSummary } from "./data";
 import type { LeadCard } from "./lead-card-data";
+import type { LeadCardAi } from "./lead-card-provisional";
 
 // The lead card beside the open chat, laid out as the /dashboard/preview Inbox's "Lead card · pinned"
 // (components/dashboard/pakka-app.tsx): score block, name and number, then label-over-value rows on a
 // 2px rule. Pinned beside the chat on wide screens; below that, a "Lead" button opens it as a sheet.
-// Shows only stored data (lead-card-data.ts); the AI-written summary rows wait for buildLeadCard (Dev 1).
+// Shows only stored data (lead-card-data.ts); the AI-written summary rows wait for buildLeadCard (Dev 1). `ai` is where
+// they will arrive: nothing supplies it in the app today, and when something does (lead-card-provisional.ts, then the
+// real contract through an adapter) the rows appear without any change here. They show only beside the conversation they
+// were made for, and while the contract is provisional they say they are a sample.
 
-export type LeadCardState = { status: "loading" } | { status: "error"; error: FormattedError } | { status: "ready"; card: LeadCard | null };
+export type LeadCardState =
+  | { status: "loading" }
+  | { status: "error"; error: FormattedError }
+  | { status: "ready"; card: LeadCard | null; ai?: LeadCardAi | null };
 
 const label: CSSProperties = { fontSize: "12px", color: "var(--color-neutral-700)" };
 const row: CSSProperties = { padding: "10px 0", borderBottom: "1px solid var(--color-divider)" };
@@ -33,6 +40,19 @@ function LeadCardBody({ state, conversation, onRetry }: { state: LeadCardState; 
   }
   const { lead, booking } = card;
   const handoff = conversation.openHandoffs[0];
+  // Never another chat's summary: it must have been made for the conversation being shown.
+  const ai = state.ai && state.ai.conversationId === conversation.id ? state.ai : null;
+  const aiRows: [string, string | null][] = ai
+    ? [
+        ["Need", ai.need],
+        ["Summary", ai.summary],
+        ["Suggested next step", ai.nextStep],
+        ["Sentiment", ai.sentiment],
+        ["Language", ai.languageNote],
+        ["Source", ai.source],
+        ["Owner", ai.owner],
+      ]
+    : [];
   return (
     <>
       <div style={{ display: "flex", gap: "14px", alignItems: "center" }}>
@@ -92,10 +112,20 @@ function LeadCardBody({ state, conversation, onRetry }: { state: LeadCardState; 
             )}
           </dd>
         </div>
+        {aiRows
+          .filter(([, text]) => text !== null)
+          .map(([name, text]) => (
+            <div key={name} style={row} data-testid="lead-card-ai-row">
+              <dt style={label}>{name}</dt>
+              <dd style={{ ...value, margin: 0, fontWeight: name === "Summary" ? 400 : 600 }}>{text}</dd>
+            </div>
+          ))}
       </dl>
 
       <p className="app-hint" style={{ margin: 0 }}>
-        Score and answers as the AI stored them. AI summaries of the chat aren’t available yet.
+        {ai
+          ? "Sample summary in a provisional format: the lead card isn’t connected to the AI yet. Score and answers are as the AI stored them."
+          : "Score and answers as the AI stored them. AI summaries of the chat aren’t available yet."}
       </p>
       <Link className="btn btn-secondary" href={`/dashboard/leads/${lead.id}`} style={{ alignSelf: "flex-start" }}>
         Open lead

@@ -36,8 +36,10 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0017_google_calendar` | `google_calendar_connections`: one per resource, refresh token encrypted, `status connected \| needs_reconnect`; members read everything but the token (section 6) |
 | `0018_agent_merge_functions` | `merge_lead_fields`, `merge_message_agent_meta`: the agent's lead-field and message-meta merges (Dev 1, #65; service_role only) |
 | `0019_notify_staff_target` | `notify_staff_target(tenantId, userId)`: a member's alert number as a contact tagged `staff` with a `human`-mode conversation (service_role only, section 2) |
-
+| `0020_whatsapp_webhook_tokens` | One webhook verify token per business for a client's own Meta app: SHA-256 hash plus an encrypted copy, server only (Dev 3, #78) |
 | `0021_consent_functions` | `record_notice_shown` and `record_opt_out` (service_role only): the contact update and the `consent_logs` row in one transaction, once (Dev 1; after 0019 `notify_staff_target` and 0020 `whatsapp_webhook_tokens`) |
+| `0022_consent_model_intent` | `record_opt_out` also accepts the source `model_intent` (a clear request to stop read by the model; Dev 1, #69) |
+| `0023_booking_resource_lock` | `hold_slot` and `reschedule_booking` take a per-resource advisory lock, so racing holds for one person queue and the losers get `slot_taken` (23P01) instead of a deadlock error (40P01) |
 
 - `kb_chunks.embedding` is `vector(1024)`: Cohere `embed-multilingual-v3.0`, cosine distance (`<=>`).
   Retrieval filters by `tenant_id` and sets `hnsw.iterative_scan = relaxed_order`.
@@ -130,6 +132,7 @@ type NotifyPayload = {
   staffUserId?: string;      // staff_alert only: the member to alert
   text?: string;             // free text, inside the 24-hour window
   templateParams?: string[]; // in {{1}}… order, outside the window
+  template?: { name: string; language: string; params: string[] }; // staff_reply only: an approved template staff chose
   interactive?: Interactive; // reply buttons or a list, sent instead of `text` inside the window
   idempotencyKey?: string;   // names this exact message; a repeat returns the first send instead of sending again
   actorId?: string;          // the staff user (staff_reply, test_message); recorded in audit_logs
@@ -167,6 +170,13 @@ otherwise the approved `staff_alert_vN` template: `{{1}}` the one-line headline,
 | `opted_out` | handoff trigger `opt_out` (the customer sent STOP; Dev 1's #69) | "{name} sent STOP, so the assistant won't message them again. Call them if you need to." | `/dashboard/inbox?conversation=<id>` |
 | `visit_outcome` | `post-visit`, after the visit: to the booked staff member if they have an alert number, else owners and admins | "How did the {what} with {name} go? Update the lead so follow-ups stay right." | `/dashboard/inbox?conversation=<id>` |
 | `low_rating` | `post-visit`: the customer rated the visit 1–3; **owners only** | "{name} rated their {what} {n} out of 5." | `/dashboard/inbox?conversation=<id>` |
+| `own_number_outcome` | `own-number-outcome`, 4 h after an own-number takeover: the staff member who took it; with Booked / Follow-up / Lost buttons inside their window | "How did your WhatsApp chat with {name} go? Update the lead." | `/dashboard/inbox?conversation=<id>` |
+
+**`daily_agenda` (built, 9 Oct):** the day's bookings to the owners, free, behind the `daily_agenda` toggle (Growth and
+Pro). Like `staff_alert` it goes to a member's alert number (`staffUserId`): free text inside their window ("Good
+morning! Today at {business}: 2 bookings." then one "• 10:00 am, Site visit with Asha (Priya)" line per booking and the
+calendar link), else the approved `daily_agenda_vN` template with {{1}} how many ("2 bookings"), {{2}} the first one and
+{{3}} the calendar link.
 
 `{name}` is the contact's name, else the masked number (`+9198xxxxxx45`). Every parameter is one line with no
 tabs or runs of spaces (Meta refuses them, 132018); customer and business names are cut to 40 characters.
@@ -174,12 +184,27 @@ tabs or runs of spaces (Meta refuses them, 132018); customer and business names 
 **For the inbox (Dev 3):** contacts tagged `staff` or `test` are our own numbers; their chats should be hidden
 from the inbox list (or shown under a separate filter).
 
+**A template chosen by staff (built, 9 Oct; for Dev 3's template picker):** `staff_reply` may pass
+`template: { name, language, params }`, an approved template by its exact versioned name (`reminder_24h_v2`), its
+language and its body variables in {{1}}… order. It is sent whatever the 24-hour window, free like any staff reply, and
+recorded with its name (`messages.template_name`). Only a template with `status = 'approved'` on the business's
+connected number is used (`not_found`, "That template isn't approved for this WhatsApp number."); the number of values
+must match the body's variables (`validation_failed`, "This template needs 2 values."); a malformed name or language is
+`validation_failed` before anything is read. Other kinds cannot pass `template`. For the inbox route
+(`POST /api/conversations/:id/messages`), the body would be `{ "template": { "name", "language", "params" } }`
+instead of `{ "body" }`, passed through to `notify.send` with the staff member as actor.
+
 **Idempotency key (built, 9 Oct):** a job that may retry passes `idempotencyKey` (up to 200 characters, for example
 `reminder_24h:<bookingId>:<start>`). The message id is derived from the business, the kind and the key, so once
 that message has gone out (its `messages` row exists), a repeat returns the first send's `sent` outcome without
 sending, charging or checking toggles again. A message that fell back to the template went out under the key
 `<key>#template`, and a repeat finds that one too. A send whose outcome is unknown wrote no row, so it is still never
 retried automatically (`outcomeUnknown`).
+
+**Template catalogue (built, 9 Oct; `backend/src/notify/template-catalogue.ts`, review sheet `docs/templates.md`):**
+every template the jobs send outside the window, English and a Tamil draft, with variables, examples and quick replies;
+`templateComponents()` gives Meta's components for Dev 1's submission. The English waits for Raja's wording and the
+Tamil for a native speaker's review before anything is submitted.
 
 **Reply buttons and lists (built, 9 Oct; `backend/src/notify/interactive.ts`):** any kind can pass
 `interactive` instead of `text`. Inside the 24-hour window it goes as WhatsApp reply buttons or a list and costs
@@ -228,6 +253,8 @@ passes through in the `failed` outcome. A plain `Error` is unexpected: it is log
 | `tenant_features.settings` of `handoff_triggers` | `{ "sla_minutes": 15 }`: minutes a handoff may wait before the owner is alerted again, 1 to 1440; anything else uses 15 | Proposed (decision 17): read by `handoff-sla` |
 | `tenant_features.settings` of `feedback_request` | `{ "offset_minutes": 120 }`: minutes after the booking's end before the rating question, 0 to 10080; anything else uses 120 | Built: read by `post-visit` |
 | `tenant_features.settings` of `review_request` | `{ "review_url": "https://…" }`: the business's review page (https only). Without it no review link is sent | Proposed: read by `post-visit`; Dev 3's settings screen to edit it |
+| `tenant_features.settings` of `followup_nudges` | `{ "offset_minutes": [120, 1380], "nurture_after_minutes": 2880 }`: minutes after the customer's message for the two nudges and the move to nurture, each 1 to 10080 and in that order; anything else uses the defaults shown | Proposed (decision 18): read by `lead-nudges` |
+| `tenant_features.settings` of `handoff_own_number` | `{ "outcome_after_minutes": 240 }`: minutes after an own-number takeover before the staff member is asked how it went, 1 to 10080; anything else uses 240 | Built: read by `own-number-outcome` |
 | `bookings.details` | Free-form per booking kind (pax, pickup point, package id) | Fixed (handover) |
 | `whatsapp_templates.components` | As submitted: body, examples, header, footer, buttons | Agreed |
 | `tenants.agent_settings` | Persona name, tone, languages, handoff default, scoring overrides | **To define: Dev 1 + Dev 3** |
@@ -291,7 +318,9 @@ localWindow(timeZone, { day: 'today' | 'tomorrow' | 'YYYY-MM-DD', part?: 'mornin
   sides of a booking) and `min_notice_min`, and held or confirmed bookings (an expired hold no longer
   counts). Start times are every 30 minutes from opening; each time comes with the least busy free resource
   of the service's `resource_type`. With `pincode`, only resources whose `service_area.pincodes` has it, or
-  that have no area set. The window is at most 14 days. Google free/busy comes with the calendar sync (Day 4).
+  that have no area set. The window is at most 14 days. A person with a connected Google Calendar is also busy when
+  Google's free/busy says so (`googleBusyTimes`); Google can only take times away, and a Google failure is logged and
+  never stops slot search.
 - `holdSlot` holds for 10 minutes (`status 'held'`). `kind` defaults to `slot`; `slot`, `site_visit` and
   `field_visit` need a resource and a service; `callback`, `date_range` and `reservation` may have no resource
   and then never clash. A lead holds one time at a time: a new hold releases its earlier one
@@ -306,8 +335,15 @@ localWindow(timeZone, { day: 'today' | 'tomorrow' | 'YYYY-MM-DD', part?: 'mornin
   business's lead, service, resource or booking is `not_found`; a hold that expired or a booking in the wrong
   state is `conflict`; bad times, kinds or resources are `validation_failed`.
 - **Jobs:** `release-holds` (Inngest cron, every minute) marks holds past their expiry `expired`.
+  `google-calendar-sync` (built 9 Oct; `backend/src/booking/google-sync.ts`): `booking.confirmed` puts the booking on
+  its person's Google Calendar ("{service}: {customer name}", no phone number, a link to the dashboard's calendar)
+  and keeps the event id in `bookings.calendar_event_id`; `booking.changed` with `cancelled` or `rescheduled` takes it
+  off (the new time of a reschedule is its own `booking.confirmed`). The event id is fixed per booking
+  (`pk<booking id without dashes>`), so a retry finds the event instead of adding another. Only for a person with a
+  connected calendar; a Google error retries the step.
 - **Double booking:** blocked by the database: `scripts/db/hold-slot-concurrency.sh` (CI) runs 20 holds for one
-  slot at the same moment; exactly one wins.
+  slot at the same moment; exactly one wins and the other 19 get `slot_taken`. Holds and moves for one person take
+  turns (0023): without that, Postgres could report a racing loser as a deadlock (a server error) instead.
 
 **`notify.send` behaviour (Proposed, test message Agreed):**
 
@@ -344,14 +380,14 @@ sent twice carries a fixed `id` so Inngest drops the duplicate (`tenant.trial_st
 
 | Event | Payload |
 |---|---|
-| `whatsapp/message.received` | `{ tenantId, conversationId, messageId }`; sent by the webhook (id `message_received:<messageId>`, also for a replay); starts `process-message` |
+| `whatsapp/message.received` | `{ tenantId, conversationId, messageId }`; sent by the webhook (id `message_received:<messageId>`, also for a replay); starts `process-message`, and `lead-nudges` (the chat's next message cancels its earlier run) |
 | `kb/document.uploaded` | `{ tenantId, documentId }`; sent by `POST /api/kb/documents` (id `kb_document_uploaded:<documentId>`), starts the `kb-ingest` job |
 | `whatsapp/connected` | `{ tenantId, connectionId }` |
-| `booking.confirmed` | `{ tenantId, bookingId }`; sent by `confirmBooking` and `rescheduleBooking` (id `booking.confirmed:<bookingId>`); starts `booking-reminders` and `post-visit` |
-| `booking.changed` | `{ tenantId, bookingId, change: 'rescheduled' \| 'cancelled' \| 'completed' \| 'no_show' }`; sent by `rescheduleBooking` and `cancelBooking` (id `booking.changed:<bookingId>:<change>`); cancels that booking's `booking-reminders` run, and its `post-visit` run unless the change is `completed` |
+| `booking.confirmed` | `{ tenantId, bookingId }`; sent by `confirmBooking` and `rescheduleBooking` (id `booking.confirmed:<bookingId>`); starts `booking-reminders` and `post-visit`, and `google-calendar-sync` adds the booking to Google |
+| `booking.changed` | `{ tenantId, bookingId, change: 'rescheduled' \| 'cancelled' \| 'completed' \| 'no_show' }`; sent by `rescheduleBooking` and `cancelBooking` (id `booking.changed:<bookingId>:<change>`); cancels that booking's `booking-reminders` run, and its `post-visit` run unless the change is `completed`; `google-calendar-sync` removes its Google event when `cancelled` or `rescheduled`; `no_show` starts `noshow-rebooking` |
 | `booking.rated` | `{ tenantId, bookingId, rating }` (1–5); sent by `recordVisitRating` when the customer taps a rating (id `booking.rated:<bookingId>`, so the first rating counts); the `post-visit` run waits for it |
 | `handoff.opened` | `{ tenantId, handoffId, conversationId }`; sent by Dev 1's reply step when it opens a handoff (id `handoff_opened:<handoffId>`); starts `handoff-alert`, which sends one `staff_alert` to each owner and admin with an alert number (section 2). A handoff already resolved by the time the job runs gets no alert. **The job is the only sender of handoff alerts:** the reply step does not alert staff itself. Also starts `handoff-sla`: after the SLA (section 3) it alerts the owners again (`handoff_waiting`) unless someone has the chat: the handoff was picked up, assigned or resolved, a staff member took the chat over, or it is no longer in `human` mode (back with the AI, or on the business's own number) |
-| `handoff.own_number` | `{ tenantId, handoffId }` |
+| `handoff.own_number` | `{ tenantId, handoffId }`; to be sent by Dev 1's own-number takeover; starts `own-number-outcome` |
 | `tenant.trial_started` | `{ tenantId }` |
 | `credits.spent` | `{ tenantId, amount, reason, balanceAfter }` |
 
@@ -387,6 +423,35 @@ rating tap's `buttonId` is `rating:<bookingId>:<n>`; `parseRatingButton(buttonId
 `recordVisitRating(tenantId, bookingId, rating)` (`backend/src/booking/post-visit.ts`) saves it on the lead
 (`leads.feedback_rating`) and sends `booking.rated`. For a 4 or 5 the job's review message is the thank-you, so the
 pipeline should not answer the tap; for a 1–3 it may send a short thank-you (staff are alerted by the job).
+
+**Lead nudges (`lead-nudges`, built 9 Oct; `backend/src/inngest/lead-nudges.ts`).** Every customer message starts a run
+and the chat's next message cancels it, so only the latest message's run is alive. At each offset (section 3; 2 h and
+23 h by default, decision 18) the run reads the chat again and sends `followup_nudge` (1 credit; the `nudge_vN`
+template has {{1}} the customer's name) only if: the assistant answered that message (its `message.answered`
+marker), the customer has not written since, the chat is still with the assistant (`mode = 'ai'`), and the lead is
+still `new`, `engaged` or `qualified`. Anything else ends the follow-up. Still quiet at `nurture_after_minutes` (48 h),
+the lead moves to `nurture` (only from those stages; audited as `lead.stage_changed`). Keys
+`followup_nudge:<messageId>:<1|2>`.
+
+**No-show rebooking (`noshow-rebooking`, built 9 Oct).** `booking.changed` with `no_show` → if the booking is still
+marked no-show, the customer gets "Sorry we missed you for your {what} with {business}. Would you like to pick a new
+time?" (`noshow_rebooking`, 1 credit) with one button, the reminders' `booking:<bookingId>:reschedule`, so the pipeline
+answers it the same way; outside the window the `noshow_rebook_vN` template with {{1}} what and {{2}} the business. Key
+`noshow_rebooking:<bookingId>`. No-shows are marked by the booking action routes (Day 5).
+
+**Daily agenda (`daily-agenda`, built 9 Oct).** A cron every 15 minutes: each live business (trial or active) where it
+is now 8:00–8:14 in its own time zone, with `daily_agenda` on, gets today's confirmed bookings (its local day) sent to
+each owner with an alert number (`daily_agenda`, free). A day without bookings sends nothing. Key
+`daily_agenda:<business>:<owner>:<local date>`, so one a day whatever retries do.
+
+**Own-number outcome (`own-number-outcome`, built 9 Oct).** `handoff.own_number` → after `outcome_after_minutes` (4 h)
+the staff member who took the chat (`handoffs.assigned_user_id`) is asked how it went (`staff_alert`
+`own_number_outcome`): inside their window with buttons `outcome:<handoffId>:booked|follow_up|lost`, outside it the
+staff_alert template (the question and the chat's link). A handoff that already has an outcome is not asked about.
+**For Dev 1:** a staff member's tap arrives from their staff-tagged contact; `parseOutcomeButton(buttonId)` gives
+`{ handoffId, outcome }` and `recordHandoffOutcome(tenantId, handoffId, outcome, actor)` (`backend/src/leads/
+own-number-outcome.ts`) saves the first answer on the handoff (and resolves it), moves the lead to `booked` or `lost`
+(follow-up leaves it) and audits it. The own-number takeover itself, and sending `handoff.own_number`, are Dev 1's.
 
 **The message pipeline (`process-message`, built: steps 2 and 3).** One conversation at a time (concurrency key
 `conversationId`); messages from one conversation within 3 seconds (never longer than 15) start one run. A debounce keeps
@@ -611,6 +676,7 @@ Plain lists (leads, conversations, bookings, services) are read directly under R
 | 15 | WhatsApp connection routes ([whatsapp-connection-contract.md](whatsapp-connection-contract.md), #44) | **Proposed.** Shaaz's answers (7 Oct): platform admins in a `platform_admins` table; the public connect-link route needs no router change (the token is masked in the request log); link tokens stored hashed; `EMBEDDED_SIGNUP_ENABLED` server flag, off by default; connection status by polling, not Realtime. **Built:** `platform_admins`, `adminRoute`, hashed tokens (0016), `secretParams` log masking (section 6). Roles on recheck and disconnect: Raja | Dev 1 |
 | 16 | A send whose outcome is unknown (a timeout, a network failure or an unreadable answer from Meta) | **Proposed by Dev 2 (8 Oct):** hold the credit until Meta's status says sent or failed, instead of refunding. Needs Raja, because it changes billing, and a way to match Meta's status webhook to the send. Until then `notify.send` refunds (decision 2) and reports `outcomeUnknown: true`, so no caller sends the message again | Raja |
 | 17 | Handoff SLA (`handoff-sla`) | **Proposed by Dev 2 (9 Oct):** 15 minutes by default, each business can change it (`sla_minutes`, section 3); counted from the handoff at any time of day (business hours not yet considered); the escalation goes to owners only. The handover gives no number | Raja |
+| 18 | Lead nudges timing (`lead-nudges`) | **Proposed by Dev 2 (9 Oct):** the handover says "after 2 h and 24 h, then nurture". The second nudge goes at **23 h**, so it is still free text inside the customer's 24-hour window (at 24 h only an approved marketing template could go, and none is approved yet); a lead still quiet at **48 h** moves to nurture. Each business can change all three (section 3) | Raja |
 
 ## 9. Knowledge base (PROPOSED, not agreed)
 

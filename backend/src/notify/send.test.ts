@@ -11,7 +11,7 @@ const db = fakeSupabase(tables);
 vi.mock("../lib/supabase-admin", () => ({ supabaseAdmin: () => ({ rpc, from: (table: string) => db.client.from(table) }) }));
 vi.mock("../features/is-enabled", () => ({ isEnabled }));
 
-const { keyedMessageId, send, TEST_MESSAGES_PER_HOUR } = await import("./send");
+const { keyedMessageId, send, templateVariableCount, TEST_MESSAGES_PER_HOUR } = await import("./send");
 const { OutsideWindowError, registerSender, SendError } = await import("./sender");
 
 const TENANT = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
@@ -48,6 +48,59 @@ beforeEach(() => {
   rpcHandlers.refund_credits = () => ok(1);
   tables.messages = { data: [], error: null };
   db.calls.length = 0;
+});
+
+describe("a template chosen by staff (staff_reply)", () => {
+  const chosen = { name: "reminder_24h_v2", language: "en", params: ["Asha", "5 pm"] };
+  const approved = () => ({
+    data: [{ name: "reminder_24h_v2", language: "en", category: "utility", components: { body: "Hi {{1}}, see you at {{2}}.", examples: ["Asha", "5 pm"] } }],
+    error: null,
+  });
+
+  it("sends an approved template of this number whatever the window, free, recorded with its name", async () => {
+    rpcHandlers.notify_target = () => ok([target({ last_customer_msg_at: null })]);
+    tables.whatsapp_templates = approved();
+    const outcome = await send(TENANT, "staff_reply", { conversationId: CONVERSATION, template: chosen, actorId: STAFF });
+    expect(outcome).toMatchObject({ status: "sent", usedTemplate: true, creditsCharged: 0 });
+    expect(sender.sendTemplate).toHaveBeenCalledWith("+919840012345", "reminder_24h_v2", "en", ["Asha", "5 pm"]);
+    expect(calls("notify_template")).toHaveLength(0);
+    expect(calls("spend_credits")).toHaveLength(0);
+    expect(calls("notify_record")[0]).toMatchObject({ p_template_name: "reminder_24h_v2", p_sender: "staff", p_actor: STAFF, p_kind: "staff_reply" });
+    for (const [column, value] of [["tenant_id", TENANT], ["connection_id", target().connection_id], ["name", "reminder_24h_v2"], ["language", "en"], ["status", "approved"]]) {
+      expect(db.calls).toContainEqual({ table: "whatsapp_templates", method: "eq", args: [column, value] });
+    }
+  });
+
+  it("refuses a template that isn't approved for this number, or the wrong number of values", async () => {
+    tables.whatsapp_templates = { data: [], error: null };
+    await expect(send(TENANT, "staff_reply", { conversationId: CONVERSATION, template: chosen })).resolves.toMatchObject({
+      status: "failed",
+      error: { code: "not_found", message: "That template isn't approved for this WhatsApp number." },
+    });
+    tables.whatsapp_templates = approved();
+    await expect(send(TENANT, "staff_reply", { conversationId: CONVERSATION, template: { ...chosen, params: ["Asha"] } })).resolves.toMatchObject({
+      status: "failed",
+      error: { code: "validation_failed", message: "This template needs 2 values." },
+    });
+    expect(sender.sendTemplate).not.toHaveBeenCalled();
+  });
+
+  it("is only for staff replies, and checks the shape before reading anything", async () => {
+    await expect(send(TENANT, "ai_reply", { conversationId: CONVERSATION, template: chosen })).rejects.toThrow("only a staff reply");
+    await expect(send(TENANT, "staff_reply", { conversationId: CONVERSATION, template: { ...chosen, name: "Reminder 24h" } })).resolves.toMatchObject({
+      status: "failed",
+      error: { code: "validation_failed" },
+    });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("counts a body's variables as submitted or as Meta lists them", () => {
+    expect(templateVariableCount({ body: "Hi {{1}}, see you at {{2}}. {{1}} again." })).toBe(2);
+    expect(templateVariableCount([{ type: "HEADER", text: "{{1}}" }, { type: "BODY", text: "Thanks {{1}}" }])).toBe(1);
+    expect(templateVariableCount({ body: "No variables here." })).toBe(0);
+    expect(templateVariableCount(null)).toBeNull();
+    expect(templateVariableCount({})).toBeNull();
+  });
 });
 
 describe("idempotencyKey", () => {

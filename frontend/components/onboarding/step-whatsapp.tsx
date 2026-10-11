@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { OwnAppConnect } from "@/components/onboarding/own-app-connect";
-import { loadWebhookConfig, type WebhookConfigResult } from "@/lib/whatsapp/manual-connect";
+import { loadWebhookConfig, resolveWhatsAppTenant, type WebhookConfigResult } from "@/lib/whatsapp/manual-connect";
 import {
   CHECKS,
   COEX_OPTIONS,
@@ -61,10 +61,24 @@ export function StepWhatsApp({
   const manualOpen = idle && !meta;
   const [config, setConfig] = React.useState<WebhookConfigResult | null>(null);
   const [configTry, setConfigTry] = React.useState(0);
+  // The business the details above were read for. Both WhatsApp calls name it in X-Pakka-Tenant; it is worked
+  // out again on every read (never remembered between reads) and again when the account details are sent.
+  const [configTenant, setConfigTenant] = React.useState<string | null>(null);
   React.useEffect(() => {
     if (!manualOpen) return;
     const controller = new AbortController();
-    loadWebhookConfig(controller.signal).then(setConfig, () => {});
+    (async () => {
+      const tenant = await resolveWhatsAppTenant();
+      if (controller.signal.aborted) return;
+      if (tenant.state !== "ready") {
+        // No business, several, signed out: nothing is sent, and the screen says why.
+        setConfigTenant(null);
+        setConfig(tenant);
+        return;
+      }
+      setConfigTenant(tenant.tenantId);
+      setConfig(await loadWebhookConfig(tenant.tenantId, controller.signal));
+    })().catch(() => {});
     return () => controller.abort();
   }, [manualOpen, configTry]);
   // Spark Agent's portfolio id for partner access, only when the API has it configured.
@@ -295,6 +309,7 @@ export function StepWhatsApp({
           {s.mMode === "own" && (
             <OwnAppConnect
               config={config}
+              tenantId={configTenant}
               onRetryConfig={() => {
                 setConfig(null);
                 setConfigTry((n) => n + 1);

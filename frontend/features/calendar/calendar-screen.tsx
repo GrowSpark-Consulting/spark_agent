@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { RefreshControl } from "@/components/shared/refresh-control";
 import { EmptyState, ErrorState, LoadingState } from "@/components/shared/states";
 import { formatError, type FormattedError } from "@/lib/errors";
+import { useTableRefresh } from "@/lib/realtime/use-table-refresh";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { bookingTitle, kindLabel, STATUS_LABEL, STATUS_STYLE, type Booking } from "./bookings";
 import {
@@ -122,6 +124,39 @@ export function CalendarScreen({
     load();
   }, [load]);
 
+  // Read the shown range again without clearing the screen: what is held is replaced by what the database says now, so
+  // a change that is reported twice cannot show a booking twice. If the person moved to another day or week meanwhile,
+  // that read's answer is dropped (the new range has its own read). A failed read leaves the last one on screen and says so.
+  // Used by the Refresh button and, once the database sends booking changes, by Realtime (below).
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const refreshRunning = useRef(false);
+  const shownData = useRef(data);
+  useEffect(() => {
+    shownData.current = data;
+  });
+  const refresh = useCallback(async () => {
+    if (shownData.current.status !== "ready" || refreshRunning.current) return;
+    refreshRunning.current = true;
+    setRefreshing(true);
+    setRefreshFailed(false);
+    const request = latest.current;
+    const key = `${range.from.toISOString()}/${range.to.toISOString()}`;
+    try {
+      const client = getSupabaseBrowserClient();
+      const [resources, { bookings, truncated }] = await Promise.all([fetchResources(client, tenantId), fetchBookings(client, tenantId, range)]);
+      if (request === latest.current) setLoaded({ status: "ready", key, resources, bookings, truncated });
+    } catch {
+      if (request === latest.current) setRefreshFailed(true);
+    } finally {
+      refreshRunning.current = false;
+      setRefreshing(false);
+    }
+  }, [tenantId, range]);
+  // Only tables the database publishes are listened to; `bookings` is not one yet, so this reports "not live" and the
+  // Refresh button is the way to update (lib/realtime/published-tables.ts says why and what changes that).
+  const live = useTableRefresh(tenantId, ["bookings"], refresh);
+
   // Keep the address in step so a reload or a shared link opens the same view.
   useEffect(() => {
     const params = new URLSearchParams();
@@ -193,6 +228,7 @@ export function CalendarScreen({
               style={{ width: "auto", minHeight: "36px", padding: "4px 8px" }}
             />
           </label>
+          {data.status === "ready" ? <RefreshControl live={live} refreshing={refreshing} failed={refreshFailed} onRefresh={() => void refresh()} /> : null}
         </div>
 
         <div style={{ display: "flex", gap: "16px", alignItems: "center", flexWrap: "wrap", justifyContent: "space-between" }}>

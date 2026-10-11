@@ -249,12 +249,23 @@ const ist = (date, hhmm) => new Date(`${date}T${hhmm}:00+05:30`).toISOString();
  * a table ("leads", "bookings", "resources", "tenants") whose reads return rows the app can't parse (switched
  * later with POST /__mock/day3-error); inbox (with seed) adds two more chats for the Inbox lead card.
  */
-function createDay3Account({ seed = false, role = "owner", error = null, inbox = false } = {}) {
+function createDay3Account({ seed = false, role = "owner", error = null, inbox = false, manyLeads = 0 } = {}) {
   const email = `d3-${randomUUID()}@test.local`;
   const t = tenant(randomUUID(), "Sample Business", "sample-pack");
   USERS[email] = { memberships: [[t, role]], view: { status: 200, body: [] }, day3Error: error };
   TENANT_EXTRA.set(t.id, { business_hours: {}, vertical_version: 1 });
   const ids = {};
+  // `manyLeads`: that many plain leads, one per minute going back from 1 Sep 2026, each with its own contact and a
+  // microsecond timestamp as PostgREST sends them (for the board's "Load more": paging by updated_at, then id).
+  for (let i = 0; i < manyLeads; i++) {
+    const contact = { id: randomUUID(), tenant_id: t.id, name: `Bulk lead ${i + 1}`, phone: `+9190000${String(10000 + i).slice(-5)}` };
+    CONTACTS.push(contact);
+    const at = `${new Date(Date.UTC(2026, 8, 1) - i * 60_000).toISOString().replace(/\.\d+Z$/, "")}.123456+00:00`;
+    LEADS.push({
+      id: randomUUID(), tenant_id: t.id, contact_id: contact.id, stage: ["new", "engaged", "qualified"][i % 3], score: null, temperature: null,
+      fields: {}, owner_user_id: null, created_at: at, updated_at: at,
+    });
+  }
   if (!seed) return { email, tenantId: t.id, ids };
 
   const week = (start, end) => Object.fromEntries(["mon", "tue", "wed", "thu", "fri", "sat"].map((d) => [d, [{ start, end }]]));
@@ -886,10 +897,14 @@ ${choose("Cancel", "cancel=1")}
       if (!email) return send(res, 200, []);
       if (req.method !== "GET") return send(res, 403, { code: "42501", details: null, hint: null, message: "permission denied for table leads" });
       const own = new Set(USERS[email].memberships.map(([t]) => t.id));
-      const rows = LEADS.filter((l) => own.has(l.tenant_id))
+      let found = LEADS.filter((l) => own.has(l.tenant_id))
         .filter(filters(url))
-        .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-        .map((l) => ({ ...l, contacts: contactOf(l.contact_id) }));
+        .sort((a, b) => b.updated_at.localeCompare(a.updated_at) || b.id.localeCompare(a.id));
+      // The board pages by value: older than the last lead shown, or the same moment with a smaller id (supabase-js sends
+      // `or=(updated_at.lt.X,and(updated_at.eq.X,id.lt.Y))`), newest first, `limit` rows at a time.
+      const keyset = /^\(updated_at\.lt\.(.+),and\(updated_at\.eq\.(.+),id\.lt\.(.+)\)\)$/.exec(url.searchParams.get("or") ?? "");
+      if (keyset) found = found.filter((l) => l.updated_at < keyset[1] || (l.updated_at === keyset[1] && l.id < keyset[3]));
+      const rows = found.slice(0, Number(url.searchParams.get("limit") ?? Infinity)).map((l) => ({ ...l, contacts: contactOf(l.contact_id) }));
       return send(res, 200, day3Rows(email, "leads", rows));
     }
     if (table === "bookings") {
