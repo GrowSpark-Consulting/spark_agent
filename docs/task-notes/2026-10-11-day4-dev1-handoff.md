@@ -1,10 +1,10 @@
-# Day 4 (Dev 1): handing a chat to a person. What was built, and what Dev 2 and Dev 3 need to do or know
+# Day 4 (Dev 1): handing a chat to a person. What was built, and what Dev 2 and Dev 3 should know
 
 Audience: Dev 2 (Shaaz) and Dev 3 (Dhatri). The next person to touch the agent can read it too.
 
 Nothing here changes a file, a table, a migration or an endpoint of yours. Everything of Dev 1's is in `backend/src/agent/` and `backend/src/channels/whatsapp/`
 (plus tests, conversation tests and this note). The only shared files touched are `server/routes.ts` (one added route), `inngest/functions.ts` and
-`inngest/process-message.ts` (one added function and one added branch). The sections that start "Dev 2:" and "Dev 3:" are things to do or check.
+`inngest/process-message.ts` (one added function and one added branch). Sections 3 and 4 are the parts about Dev 2's and Dev 3's areas.
 
 ## 1. What it does, in plain words
 
@@ -27,42 +27,43 @@ Nothing here changes a file, a table, a migration or an endpoint of yours. Every
 | #105 | The signed 24-hour links, `GET /h/:token`. |
 | #106 | The 30-minute notice during an own-number chat, and the `handoff.own_number` event. |
 
-## 3. Dev 2: what to do or check
+## 3. For Dev 2: what Dev 1's work sends, links to and affects
 
-1. **Handoff alert buttons.** Build the two URL buttons with `createHandoffLinks(claims, env, now, { ownNumber })` from `agent/handoff/token`. Claims are `{ tenantId, handoffId, userId }`, one token per staff member. `ownNumber` is whether the business has `handoff_own_number`; when false there is no second link. It needs `API_PUBLIC_URL` set on Railway (the links are `${API_PUBLIC_URL}/h/<token>?mode=inbox|own`). Both links carry the same token, so using one ends the other.
-2. **`handoff.own_number`** is now sent by the link (id `handoff_own_number:<handoffId>`, data `{ tenantId, handoffId }`). Your `own-number-outcome` job already waits for it.
-3. **Events that nothing listens to yet.** Ids only, in each case:
+1. **The two alert links.** Dev 1 built the links that a staff alert's buttons can point to. `createHandoffLinks(claims, env, now, { ownNumber })` is in `agent/handoff/token` and returns `{ inbox, own }` (`own` is null when `ownNumber` is false). Claims are `{ tenantId, handoffId, userId }`: a link is for one staff member, so there is one token per person. `ownNumber` should be whether the business has the `handoff_own_number` feature. The links are `${API_PUBLIC_URL}/h/<token>?mode=inbox|own`, so `API_PUBLIC_URL` has to be set on Railway. Both links carry the same token, so using one ends the other. Today nothing calls `createHandoffLinks`; `handoff-alert` is unchanged.
+2. **`handoff.own_number`** is now sent when a staff member uses the own-number link (id `handoff_own_number:<handoffId>`, data `{ tenantId, handoffId }`). Your `own-number-outcome` job already listens for it.
+3. **Events Dev 1 sends that nothing consumes yet** (ids only, so any alert text has to be built from the database):
 
-| Event | Sent when | Data | Suggested use |
-|---|---|---|---|
-| `lead.hot` | a lead turns hot (id `lead_hot:<leadId>`, audit `lead.hot_alerted`, once per lead) | `{ tenantId, leadId, conversationId }` | "Hot lead" alert with the card's summary |
-| `voice_note.received` | a voice note got the request to type (id `voice_note:<lastMessageId>`) | ids | tell staff there is a voice note to listen to |
-| `chat.external_waiting` | a customer wrote during an own-number chat, at most every 30 minutes per chat (id `external_waiting:<messageId>`) | `{ tenantId, conversationId, messageId }` | ping the staff member who has the chat |
-| `chat.phone_reply` | the owner replied from the phone app | `{ tenantId, conversationId }` | **handled by Dev 1's job** (24-hour return), nothing to do |
+| Event | Sent when | Data |
+|---|---|---|
+| `lead.hot` | a lead turns hot (id `lead_hot:<leadId>`, audit `lead.hot_alerted`, once per lead) | `{ tenantId, leadId, conversationId }` |
+| `voice_note.received` | a voice note was answered with the request to type (id `voice_note:<lastMessageId>`) | ids |
+| `chat.external_waiting` | a customer wrote during an own-number chat, at most every 30 minutes per chat (id `external_waiting:<messageId>`) | `{ tenantId, conversationId, messageId }` |
+| `chat.phone_reply` | the owner replied from the phone app | `{ tenantId, conversationId }`; Dev 1's own job handles it (the AI's return after 24 hours), nothing for others |
 
-4. **Alert wording.** A discount alert goes at once with priority, the summary and the range asked for. A hot-lead alert says "hot lead" and carries the 2 to 5 line summary. Staff alerts, lead cards and staff replies cost no credits.
-5. **The lead card endpoint** is `GET /api/conversations/:id/lead-card` (any member, the business from `X-Pakka-Tenant`). It can be used to fill an alert's text too (`buildLeadCard` in `agent/leadcard/build.ts`).
+4. **What the product owner decided about alerts** (for context; the alerts themselves are Dev 2's): a discount request is alerted at once with priority, the summary and the range asked for; a hot-lead alert says "hot lead" with the 2 to 5 line summary; staff alerts, lead cards and staff replies cost no credits.
+5. **A lead card is available** at `GET /api/conversations/:id/lead-card` (any member, the business from `X-Pakka-Tenant`), built by `buildLeadCard` in `agent/leadcard/build.ts`, if an alert wants its text.
+6. **A link mismatch that touches both Dev 2 and Dev 3.** Dev 1's takeover link opens `/dashboard/inbox?chat=<conversationId>`, which is the parameter the inbox reads (`inbox-screen.tsx`). The staff alerts in `notify/staff-alerts.ts` use `?conversation=<id>`, which the inbox does not read, so those links open the inbox without selecting the chat.
 
-## 4. Dev 3: what to do or check
+## 4. For Dev 3: what Dev 1's work adds in your area
 
-1. **Lead card on the inbox.** `GET /api/conversations/:id/lead-card` returns `contact`, `need`, `languageNote`, `source`, `answers`, `score`, `temperature`, `isHot`, `booking`, `trigger`, `priority`, `sentiment`, `summary`, plus next step, suggested reply and discount (the shape is `LeadCard` in `agent/leadcard/card.ts`). `owner` is null today; it is for you to fill if the lead has an owner.
-2. **A hot lead is not a handoff row.** Your inbox marks any chat with an open handoff as "Needs human", even in AI mode, so a hot lead is only an event plus an audit row. If you want a "hot" marker in the list, read `leads.temperature`.
-3. **The inbox opens on the chat** from the link: `/dashboard/inbox?chat=<conversationId>`, which is the parameter your inbox reads (`inbox-screen.tsx`). Dev 2's staff alerts use `?conversation=<id>` (`notify/staff-alerts.ts`), which the inbox does not read, so those links open the inbox without selecting the chat. One of the two should change; this is for Dev 2 and Dev 3 to agree, not Dev 1.
-4. **The Team screen and consent.** The product owner wants a one-time "I agree" before a staff member's name and number are shown to customers. Not built. For now the link reads `memberships.takeover_pref`: `inbox` blocks the own-number link, `own_number` or `ask` allow it. Treat choosing "own number" in the Team screen as the agreement, with the number saved in `whatsapp_phone`, until a real consent field exists.
-5. **System notes in the chat.** The link adds a `sender: system` message with `meta.event` `takeover` or `own_number_takeover`; the owner's phone-reply note and the 24-hour return note do the same. They should show as small notes, not as bubbles.
-6. **The 24-hour return** closes the chat's open handoffs, like "Return to AI" does.
-7. **Own-number chat.** The conversation mode is `external` and `assigned_user_id` is the staff member. The AI stays out. Staff press "Return to AI" to hand it back; nothing returns it by itself.
+1. **The lead card.** `GET /api/conversations/:id/lead-card` returns `contact`, `need`, `languageNote`, `source`, `answers`, `score`, `temperature`, `isHot`, `booking`, `trigger`, `priority`, `sentiment`, `summary`, plus next step, suggested reply and discount (the shape is `LeadCard` in `agent/leadcard/card.ts`). `owner` is always null: Dev 1 does not know a lead's owner.
+2. **A hot lead is not a handoff row.** Your inbox marks any chat with an open handoff as "Needs human", even in AI mode, so Dev 1 made a hot lead an event plus an audit row. `leads.temperature` holds "hot" if the list wants to show it.
+3. **The link into the inbox** is `/dashboard/inbox?chat=<conversationId>`, the parameter your inbox reads. See Dev 2's point 6 for the other alert links.
+4. **The Team screen and consent.** The product owner wants a one-time "I agree" before a staff member's name and number are shown to customers. Nothing for it exists. Until it does, the own-number link reads `memberships.takeover_pref`: `inbox` blocks it; `own_number` or `ask` allow it. It also needs `memberships.whatsapp_phone`, otherwise the staff member gets an "add your number" page. So the Team screen's own-number choice and number are what the link depends on today.
+5. **System notes in the chat.** The link adds a `sender: system` message with `meta.event` `takeover` or `own_number_takeover`; the owner's phone-reply note and the 24-hour return note are system messages too.
+6. **The 24-hour return** closes the chat's open handoffs, as "Return to AI" does.
+7. **Own-number chats.** The conversation mode is `external` and `assigned_user_id` is the staff member. The AI stays out and nothing returns it by itself; only "Return to AI" does.
 
 ## 5. Still open (Dev 1 follows these up)
 
 1. **Wording in four languages is a draft** and needs a native speaker: the handover sorry, the voice-note request, the own-number notice and greeting, and the "your team member is looking after your chat" line (English, Tamil, Tanglish and Hindi).
-2. **Consent** is not a real "I agree" yet (see Dev 3, point 4).
+2. **Consent** is not a real "I agree" yet (see section 4, point 4).
 3. **The echo payload from Meta (phone-app replies)** was built from Meta's documentation and has not been seen on a real number. It needs a test on staging with a real coexistence number.
 4. **Not run on staging or with the real models.** All of this was tested with fakes and mocked models. Before launch run `pnpm test:conversations -- --live --only <chat>` for the handoff chats.
 5. **The rename from Pakka to Spark** still needs its own planned change: the code, the `X-Pakka-Tenant` header, the `@pakka/*` packages, the token context `"pakka:handoff-link"` (changing it would invalidate links already sent) and the docs.
 
 ## 6. Limits worth knowing
 
-- The link is a credential for 24 hours. It names one person and works once, but anyone holding the alert message can use it before that person does. Staff should not forward alerts.
+- The link is a credential for 24 hours. It names one person and works once, but anyone holding the alert message can use it before that person does.
 - The own-number notice to the customer is best effort: outside the 24-hour window or at zero credits the customer is not told, and the staff member is still sent to them.
 - The link pages are served by the API (Railway), not the frontend. `frontend/app/h/[token]/` is an empty placeholder and is not used.
