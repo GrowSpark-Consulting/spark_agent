@@ -13,6 +13,20 @@ describe("MODELS", () => {
   });
 });
 
+describe("the lead card writer (Day 4)", () => {
+  it("uses the strong model, as a reply does, because it writes a reply staff may send in the customer's language", () => {
+    expect(MODELS.summary).toBe(MODELS.reply);
+    expect(ROLE_SETTINGS.summary).toMatchObject({ model: MODELS.reply, effort: "low" });
+    expect(ROLE_SETTINGS.summary.temperature).toBeUndefined(); // Sonnet 5.5 refuses a non-default value
+  });
+
+  it("has room for the JSON and a tamil-script reply, and a deadline that fits a staff member waiting", () => {
+    expect(ROLE_SETTINGS.summary.maxTokens).toBeGreaterThanOrEqual(1500);
+    expect(ROLE_SETTINGS.summary.attemptTimeoutMs).toBeLessThan(ROLE_SETTINGS.summary.totalTimeoutMs);
+    expect(ROLE_SETTINGS.summary.totalTimeoutMs).toBeLessThanOrEqual(25_000);
+  });
+});
+
 describe("ROLE_SETTINGS", () => {
   it("extraction is deterministic and short: Haiku, temperature 0, no effort setting (Haiku 4.5 refuses one)", () => {
     expect(ROLE_SETTINGS.extraction).toMatchObject({ model: MODELS.extraction, temperature: 0, maxTokens: 1024 });
