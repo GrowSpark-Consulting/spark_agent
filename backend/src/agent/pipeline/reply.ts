@@ -3,6 +3,7 @@ import { NonRetriableError } from "inngest";
 import { normaliseQuestion } from "../../kb/question";
 import type { AuditEntry } from "../../lib/audit";
 import { recordAnswered } from "./answered";
+import { HOT_LEAD_ACTION, HOT_LEAD_EVENT } from "./events";
 import { recordHandoff } from "./handoff";
 import { applyStop, completeOptOut } from "./stop";
 import { stripUnsafeCharacters } from "../../lib/text";
@@ -86,6 +87,8 @@ export interface ReplyOutcome {
   case: string;
   reply: ReplyResult;
   handoff: HandoffSummary | null;
+  /** Staff were told that this lead turned hot ("announced"), or already had been ("already"). Absent when the lead did not just turn hot. */
+  hotLead?: "announced" | "already";
 }
 
 const TAG = "[pipeline]";
@@ -100,6 +103,8 @@ interface PlanSummary {
   optOut: { notInterested: boolean } | null;
   /** The calendar must be looked at or changed before the reply can be written (the "act" step). */
   needsAct: boolean;
+  /** The lead has just turned hot and staff have not been told: announce it once, after the reply. */
+  hotLead: boolean;
 }
 
 interface Loaded {
@@ -126,13 +131,31 @@ async function loadPlanInput(turn: TurnContext, understood: UnderstandResult, de
   const asked = (agent?.extraction as { question?: unknown } | undefined)?.question;
   const settings = parseReplySettings(info?.agentSettings);
   const scheduling = await loadScheduling(turn, understood, texts, agent, firstAt, settings, deps);
+  // Only a lead that is hot can raise the alert, so only then is it looked up whether staff were already told.
+  const hotLeadAlerted = understood.status === "understood" && understood.qualification?.temperature === "hot" ? await store.hasHotLeadAlert(turn.tenantId, turn.leadId) : undefined;
   return {
     agent,
     settings,
     businessName: info?.name ?? null,
     lastAt,
-    input: { ...(scheduling ? { scheduling } : {}), understood, question: typeof asked === "string" ? asked : null, contactLanguage: contact?.language ?? null, previousMisses, settings, deadlineExceeded, exitQuestionPending: previousCase === "exit_unclear", customerSaidOne: texts.some((t) => isJustOne(t.body)), talkButtonTapped: texts.some((t) => t.buttonId === EXIT_BUTTON_IDS.talk) },
+    input: { ...(scheduling ? { scheduling } : {}), ...(hotLeadAlerted === undefined ? {} : { hotLeadAlerted }), understood, question: typeof asked === "string" ? asked : null, contactLanguage: contact?.language ?? null, previousMisses, settings, deadlineExceeded, exitQuestionPending: previousCase === "exit_unclear", customerSaidOne: texts.some((t) => isJustOne(t.body)), talkButtonTapped: texts.some((t) => t.buttonId === EXIT_BUTTON_IDS.talk) },
   };
+}
+
+/**
+ * Tells whoever sends staff alerts that this lead turned hot (an event with ids only, one per lead) and remembers it in the audit log, so it is
+ * said once. Safe to run again: it looks first, and a repeat of the event is dropped by its id. Nothing about the chat changes.
+ */
+async function announceHotLead(turn: TurnContext, deps: ReplyDeps): Promise<"announced" | "already"> {
+  if (await deps.store.hasHotLeadAlert(turn.tenantId, turn.leadId)) return "already";
+  await deps.sendEvent({ id: `lead_hot:${turn.leadId}`, name: HOT_LEAD_EVENT, data: { tenantId: turn.tenantId, leadId: turn.leadId, conversationId: turn.conversationId } });
+  try {
+    await deps.audit({ tenantId: turn.tenantId, actor: "ai", action: HOT_LEAD_ACTION, entity: "lead", entityId: turn.leadId, diff: { temperature: "hot" } });
+  } catch {
+    // The event is out; a lost audit row only means the next hot turn announces again, which the event id drops.
+    console.error(`${TAG} could not record the hot lead alert (business ${turn.tenantId})`);
+  }
+  return "announced";
 }
 
 /** The booking part of the plan input, or undefined when booking is off, does not apply to this business, or nothing about it is going on. */
@@ -232,7 +255,7 @@ async function replan(turn: TurnContext, understood: UnderstandResult, startedAt
   const loaded = await loadPlanInput(turn, understood, clock.exceeded, deps);
   const plan = planReply(loaded.input);
   await keep(deps, turn, { kbMisses: plan.kbMisses, planCase: plan.case });
-  return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null, needsAct: false };
+  return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null, needsAct: false, hotLead: plan.hotLead === true };
 }
 
 /** The customer's answer "1" to the question we asked ("Reply 1 to talk to the team"): the digit alone, in any of the usual forms, with or without a full stop. */
@@ -265,7 +288,7 @@ export async function replyTurn(step: StepRunner, turn: TurnContext, understood:
       }
     }
     await keep(deps, turn, { kbMisses: plan.kbMisses, planCase: plan.case });
-    return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null, needsAct: plan.act !== undefined };
+    return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null, needsAct: plan.act !== undefined, hotLead: plan.hotLead === true };
   });
 
   // The calendar is looked at or changed once (step 6), its result kept on the message, and the plan made again with it in hand.
@@ -291,7 +314,11 @@ export async function replyTurn(step: StepRunner, turn: TurnContext, understood:
         : null;
   const handoff = trigger ? await step.run<HandoffSummary>("handoff", () => openHandoff(turn, trigger, deps)) : null;
 
-  return { case: planned.case, reply, handoff };
+  // A lead that has just turned hot: staff are told once, after the customer has their reply. The chat stays with the AI.
+  const answered = reply.status === "sent" || reply.status === "sent_unknown" || reply.status === "already_answered";
+  const hotLead = planned.hotLead && answered ? await step.run<"announced" | "already">("hot-lead", () => announceHotLead(turn, deps)) : null;
+
+  return { case: planned.case, reply, handoff, ...(hotLead ? { hotLead } : {}) };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

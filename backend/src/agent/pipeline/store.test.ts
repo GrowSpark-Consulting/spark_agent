@@ -559,6 +559,21 @@ describe("getPreviousOffer", () => {
   });
 });
 
+describe("hasHotLeadAlert", () => {
+  it("looks for the audit row that says staff were told, for this business and this lead", async () => {
+    const { db, calls } = fakeDb(() => ({ data: [{ id: 1 }] }));
+    expect(await createPipelineStore(db).hasHotLeadAlert(T, LEAD)).toBe(true);
+    expect(calls[0].table).toBe("audit_logs");
+    tenantFilter(calls[0]);
+    expect(filter(calls[0], "action")).toEqual(["action", "eq", "lead.hot_alerted"]);
+    expect(filter(calls[0], "entity_id")).toEqual(["entity_id", "eq", LEAD]);
+  });
+
+  it("is false when there is none", async () => {
+    expect(await createPipelineStore(fakeDb(() => ({ data: [] })).db).hasHotLeadAlert(T, LEAD)).toBe(false);
+  });
+});
+
 describe("saveLeadScore", () => {
   it("writes the score and temperature of an open lead of this business, by id", async () => {
     const { db, calls } = fakeDb(() => ({ data: [{ id: LEAD }] }));

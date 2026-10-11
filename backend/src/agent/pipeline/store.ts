@@ -5,7 +5,7 @@ import { AppError } from "../../lib/errors";
 import { parsePendingState, type PendingState } from "../scheduling/state";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { TimeoutError, withTimeout } from "../../lib/timeout";
-import { ANSWERED_ACTION } from "./events";
+import { ANSWERED_ACTION, HOT_LEAD_ACTION } from "./events";
 
 // The message pipeline's reads and writes, with the service role. It bypasses row-level security, so every
 // query names its business (`tenant_id`; for the tenants table, its own `id`), and the business always comes
@@ -140,6 +140,8 @@ export interface PipelineStore {
    * lead is still open (new, engaged, qualified, nurture). A booked, visited, won or lost lead keeps what it had. True when it changed.
    */
   saveLeadScore(tenantId: string, leadId: string, result: { score: number; temperature: "hot" | "warm" | "cold" | "disqualified" }): Promise<boolean>;
+  /** Whether staff were already told that this lead turned hot (the audit row the reply step writes), so it is told once per lead. */
+  hasHotLeadAlert(tenantId: string, leadId: string): Promise<boolean>;
   /**
    * The offer of times waiting for the customer's answer, as the chat's latest earlier turn left it (`messages.meta.agent.offer` on the
    * customer message that turn answered, before `before`): the newest message that says anything about an offer decides, and `null` (the
@@ -451,6 +453,14 @@ export function createPipelineStore(db: SupabaseClient = supabaseAdmin(), { time
         if (agent && typeof agent.planCase === "string") return agent.planCase;
       }
       return null;
+    },
+
+    async hasHotLeadAlert(tenantId, leadId) {
+      const { data, error } = await run("check hot lead alert", (signal) =>
+        db.from("audit_logs").select("id").eq("tenant_id", tenantId).eq("action", HOT_LEAD_ACTION).eq("entity_id", leadId).limit(1).abortSignal(signal),
+      );
+      if (error) fail("check hot lead alert", error);
+      return Array.isArray(data) && data.length > 0;
     },
 
     async getPreviousOffer(tenantId, conversationId, before) {

@@ -1,6 +1,7 @@
 import { vi, type Mock } from "vitest";
 import type { AuditEntry } from "../lib/audit";
 import type { SendOutcome } from "../notify/send";
+import { HOT_LEAD_ACTION } from "../agent/pipeline/events";
 import { fakePipelineStore, type FakeMessage } from "./fake-pipeline-store";
 import type { LlmClient, LlmRequest, LlmResult } from "../agent/llm/anthropic";
 import type { FoundSlot, SchedulingDeps, SchedulingPort } from "../agent/scheduling/act";
@@ -32,7 +33,7 @@ export const MON_17 = found("2026-10-12T12:00:00.000Z", "Mon 12 Oct, 5:30 pm");
 export const plain = (s: FoundSlot) => ({ start: s.start, end: s.end, resourceId: s.resourceId, serviceId: s.serviceId, label: s.label });
 export const OFFER = { slots: [SUN_10, SUN_15, MON_17].map(plain), at: at(120) };
 
-export const ready: QualificationSummary = { score: 75, temperature: "hot", ask: [], missingRequired: [], readyForSlots: true, hardFail: null, bookingKind: "site_visit" };
+export const ready: QualificationSummary = { score: 50, temperature: "warm", ask: [], missingRequired: [], readyForSlots: true, hardFail: null, bookingKind: "site_visit" };
 const skipped: Retrieval = { outcome: "skipped" };
 export const understood = (over: Record<string, unknown> = {}, q: QualificationSummary = ready): UnderstandResult => ({
   status: "understood",
@@ -117,12 +118,13 @@ export function world(over: Options = {}) {
   const audit = vi.fn(async (entry: AuditEntry) => {
     audits.push(entry);
     if (entry.action === "message.answered" && entry.entityId) fake.answered.set(entry.entityId, NOW);
+    if (entry.action === HOT_LEAD_ACTION && entry.entityId) fake.hotAlerted.add(entry.entityId);
   });
   const sendEvent = vi.fn<ReplyDeps["sendEvent"]>(async () => undefined);
   const systemNotice = { send: vi.fn(async () => ({ status: "awaiting_notify_kind" as const })) };
   const deps: ReplyDeps = { store: fake.store, llm, send, audit, sendEvent, systemNotice, privacyPolicyUrl: "https://example.test/privacy", scheduling, now: () => NOW };
   const turn: TurnContext = { tenantId: A, conversationId: CONV, contactId: CONTACT, leadId: LEAD, leadCreated: false, messageIds: [M1], language: null, vertical: "sample-pack", verticalVersion: 1 };
-  return { ...fake, complete, port, scheduling, send, deps, turn };
+  return { ...fake, complete, port, scheduling, send, sendEvent, audits, deps, turn };
 }
 
 

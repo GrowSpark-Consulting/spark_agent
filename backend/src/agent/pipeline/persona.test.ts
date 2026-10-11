@@ -6,17 +6,17 @@ import { parseReplySettings } from "./persona";
 
 describe("parseReplySettings", () => {
   it("reads the persona and the tone the dashboard saves", () => {
-    expect(parseReplySettings({ persona: "Maya", tone: "formal" })).toEqual({ persona: "Maya", tone: "formal", kbGapHandoffEnabled: true, askedHumanHandoffEnabled: true, complaintHandoffEnabled: true, privacyNotice: false, bookingServiceId: null });
+    expect(parseReplySettings({ persona: "Maya", tone: "formal" })).toEqual({ persona: "Maya", tone: "formal", kbGapHandoffEnabled: true, askedHumanHandoffEnabled: true, complaintHandoffEnabled: true, privacyNotice: false, bookingServiceId: null, negotiationHandoffEnabled: true, hotLeadAlertEnabled: true });
   });
 
   it("uses no persona and the friendly tone when nothing is saved", () => {
     for (const raw of [{}, null, undefined, "text", 5, []]) {
-      expect(parseReplySettings(raw)).toEqual({ persona: null, tone: "friendly", kbGapHandoffEnabled: true, askedHumanHandoffEnabled: true, complaintHandoffEnabled: true, privacyNotice: false, bookingServiceId: null });
+      expect(parseReplySettings(raw)).toEqual({ persona: null, tone: "friendly", kbGapHandoffEnabled: true, askedHumanHandoffEnabled: true, complaintHandoffEnabled: true, privacyNotice: false, bookingServiceId: null, negotiationHandoffEnabled: true, hotLeadAlertEnabled: true });
     }
   });
 
   it("ignores a tone that is not offered and a persona that is not text, keeping the rest", () => {
-    expect(parseReplySettings({ persona: 42, tone: "sarcastic" })).toEqual({ persona: null, tone: "friendly", kbGapHandoffEnabled: true, askedHumanHandoffEnabled: true, complaintHandoffEnabled: true, privacyNotice: false, bookingServiceId: null });
+    expect(parseReplySettings({ persona: 42, tone: "sarcastic" })).toEqual({ persona: null, tone: "friendly", kbGapHandoffEnabled: true, askedHumanHandoffEnabled: true, complaintHandoffEnabled: true, privacyNotice: false, bookingServiceId: null, negotiationHandoffEnabled: true, hotLeadAlertEnabled: true });
     expect(parseReplySettings({ persona: { x: 1 }, tone: "formal" }).tone).toBe("formal");
   });
 

@@ -1,0 +1,22 @@
+name: A customer who asks for a discount is never given one, and staff are told at once
+description: "Day 4 (Raja, 11 Oct): the assistant never agrees to a price change. It says a team member will look at it, the chat goes to a person at high priority, and the alert card (built separately) says what was asked."
+kb:
+  - "2BHK of 950 sq ft in Velachery starts at ₹78 lakh."
+turns:
+  - customer: "The 2BHK is ₹78 lakh, can you do it for 70? I can pay in cash"
+    mock:
+      extraction: { language: en, intent: price_negotiation, question: null }
+      reply: "I am not able to change prices myself, but a team member will look at this and get back to you."
+    expect:
+      aiReplies: 1
+      handoff: { trigger: negotiation, priority: high }
+      mode: human
+      reply: { sent: true, notContains: ["₹70", "70 lakh", "discount of"] }
+    mockOnly:
+      case: negotiation
+  - customer: "Please confirm 70 lakh then"
+    mock:
+      extraction: { language: en, intent: price_negotiation, question: null }
+    expect:
+      aiReplies: 0
+      mode: human

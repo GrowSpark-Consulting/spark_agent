@@ -7,7 +7,13 @@ import { nameForPrompt } from "../prompts/shared";
 // is missing or not the expected shape is ignored (the default persona and tone are used), never an error: a broken
 // setting must not stop a customer's reply.
 
-const TRIGGER_KEYS = { kb_gap: ["kb_gap", "gap"], asked_human: ["asked_human", "human"], complaint: ["complaint"] } as const;
+const TRIGGER_KEYS = {
+  kb_gap: ["kb_gap", "gap"],
+  asked_human: ["asked_human", "human"],
+  complaint: ["complaint"],
+  negotiation: ["negotiation", "price_negotiation"],
+  hot_lead: ["hot_lead", "hot"],
+} as const;
 
 const Settings = z.object({
   persona: z.string().optional().catch(undefined),
@@ -29,6 +35,10 @@ export interface ReplySettings {
   /** The business switched off the handover for "wants a person" or for a complaint / an angry customer. */
   askedHumanHandoffEnabled: boolean;
   complaintHandoffEnabled: boolean;
+  /** The business switched off the handover for a customer who asks for a discount (the assistant still never agrees to one). */
+  negotiationHandoffEnabled: boolean;
+  /** The business switched off the one alert to staff when a lead turns hot. */
+  hotLeadAlertEnabled: boolean;
   /** The first AI reply to a contact carries the privacy notice. Off unless the business turns it on (Raja, 9 Oct: switchable if legal review requires it). */
   privacyNotice: boolean;
   /**
@@ -49,6 +59,8 @@ export function parseReplySettings(raw: unknown): ReplySettings {
     kbGapHandoffEnabled: enabled(TRIGGER_KEYS.kb_gap),
     askedHumanHandoffEnabled: enabled(TRIGGER_KEYS.asked_human),
     complaintHandoffEnabled: enabled(TRIGGER_KEYS.complaint),
+    negotiationHandoffEnabled: enabled(TRIGGER_KEYS.negotiation),
+    hotLeadAlertEnabled: enabled(TRIGGER_KEYS.hot_lead),
     privacyNotice: settings.privacyNotice === true,
     bookingServiceId: settings.bookingServiceId ?? null,
   };
