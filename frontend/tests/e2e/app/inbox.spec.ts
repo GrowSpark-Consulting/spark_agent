@@ -513,6 +513,239 @@ test.describe("Inbox · staff reply", () => {
   });
 });
 
+// "Suggest reply" in the reply box: POST /api/conversations/:id/suggest (backend/src/agent/leadcard/suggest.ts), stood in for with
+// page.route (the real route needs the model). It only ever fills the box; nothing is sent until Send is pressed.
+const SUGGEST_PATH = new RegExp(`/api/conversations/${cid(1)}/suggest$`);
+
+test.describe("Inbox · suggested reply", () => {
+  test.use({ storageState: SIGNED_OUT });
+
+  type Answer = { status: number; body: unknown } | "abort";
+  type Call = { method: string; tenant: string | null; authorization: string | null; body: string };
+  const suggestion = (reply: string | null, language: string | null = "ta-en") => ({ status: 200, body: { reply, language, reason: reply === null ? "unavailable" : null } });
+
+  async function mockSuggest(page: Page, answer: (n: number) => Answer | Promise<Answer>) {
+    const calls: Call[] = [];
+    await page.route(SUGGEST_PATH, async (route) => {
+      const req = route.request();
+      if (req.method() === "OPTIONS") return route.fallback();
+      calls.push({ method: req.method(), tenant: req.headers()["x-pakka-tenant"] ?? null, authorization: req.headers()["authorization"] ?? null, body: req.postData() ?? "" });
+      const result = await answer(calls.length);
+      if (result === "abort") return route.abort("failed");
+      return route.fulfill({ status: result.status, contentType: "application/json", body: JSON.stringify(result.body) });
+    });
+    return calls;
+  }
+
+  /** Stands in for POST /api/conversations/:id/messages and counts what is sent: a suggestion must never reach it by itself. */
+  async function mockSend(page: Page) {
+    const sent: string[] = [];
+    await page.route(new RegExp(`/api/conversations/${cid(1)}/messages$`), async (route) => {
+      if (route.request().method() === "OPTIONS") return route.fallback();
+      sent.push(route.request().postData() ?? "");
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ messageId: "41000000-0000-0000-0000-000000000801", providerMsgId: "wamid.OUT", status: "accepted" }) });
+    });
+    return sent;
+  }
+
+  /** Karthik's chat, taken over by a person (the mode route is stood in for), so the reply box is open. */
+  async function openComposer(page: Page) {
+    await mockRealtime(page);
+    await mockMode(page);
+    await openInbox(page);
+    await row(page, /Karthik R/).click();
+    await whoReplies(page).getByRole("button", { name: "Human" }).click();
+    await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+  }
+
+  const box = (page: Page) => page.getByRole("textbox", { name: "Message" });
+  const suggestButton = (page: Page) => page.getByRole("button", { name: /^(Suggest reply|Suggesting…)$/ });
+
+  test("fills an empty box and sends nothing", async ({ page }) => {
+    const calls = await mockSuggest(page, () => suggestion("Vanakkam Karthik! The 3BHK is ready; shall we fix a visit on Monday?"));
+    const sent = await mockSend(page);
+    await openComposer(page);
+    await expect(suggestButton(page)).toHaveText("Suggest reply");
+    await suggestButton(page).click();
+
+    await expect(box(page)).toHaveValue("Vanakkam Karthik! The 3BHK is ready; shall we fix a visit on Monday?");
+    await expect(page.getByRole("status").filter({ hasText: "Suggested reply added in Tanglish. Read it before you send." })).toBeVisible();
+    await expect(box(page)).toBeFocused();
+    // The member's own request: their token, their business, no body.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ method: "POST", tenant: INBOX_TENANT, body: "" });
+    expect(calls[0].authorization).toMatch(/^Bearer /);
+    // Nothing was sent, and nothing is sent by itself afterwards either.
+    await page.waitForTimeout(500);
+    expect(sent).toEqual([]);
+    await expect(chatLog(page).getByText("The 3BHK is ready; shall we fix a visit")).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+
+    // It is an ordinary draft: editable, and only Send sends it.
+    await box(page).fill("Vanakkam Karthik! Shall we fix a visit on Monday?");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(box(page)).toHaveValue("");
+    expect(sent.map((s) => JSON.parse(s))).toEqual([{ body: "Vanakkam Karthik! Shall we fix a visit on Monday?" }]);
+  });
+
+  test("keeps a draft the member already typed unless they choose to replace it", async ({ page }) => {
+    const calls = await mockSuggest(page, () => suggestion("Suggested words"));
+    const sent = await mockSend(page);
+    await openComposer(page);
+    await box(page).fill("My own words");
+    await suggestButton(page).click();
+
+    const offer = page.getByRole("group", { name: "Suggested reply" });
+    await expect(offer).toBeVisible();
+    await expect(offer.getByTestId("suggested-reply-preview")).toHaveText("Suggested words");
+    await expect(box(page)).toHaveValue("My own words");
+
+    await offer.getByRole("button", { name: "Keep my draft" }).click();
+    await expect(offer).toHaveCount(0);
+    await expect(box(page)).toHaveValue("My own words");
+
+    await suggestButton(page).click();
+    await offer.getByRole("button", { name: "Replace my draft" }).click();
+    await expect(offer).toHaveCount(0);
+    await expect(box(page)).toHaveValue("Suggested words");
+    expect(calls).toHaveLength(2);
+    await page.waitForTimeout(300);
+    expect(sent).toEqual([]);
+  });
+
+  test("shows the offer inside the screen at every width", async ({ page }) => {
+    await mockSuggest(page, () => suggestion("A fairly long suggested reply that goes on for a while so the offer has to wrap onto several lines on a narrow phone screen without pushing the page wider than the viewport."));
+    await openComposer(page);
+    await box(page).fill("Draft");
+    await suggestButton(page).click();
+    await expect(page.getByRole("group", { name: "Suggested reply" })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test("says there is no suggestion this time when the API has none, and keeps the draft", async ({ page }) => {
+    const calls = await mockSuggest(page, () => suggestion(null, "en"));
+    await openComposer(page);
+    await box(page).fill("Half written");
+    await suggestButton(page).click();
+    await expect(page.getByRole("status").filter({ hasText: "No suggestion this time. Write your own reply." })).toBeVisible();
+    await expect(box(page)).toHaveValue("Half written");
+    await expect(page.getByRole("group", { name: "Suggested reply" })).toHaveCount(0);
+    await expect(page.locator('form [role="alert"]')).toHaveCount(0);
+    // It can be asked again.
+    await expect(suggestButton(page)).toBeEnabled();
+    expect(calls).toHaveLength(1);
+  });
+
+  test("shows a failure in the box, never the raw error, and keeps the draft", async ({ page }) => {
+    const calls = await mockSuggest(page, (n) => (n === 1 ? { status: 502, body: { error: { code: "upstream_failed", message: "We couldn't build the lead card just now. Try again in a moment." } } } : n === 2 ? "abort" : { status: 200, body: { reply: 7 } }));
+    await openComposer(page);
+    await box(page).fill("Keep me");
+    const alert = page.locator('form [role="alert"]');
+
+    await suggestButton(page).click();
+    await expect(alert).toContainText("Couldn’t get a suggestion.");
+    await expect(alert).toContainText("We couldn't build the lead card just now.");
+    await expect(alert).toContainText("Your draft is untouched.");
+    await expect(alert).not.toContainText(/upstream_failed|502/);
+    await expect(box(page)).toHaveValue("Keep me");
+
+    await suggestButton(page).click();
+    await expect(alert).toContainText("Couldn’t get a suggestion.");
+    await expect(alert).not.toContainText(/Failed to fetch|TypeError|ERR_/);
+
+    await suggestButton(page).click();
+    await expect(alert).toContainText("The suggestion came back in a form we couldn't read.");
+    await expect(box(page)).toHaveValue("Keep me");
+    expect(calls).toHaveLength(3);
+  });
+
+  test("a conversation the API doesn't find is reported in its own words", async ({ page }) => {
+    await mockSuggest(page, () => ({ status: 404, body: { error: { code: "not_found", message: "That conversation was not found." } } }));
+    await openComposer(page);
+    await suggestButton(page).click();
+    await expect(page.locator('form [role="alert"]')).toContainText("That conversation was not found.");
+    await expect(box(page)).toHaveValue("");
+  });
+
+  test("shows it is working and sends one request however often it is pressed", async ({ page }) => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const calls = await mockSuggest(page, async () => {
+      await held;
+      return suggestion("Done thinking");
+    });
+    await openComposer(page);
+    await suggestButton(page).dblclick();
+    await expect(suggestButton(page)).toHaveText("Suggesting…");
+    await expect(suggestButton(page)).toBeDisabled();
+    await expect(suggestButton(page)).toHaveAttribute("aria-busy", "true");
+    release();
+    await expect(box(page)).toHaveValue("Done thinking");
+    await expect(suggestButton(page)).toHaveText("Suggest reply");
+    expect(calls).toHaveLength(1);
+  });
+
+  test("an answer that arrives after the member left the chat is not put in another chat's box", async ({ page }) => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const calls = await mockSuggest(page, async () => {
+      await held;
+      return suggestion("Late words for Karthik");
+    });
+    await openComposer(page);
+    await suggestButton(page).click();
+    await expect.poll(() => calls.length).toBe(1);
+
+    if (isMobile(page)) await page.getByRole("button", { name: "Back" }).click();
+    await row(page, /Lakshmi V/).click();
+    await expect(page.getByText("24-hour window closed.")).toBeVisible();
+    if (isMobile(page)) await page.getByRole("button", { name: "Back" }).click();
+    await row(page, /Karthik R/).click();
+    // Back on Karthik (still taken over): a new box, empty, with its button ready; the old request finishing changes nothing.
+    await expect(box(page)).toHaveValue("");
+    await expect(suggestButton(page)).toHaveText("Suggest reply");
+    release();
+    await page.waitForTimeout(400);
+    await expect(box(page)).toHaveValue("");
+    await expect(page.getByRole("group", { name: "Suggested reply" })).toHaveCount(0);
+  });
+
+  test("an answer that arrives after a message was sent meanwhile is dropped", async ({ page }) => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const calls = await mockSuggest(page, async () => {
+      await held;
+      return suggestion("Out-of-date words");
+    });
+    const sent = await mockSend(page);
+    await openComposer(page);
+    await suggestButton(page).click();
+    await expect.poll(() => calls.length).toBe(1);
+    await box(page).fill("I'll answer myself");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(box(page)).toHaveValue("");
+    expect(sent).toHaveLength(1);
+
+    release();
+    await expect(page.getByRole("status").filter({ hasText: "wasn’t added" })).toBeVisible();
+    await expect(box(page)).toHaveValue("");
+    expect(sent).toHaveLength(1);
+  });
+
+  test("is offered only where a reply can be typed", async ({ page }) => {
+    await mockRealtime(page);
+    await openInbox(page);
+    await row(page, /Karthik R/).click();
+    // The AI has the chat: no box, so no button.
+    await expect(page.getByText("AI is replying. Switch to Human to reply.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Suggest reply" })).toHaveCount(0);
+    if (isMobile(page)) await page.getByRole("button", { name: "Back" }).click();
+    await row(page, /Lakshmi V/).click();
+    await expect(page.getByText("24-hour window closed.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Suggest reply" })).toHaveCount(0);
+  });
+});
+
 test.describe("Inbox · who replies", () => {
   test.use({ storageState: SIGNED_OUT });
 
