@@ -515,3 +515,41 @@ test.describe("WhatsApp connection checks", () => {
     await expect(page.locator("body")).not.toContainText(/number disconnected/i);
   });
 });
+
+// Template approval status (Day 5, Dev 3): whatsapp_templates read under RLS (0007), shown per number. Nothing here submits a template.
+test.describe("WhatsApp connection panel · template approval", () => {
+  test.use({ storageState: SIGNED_OUT });
+  const templates = (page: Page) => page.getByTestId("template-status");
+
+  test("shows each template's stored status and Meta's reason for a rejection", async ({ page, request }) => {
+    const account = await newWhatsappAccount(request);
+    const set = await request.post(`${MOCK_SUPABASE_URL}/__mock/whatsapp-templates`, {
+      data: {
+        email: account.email,
+        templates: [
+          { name: "reminder_24h_v1", language: "en", status: "approved" },
+          { name: "reminder_24h_v1", language: "ta", status: "pending" },
+          { name: "followup_v1", language: "en", category: "marketing", status: "rejected", rejection_reason: "Variables are not allowed at the start." },
+        ],
+      },
+    });
+    expect(set.ok()).toBe(true);
+    await signIn(page, account.email, "/dashboard/whatsapp");
+    await expect(templates(page)).toContainText("1 approved, 1 waiting for Meta, 1 rejected.");
+    const rows = templates(page).getByTestId("template-row");
+    await expect(rows).toHaveCount(3);
+    await expect(rows.filter({ hasText: "followup_v1" })).toHaveAttribute("data-status", "rejected");
+    await expect(rows.filter({ hasText: "followup_v1" })).toContainText("Meta said: “Variables are not allowed at the start.”");
+    await expect(rows.filter({ hasText: "Tamil" })).toContainText("Waiting for Meta");
+    await expect(rows.filter({ hasText: "Tamil" })).toContainText("can't be sent until Meta approves it");
+    await expectNoSecrets(page);
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test("says none have been submitted when there are none, and claims no approval", async ({ page, request }) => {
+    const account = await newWhatsappAccount(request);
+    await signIn(page, account.email, "/dashboard/whatsapp");
+    await expect(templates(page)).toContainText("No templates have been submitted for this number yet.");
+    await expect(templates(page)).not.toContainText("approved");
+  });
+});
