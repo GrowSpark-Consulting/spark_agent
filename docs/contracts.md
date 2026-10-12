@@ -219,9 +219,11 @@ language and its body variables in {{1}}… order. It is sent whatever the 24-ho
 recorded with its name (`messages.template_name`). Only a template with `status = 'approved'` on the business's
 connected number is used (`not_found`, "That template isn't approved for this WhatsApp number."); the number of values
 must match the body's variables (`validation_failed`, "This template needs 2 values."); a malformed name or language is
-`validation_failed` before anything is read. Other kinds cannot pass `template`. For the inbox route
-(`POST /api/conversations/:id/messages`), the body would be `{ "template": { "name", "language", "params" } }`
-instead of `{ "body" }`, passed through to `notify.send` with the staff member as actor.
+`validation_failed` before anything is read. Other kinds cannot pass `template`. The inbox route
+(`POST /api/conversations/:id/messages`, built 12 Oct) takes `{ "template": { "name", "language", "params" } }` instead of
+`{ "body" }` (`SendStaffTemplateInput` in `@pakka/types`; a body with both is refused) and passes it to `notify.send` with the
+staff member as actor; the chat must be in human mode, as for text. The picker reads the approved templates from
+`whatsapp_templates` under RLS (0007).
 
 **Idempotency key (built, 9 Oct):** a job that may retry passes `idempotencyKey` (up to 200 characters, for example
 `reminder_24h:<bookingId>:<start>`). The message id is derived from the business, the kind and the key, so once
@@ -780,6 +782,7 @@ Plain lists (leads, conversations, bookings, services) are read directly under R
 | 16 | A send whose outcome is unknown (a timeout, a network failure or an unreadable answer from Meta) | **Proposed by Dev 2 (8 Oct):** hold the credit until Meta's status says sent or failed, instead of refunding. Needs Raja, because it changes billing, and a way to match Meta's status webhook to the send. Until then `notify.send` refunds (decision 2) and reports `outcomeUnknown: true`, so no caller sends the message again | Raja |
 | 17 | Handoff SLA (`handoff-sla`) | **Proposed by Dev 2 (9 Oct):** 15 minutes by default, each business can change it (`sla_minutes`, section 3); counted from the handoff at any time of day (business hours not yet considered); the escalation goes to owners only. The handover gives no number | Raja |
 | 18 | Lead nudges timing (`lead-nudges`) | **Proposed by Dev 2 (9 Oct):** the handover says "after 2 h and 24 h, then nurture". The second nudge goes at **23 h**, so it is still free text inside the customer's 24-hour window (at 24 h only an approved marketing template could go, and none is approved yet); a lead still quiet at **48 h** moves to nurture. Each business can change all three (section 3) | Raja |
+| 19 | A booking made in the chat gets no separate confirmation message | **Proposed by Dev 2 (12 Oct):** the assistant's own reply confirms the booking (Dev 1's Day 3 note), so `booking_confirmation` sends nothing on `booking.confirmed` and shows as "Not available yet" on the Features screen; a customer would otherwise get two. The `booking_confirmed_vN` template stays in the catalogue for bookings made outside the chat (by staff from the dashboard, when that exists) | Raja |
 
 ## 9. Knowledge base (PROPOSED, not agreed)
 
