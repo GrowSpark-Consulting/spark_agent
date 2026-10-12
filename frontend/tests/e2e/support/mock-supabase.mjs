@@ -703,6 +703,18 @@ ${choose("Cancel", "cancel=1")}
     for (const key of WA_PATCHABLE) if (key in patch) rows[0][key] = patch[key];
     return send(res, 200, rows[0]);
   }
+  if (path === "/__mock/whatsapp-templates" && req.method === "POST") {
+    // { email, templates: [{ name, language?, category?, status, rejection_reason? }] } → whatsapp_templates as the business's number has them.
+    const { email, templates } = await readBody(req);
+    const user = USERS[email];
+    const connectionId = user?.view?.body?.[0]?.id;
+    if (!connectionId) return send(res, 404, { msg: "no such connection" });
+    user.templates = templates.map((t) => ({
+      id: randomUUID(), tenant_id: user.memberships[0][0].id, connection_id: connectionId,
+      language: "en", category: "utility", rejection_reason: null, ...t,
+    }));
+    return send(res, 200, user.templates);
+  }
   if (path === "/__mock/memberships") {
     // A user's membership rows as stored, for checking writes: ?email=<email>.
     const email = String(url.searchParams.get("email") ?? "").toLowerCase();
@@ -841,6 +853,11 @@ ${choose("Cancel", "cancel=1")}
       const view = USERS[email].view;
       if (view.delay) await new Promise((r) => setTimeout(r, view.delay));
       return send(res, view.status, view.body);
+    }
+    if (table === "whatsapp_templates") {
+      // Members read their own business's templates (0007 tenant_read); none until a test sets them.
+      if (!email) return send(res, 200, []);
+      return send(res, 200, USERS[email].templates ?? []);
     }
     if (table === "kb_documents") {
       // RLS as in 0001: members read their own businesses' documents and write none.

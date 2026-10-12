@@ -3,11 +3,13 @@ import type { Role, WhatsAppConnectionPublic } from "@pakka/types";
 import { unstable_rethrow } from "next/navigation";
 import { WhatsAppConnectionActions } from "@/components/dashboard/whatsapp-connection-actions";
 import { WhatsAppConnectionChecks } from "@/components/dashboard/whatsapp-connection-checks";
+import { WhatsAppTemplateStatus } from "@/components/dashboard/whatsapp-template-status";
 import { EmptyState, ErrorState } from "@/components/shared/states";
 import { getAuth } from "@/lib/auth/session";
 import { formatError } from "@/lib/errors";
 import { visibleActions } from "@/lib/whatsapp/connection-actions";
 import { parseLastCheck, webhookUnconfirmed } from "@/lib/whatsapp/last-check";
+import { fetchTemplates, type TemplateStatusRow } from "@/lib/whatsapp/templates";
 
 const STATUS: Record<WhatsAppConnectionPublic["status"], { label: string; tone: "ok" | "warn" | "off"; detail: string }> = {
   active: { label: "Connected", tone: "ok", detail: "Your assistant replies to customers from this number." },
@@ -94,6 +96,18 @@ export async function WhatsAppConnectionPanel({ tenantId, role, compact }: { ten
 
   const allDisconnected = result.connections.every((c) => c.status === "disconnected");
 
+  // Template approval is read with the signed-in member's own client (RLS). The full screen only: Home's card doesn't show it. A failed
+  // read doesn't take the connection down with it: the numbers still show, and the template block says it couldn't be loaded.
+  let templates: TemplateStatusRow[] | null = null;
+  if (!compact) {
+    try {
+      const { supabase } = await getAuth();
+      templates = await fetchTemplates(supabase, tenantId);
+    } catch (err) {
+      unstable_rethrow(err);
+    }
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <ul className="app-grid" style={{ listStyle: "none", margin: 0, padding: 0 }} aria-label="WhatsApp numbers">
@@ -142,6 +156,7 @@ export async function WhatsAppConnectionPanel({ tenantId, role, compact }: { ten
                     </div>
                   </dl>
                   <WhatsAppConnectionChecks lastCheck={last} canRecheck={actions.includes("recheck")} />
+                  <WhatsAppTemplateStatus templates={templates && templates.filter((t) => t.connectionId === c.id)} />
                   {role ? <WhatsAppConnectionActions connectionId={c.id} tenantId={tenantId} displayPhone={c.display_phone} actions={actions} /> : null}
                 </>
               ) : null}
