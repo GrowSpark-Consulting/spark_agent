@@ -34,7 +34,8 @@ const row = (over: Row = {}): Row => ({
   last_check: {}, quality_rating: null, messaging_limit: null, created_at: "2026-10-01T00:00:00Z", token_enc: "enc:token", ...over,
 });
 
-function world(rows: Row[] = [row()], over: { probe?: MetaProbe; graph?: Graph; webhookSeen?: boolean; decrypt?: () => string } = {}) {
+function world(rows: Row[] = [row()], over: { probe?: MetaProbe; graph?: Graph; webhookSeen?: boolean; webhookSeenLater?: boolean; decrypt?: () => string } = {}) {
+  let seenCalls = 0;
   const t = fakeTables({ whatsapp_connections: rows });
   const audits: { action: string; diff: unknown; actor: string; tenantId: string | null }[] = [];
   const graph = vi.fn(over.graph ?? healthy);
@@ -43,14 +44,14 @@ function world(rows: Row[] = [row()], over: { probe?: MetaProbe; graph?: Graph; 
     probe: vi.fn(async () => over.probe ?? GOOD),
     graph,
     decrypt: (over.decrypt ?? (() => TOKEN)) as RecheckDeps["decrypt"],
-    webhookSeen: async () => over.webhookSeen ?? true,
+    webhookSeen: async () => (++seenCalls === 1 ? (over.webhookSeen ?? true) : (over.webhookSeenLater ?? over.webhookSeen ?? true)),
     testMessage: vi.fn(async () => SIXTH),
     audit: vi.fn(async (entry) => {
       audits.push({ action: entry.action, diff: entry.diff, actor: entry.actor, tenantId: entry.tenantId });
     }),
     now: () => NOW,
   };
-  return { ...t, deps, audits, graph, conn: () => t.tables.whatsapp_connections[0] };
+  return { ...t, deps, audits, graph, seenReads: () => seenCalls, conn: () => t.tables.whatsapp_connections[0] };
 }
 const codeOf = async (p: Promise<unknown>) => ((await p.then(() => null, (e: unknown) => e)) as AppError | null)?.code;
 
@@ -91,6 +92,20 @@ describe("recheck", () => {
     const first = (w.conn().last_check as { checks: { key: string; status: string; message: string }[] }).checks[0];
     expect(first).toMatchObject({ key: "token_permissions", status: "fail", message: expect.stringContaining("expired or is no longer valid") });
     expect(w.deps.testMessage).not.toHaveBeenCalled();
+  });
+
+  it("a webhook that arrives while the test message is sent is not lost: the saved webhook check is a pass", async () => {
+    const w = world([row()], { webhookSeen: false, webhookSeenLater: true });
+    await recheckConnection(context("owner"), CONN, w.deps);
+    const last = w.conn().last_check as { overall: string; checks: { key: string; status: string }[] };
+    expect(last.checks.find((c) => c.key === "webhook_subscribed")?.status).toBe("pass");
+    expect(last.overall).toBe("pass");
+  });
+
+  it("does not read the webhook proof a second time when the first read already found it", async () => {
+    const w = world([row()], { webhookSeen: true });
+    await recheckConnection(context("owner"), CONN, w.deps);
+    expect(w.seenReads()).toBe(1);
   });
 
   it("a failed number that is now right becomes active again", async () => {

@@ -24,3 +24,15 @@ For Dev 2: nothing. The send path (`meta-errors.ts`) already mapped 190 to `what
 5. Known limit: a recheck that is running when the owner disconnects can still send its POST after the disconnect's unsubscribe; the recheck then fails to save and the number stays disconnected, but Meta keeps the subscription until the next disconnect or a manual change.
 
 For Dev 3: the `last_check` shape is unchanged; a missing subscription now arrives as `status: "warn"` on `webhook_subscribed`, and the connection stays `active`. For Dev 2: nothing.
+
+## 3. The first signed webhook clears the waiting note (PR 3)
+
+1. When a webhook signed with a `manual_byo` connection's own app secret names it, `connect/webhook-seen.ts` (already writing the one `webhook_seen` audit row per connection) also turns the stored `webhook_subscribed` check of that connection into `pass` when it is `not_verified` (waiting for that webhook), with the message "Your app is subscribed, and a signed webhook from it has arrived.", and works `overall` out again (`withWebhookConfirmed` and `withCheck` in `checks.ts`). The owner no longer has to press Recheck. A `warn` (Meta's list showed nothing subscribed) is left for a recheck, so the stored result does not contradict Meta's own answer.
+2. The status is never changed. Only an `active` manual_byo connection of that business is touched. A repeat writes nothing. `ran_at` stays as it was. The update is guarded by the row's `updated_at` as it was read (a trigger moves it on every write), so nothing saved in between, a recheck or the sixth check of a connect, is overwritten with an older copy; a guard that misses is looked at again by a later webhook.
+3. The test message of a connect or recheck can itself bring the first signed webhook (its delivery statuses come from the business's own app). So both save the sixth check after reading the webhook proof again (only when the first read did not already find it), so that write does not put the waiting note back.
+4. It never blocks or delays the webhook's answer (the call was never awaited by `inbound.ts`) and a failure changes nothing. A connection that is not ready (not active, nothing stored yet), a database error, or a guard that missed is looked at again by a later webhook, at most once a minute per connection; a connection that is done is remembered until the server restarts.
+5. A number that is `failed`, `validating` or `pending` is not touched; a recheck reads the `webhook_seen` row itself and passes the check.
+6. Not verified against the real database: the `updated_at` guard is exercised only through the test fake. A recheck's own write that lands in the few milliseconds between its proof read and its save can still put the waiting note back; the next Recheck clears it.
+7. The stored result is checked only for the fields the update needs, and everything else is passed through, so a check this code does not know yet does not stop the clearing.
+
+For Dev 3: the stored `last_check` can now change without a call from the dashboard (the webhook check going from `not_verified` to `pass`, `overall` from `warn` to `pass`). The shape is unchanged. For Dev 2: nothing.

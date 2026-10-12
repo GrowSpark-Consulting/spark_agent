@@ -6,7 +6,7 @@ import { writeAudit, type AuditEntry } from "../../../lib/audit";
 import { AppError } from "../../../lib/errors";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { requireRole } from "../../../lib/tenant";
-import { graph as realGraph, runGraphChecks, withTestMessage, type Check, type Graph } from "./checks";
+import { graph as realGraph, runGraphChecks, withTestMessage, withWebhookConfirmed, type Check, type Graph } from "./checks";
 import { probeMeta, type MetaProbe } from "./manual";
 import { checkTestMessage } from "./test-message-check";
 import { webhookWasSeen } from "./webhook-seen";
@@ -105,6 +105,7 @@ export async function recheckConnection(context: TenantContext, connectionId: st
 
 
   let finalStatus: "active" | "failed";
+  let seenBefore: boolean | undefined; // what the proof read said while the checks ran
   let subscribed: boolean | null = null; // an app is subscribed to the account after the check (null: not asked)
   try {
     let token: string;
@@ -130,7 +131,7 @@ export async function recheckConnection(context: TenantContext, connectionId: st
         },
         inAccount: probe.state === "ok" && probe.numberInAccount,
         facts: { nameStatus: probe.state === "ok" ? (probe.info.facts?.nameStatus ?? null) : null, platformType: probe.state === "ok" ? (probe.info.facts?.platformType ?? null) : null },
-        webhookSeen: () => deps.webhookSeen(tenantId, connectionId),
+        webhookSeen: async () => (seenBefore = await deps.webhookSeen(tenantId, connectionId)),
       },
       deps.graph,
       deps.now(),
@@ -157,7 +158,9 @@ export async function recheckConnection(context: TenantContext, connectionId: st
     // The sixth check needs an active number (notify.send refuses any other), so it comes after. It never changes the status.
     if (finalStatus === "active") {
       try {
-        const withSixth = withTestMessage(lastCheck, await deps.testMessage(tenantId, context.user.id));
+        const sixth = withTestMessage(lastCheck, await deps.testMessage(tenantId, context.user.id));
+        // The test message can bring the first signed webhook of the business's own app; read the proof again so this write does not undo what it cleared.
+        const withSixth = seenBefore !== true && (await deps.webhookSeen(tenantId, connectionId)) ? withWebhookConfirmed(sixth, deps.now()) : sixth;
         await deps.db.from("whatsapp_connections").update({ last_check: withSixth }).eq("tenant_id", tenantId).eq("id", connectionId);
       } catch {
         console.error("[whatsapp-connect] the test message check could not be recorded");
