@@ -105,6 +105,7 @@ export async function recheckConnection(context: TenantContext, connectionId: st
 
 
   let finalStatus: "active" | "failed";
+  let subscribed: boolean | null = null; // an app is subscribed to the account after the check (null: not asked)
   try {
     let token: string;
     try {
@@ -124,6 +125,9 @@ export async function recheckConnection(context: TenantContext, connectionId: st
         method: row.method,
         accepted,
         tokenExpired: probe.state === "rejected" && probe.reason === "token_expired",
+        onSubscribed: (value) => {
+          subscribed = value;
+        },
         inAccount: probe.state === "ok" && probe.numberInAccount,
         facts: { nameStatus: probe.state === "ok" ? (probe.info.facts?.nameStatus ?? null) : null, platformType: probe.state === "ok" ? (probe.info.facts?.platformType ?? null) : null },
         webhookSeen: () => deps.webhookSeen(tenantId, connectionId),
@@ -170,7 +174,7 @@ export async function recheckConnection(context: TenantContext, connectionId: st
     action: "whatsapp_connection.rechecked",
     entity: "whatsapp_connection",
     entityId: connectionId,
-    diff: { from: row.status, to: finalStatus },
+    diff: { from: row.status, to: finalStatus, subscribed },
   });
   return publicRow(context, connectionId, deps);
 }

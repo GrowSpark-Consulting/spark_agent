@@ -14,7 +14,7 @@ export type LastCheck = { ran_at: string; overall: "pass" | "warn" | "fail"; che
 
 /** Meta's answer to one Graph call: a status and a body, or nothing at all when it could not be reached. */
 export type GraphAnswer = { state: "answered"; ok: boolean; status: number; body: unknown } | { state: "unreachable" };
-export type Graph = (method: "GET" | "DELETE", path: string, token: string) => Promise<GraphAnswer>;
+export type Graph = (method: "GET" | "POST" | "DELETE", path: string, token: string) => Promise<GraphAnswer>;
 
 /** The real Graph client: the pinned version, the client's own token, ten seconds at most. */
 export const graph: Graph = async (method, path, token) => {
@@ -42,7 +42,8 @@ export const SAFE = {
   numberPass: "The number belongs to this WhatsApp Business Account and is set up for the Cloud API.",
   numberNotInAccount: "This number isn't in that WhatsApp Business Account. Check the Account ID and the Phone number ID.",
   numberNotCloud: "This number is not registered for the WhatsApp Cloud API yet. Register it in Meta's WhatsApp Manager, then check again.",
-  webhookNone: "Your Meta app is not subscribed to this account's webhooks. Subscribe it in your app's WhatsApp settings, then check again.",
+  webhookNone: "Your Meta app is not subscribed to this account's webhooks yet. Subscribe it in your app's WhatsApp settings, then check again.",
+  webhookCouldNotSubscribe: "We couldn't subscribe your Meta app to this account's webhooks automatically. Subscribe it in your app's WhatsApp settings, then check again.",
   webhookWaiting: "Your app is subscribed. This is confirmed when a webhook from your app arrives: send a message to this number from a phone, or use Test in Meta's webhook settings, then check again.",
   webhookPass: "Your app is subscribed, and a signed webhook from it has arrived.",
   webhookPassPlatform: "Spark Agent's app is subscribed to this account's webhooks.",
@@ -98,15 +99,56 @@ export function checkNumber(args: { accepted: boolean; inAccount: boolean; facts
 }
 
 /**
- * 3. Our app is subscribed to the account's webhooks (`subscribed_apps`). For `manual_byo` the client's own app is the one subscribed, so a signed webhook
- * from it must also have arrived (`webhookSeen`); until then the check waits instead of failing.
+ * Subscribes the app that owns the token to the account's webhooks (`POST subscribed_apps`). Call it only when none is subscribed (`checkWebhook` does): a repeat
+ * on an account that has one is not known to leave its callback alone. Best effort: false when Meta refuses, does not answer, does not say `success: true` or the
+ * call throws, and nothing here ever stops a connection.
  */
-export async function checkWebhook(args: { wabaId: string; token: string; method: string; webhookSeen: () => Promise<boolean> }, call: Graph, now: Date): Promise<Check> {
+export async function subscribeApp(args: { wabaId: string; token: string }, call: Graph): Promise<boolean> {
+  try {
+    const answer = await call("POST", `${args.wabaId}/subscribed_apps`, args.token);
+    return answer.state === "answered" && answer.ok && asRecord(answer.body).success === true;
+  } catch {
+    return false;
+  }
+}
+
+/** The apps Meta lists as subscribed to the account, or null when it did not say. */
+async function subscribedApps(args: { wabaId: string; token: string }, call: Graph): Promise<unknown[] | null> {
   const answer = await call("GET", `${args.wabaId}/subscribed_apps`, args.token);
-  if (answer.state !== "answered" || !answer.ok) return make("webhook_subscribed", "not_verified", SAFE.webhookUnknown, now);
+  if (answer.state !== "answered" || !answer.ok) return null;
   const apps = asRecord(answer.body).data;
-  if (!Array.isArray(apps)) return make("webhook_subscribed", "not_verified", SAFE.webhookUnknown, now);
-  if (apps.length === 0) return make("webhook_subscribed", "fail", SAFE.webhookNone, now);
+  return Array.isArray(apps) ? apps : null;
+}
+
+/**
+ * 3. An app is subscribed to the account's webhooks (`subscribed_apps`). Only when none is, and `canSubscribe` says the number is in this account, the app that owns
+ * the token is subscribed (`subscribeApp`, best effort) and the list is read again; an account that already has an app is never posted to. Nothing subscribed
+ * after that is a warning, never a failure. `onSubscribed` is told the outcome for the audit: true when an app is subscribed, false when none is, null when Meta
+ * did not say. For `manual_byo` the client's own app is the one subscribed, so a signed webhook from it must also have arrived (`webhookSeen`); until then the
+ * check waits instead of failing.
+ */
+export async function checkWebhook(
+  args: { wabaId: string; token: string; method: string; webhookSeen: () => Promise<boolean>; canSubscribe?: boolean; onSubscribed?: (subscribed: boolean | null) => void },
+  call: Graph,
+  now: Date,
+): Promise<Check> {
+  let apps = await subscribedApps(args, call);
+  if (apps === null) {
+    args.onSubscribed?.(null);
+    return make("webhook_subscribed", "not_verified", SAFE.webhookUnknown, now);
+  }
+  let attemptFailed = false;
+  if (apps.length === 0 && args.canSubscribe === true) {
+    if (await subscribeApp(args, call)) {
+      apps = await subscribedApps(args, call);
+      if (apps === null) {
+        args.onSubscribed?.(null);
+        return make("webhook_subscribed", "not_verified", SAFE.webhookUnknown, now);
+      }
+    } else attemptFailed = true;
+  }
+  args.onSubscribed?.(apps.length > 0);
+  if (apps.length === 0) return make("webhook_subscribed", "warn", attemptFailed ? SAFE.webhookCouldNotSubscribe : SAFE.webhookNone, now);
   if (args.method !== "manual_byo") return make("webhook_subscribed", "pass", SAFE.webhookPassPlatform, now);
   return (await args.webhookSeen()) ? make("webhook_subscribed", "pass", SAFE.webhookPass, now) : make("webhook_subscribed", "not_verified", SAFE.webhookWaiting, now);
 }
@@ -150,6 +192,8 @@ export interface GraphChecksInput {
   accepted: boolean;
   /** Meta refused the number's read because the token has expired (only meaningful when `accepted` is false). */
   tokenExpired?: boolean;
+  /** Told whether an app is subscribed to the account after the webhook check (true, false, or null when Meta did not say). Not called when the check is skipped. */
+  onSubscribed?: (subscribed: boolean | null) => void;
   inAccount: boolean;
   facts: NumberFacts;
   webhookSeen: () => Promise<boolean>;
@@ -157,9 +201,10 @@ export interface GraphChecksInput {
 
 /** The first five checks, in the contract's order, and the sixth as "not checked yet". The checks are independent: one failing never hides another. */
 export async function runGraphChecks(input: GraphChecksInput, call: Graph, now: Date): Promise<LastCheck> {
-  const [token, webhook, payment] = await Promise.all([
-    checkToken({ token: input.token, accepted: input.accepted, expired: input.tokenExpired === true }, call, now),
-    input.accepted ? checkWebhook({ wabaId: input.wabaId, token: input.token, method: input.method, webhookSeen: input.webhookSeen }, call, now) : Promise.resolve(make("webhook_subscribed", "skipped", SAFE.later, now)),
+  // The token is checked first: the app is only subscribed (a write to the client's account) with a token that has both WhatsApp permissions.
+  const token = await checkToken({ token: input.token, accepted: input.accepted, expired: input.tokenExpired === true }, call, now);
+  const [webhook, payment] = await Promise.all([
+    input.accepted ? checkWebhook({ wabaId: input.wabaId, token: input.token, method: input.method, webhookSeen: input.webhookSeen, canSubscribe: input.inAccount && token.status === "pass", ...(input.onSubscribed && { onSubscribed: input.onSubscribed }) }, call, now) : Promise.resolve(make("webhook_subscribed", "skipped", SAFE.later, now)),
     input.accepted ? checkPayment({ wabaId: input.wabaId, token: input.token }, call, now) : Promise.resolve(make("payment_method", "skipped", SAFE.later, now)),
   ]);
   const checks: Check[] = [

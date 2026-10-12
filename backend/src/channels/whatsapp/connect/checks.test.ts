@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { checkDisplayName, checkNumber, checkPayment, checkToken, checkWebhook, isExpiredTokenAnswer, overallOf, runGraphChecks, SAFE, withTestMessage, type Check, type Graph, type GraphAnswer } from "./checks";
+import { subscribeApp, checkDisplayName, checkNumber, checkPayment, checkToken, checkWebhook, isExpiredTokenAnswer, overallOf, runGraphChecks, SAFE, withTestMessage, type Check, type Graph, type GraphAnswer } from "./checks";
 
 // The six validation checks (Day 5): what each one answers for each thing Meta can say, in fixed words. Nothing Meta says and no token is ever in a message.
 
@@ -61,8 +61,69 @@ describe("2. the number is in the account and registered for the Cloud API", () 
 
 describe("3. the webhook", () => {
   const args = (method: string, seen: boolean) => ({ wabaId: "100", token: TOKEN, method, webhookSeen: async () => seen });
-  it("fails when no app is subscribed to the account", async () => {
-    expect(await checkWebhook(args("manual_byo", true), graphOf(answered({ data: [] })), NOW)).toMatchObject({ status: "fail", message: SAFE.webhookNone });
+  /** Meta: nothing subscribed until a POST subscribed_apps has been accepted, then one app. */
+  const account = (post: GraphAnswer, calls: string[] = []): Graph => {
+    let subscribed = false;
+    return async (method) => {
+      calls.push(method);
+      if (method === "POST") {
+        if (post.state === "answered" && post.ok) subscribed = true;
+        return post;
+      }
+      return answered({ data: subscribed ? [{ id: "1" }] : [] });
+    };
+  };
+  const ACCEPTED = answered({ success: true });
+  const REFUSED = answered({ error: { code: 200 } }, false, 403);
+  it("when nothing is subscribed it subscribes the app, reads again, and goes on with what it then sees", async () => {
+    const calls: string[] = [];
+    const seen: boolean[] = [];
+    const c = await checkWebhook({ ...args("manual_byo", true), canSubscribe: true, onSubscribed: (s) => seen.push(s as boolean) }, account(ACCEPTED, calls), NOW);
+    expect(calls).toEqual(["GET", "POST", "GET"]);
+    expect(c).toMatchObject({ status: "pass", message: SAFE.webhookPass });
+    expect(seen).toEqual([true]);
+  });
+  it("never posts when an app is subscribed already (a repeat could reset the subscription's callback)", async () => {
+    const call = vi.fn<Graph>(async () => answered({ data: [{ id: "1" }] }));
+    const seen: (boolean | null)[] = [];
+    await checkWebhook({ ...args("manual_byo", true), canSubscribe: true, onSubscribed: (s) => seen.push(s) }, call, NOW);
+    expect(call.mock.calls.map(([m]) => m)).toEqual(["GET"]);
+    expect(seen).toEqual([true]);
+  });
+  it("never posts unless told it may (the number must be in the account first)", async () => {
+    const calls: string[] = [];
+    const seen: (boolean | null)[] = [];
+    const c = await checkWebhook({ ...args("manual_byo", true), onSubscribed: (s) => seen.push(s) }, account(ACCEPTED, calls), NOW);
+    expect(calls).toEqual(["GET"]);
+    expect(c).toMatchObject({ status: "warn", message: SAFE.webhookNone });
+    expect(seen).toEqual([false]);
+  });
+  it("warns, and never fails, when the attempt was refused and nothing is subscribed, in words that say so", async () => {
+    const seen: (boolean | null)[] = [];
+    const c = await checkWebhook({ ...args("manual_byo", true), canSubscribe: true, onSubscribed: (s) => seen.push(s) }, account(REFUSED), NOW);
+    expect(c).toMatchObject({ status: "warn", message: SAFE.webhookCouldNotSubscribe });
+    expect(seen).toEqual([false]);
+  });
+  it("an accepted attempt that Meta does not yet show is 'not subscribed yet', not 'could not subscribe'", async () => {
+    const never: Graph = async (method) => (method === "POST" ? ACCEPTED : answered({ data: [] }));
+    expect(await checkWebhook({ ...args("manual_byo", true), canSubscribe: true }, never, NOW)).toMatchObject({ status: "warn", message: SAFE.webhookNone });
+  });
+  it("an accepted attempt whose re-read Meta does not answer is 'not verified' and null, not 'not subscribed'", async () => {
+    let reads = 0;
+    const flaky: Graph = async (method) => {
+      if (method === "POST") return ACCEPTED;
+      return ++reads === 1 ? answered({ data: [] }) : UNREACHABLE;
+    };
+    const seen: (boolean | null)[] = [];
+    const c = await checkWebhook({ ...args("manual_byo", true), canSubscribe: true, onSubscribed: (s) => seen.push(s) }, flaky, NOW);
+    expect(c.status).toBe("not_verified");
+    expect(seen).toEqual([null]);
+  });
+  it("reports nothing it could not find out: Meta not answering is 'not verified' and onSubscribed says null", async () => {
+    const seen: (boolean | null)[] = [];
+    const c = await checkWebhook({ ...args("manual_byo", true), canSubscribe: true, onSubscribed: (s) => seen.push(s) }, graphOf(UNREACHABLE), NOW);
+    expect(c.status).toBe("not_verified");
+    expect(seen).toEqual([null]);
   });
   it("for a manual_byo number passes only once a signed webhook from its own app has arrived, and waits until then", async () => {
     const subscribed = graphOf(answered({ data: [{ id: "1" }] }));
@@ -76,6 +137,25 @@ describe("3. the webhook", () => {
     for (const answer of [UNREACHABLE, answered({}, false, 403), answered({ data: "x" })]) {
       expect((await checkWebhook(args("manual_byo", true), graphOf(answer), NOW)).status).toBe("not_verified");
     }
+  });
+});
+
+describe("subscribing the app to the account's webhooks (best effort)", () => {
+  it("POSTs to the account's subscribed_apps with the token, and is true when Meta says yes", async () => {
+    const call = vi.fn(async () => answered({ success: true }));
+    expect(await subscribeApp({ wabaId: "100", token: TOKEN }, call)).toBe(true);
+    expect(call).toHaveBeenCalledWith("POST", "100/subscribed_apps", TOKEN);
+  });
+  it("is false, and throws nothing, when Meta refuses, does not answer, or does not say success is true", async () => {
+    for (const answer of [answered({ error: { code: 200 } }, false, 403), UNREACHABLE, answered({ success: false }), answered(null), answered({})]) {
+      expect(await subscribeApp({ wabaId: "100", token: TOKEN }, graphOf(answer))).toBe(false);
+    }
+  });
+  it("is false when the call itself throws", async () => {
+    const boom: Graph = async () => {
+      throw new Error("boom");
+    };
+    expect(await subscribeApp({ wabaId: "100", token: TOKEN }, boom)).toBe(false);
   });
 });
 
@@ -123,6 +203,35 @@ describe("all of them together", () => {
     expect(last.checks.map((x) => x.key)).toEqual(["token_permissions", "number_registered", "webhook_subscribed", "display_name_approved", "payment_method", "test_message_delivered"]);
     expect(last.checks.map((x) => x.status)).toEqual(["pass", "pass", "pass", "pass", "pass", "not_verified"]);
     expect(last.ran_at).toBe(NOW.toISOString());
+  });
+
+  it("an account nothing could subscribe to is a warning on the webhook check, not a failure of the connection", async () => {
+    const none: Graph = async (m, path) => (path.endsWith("/subscribed_apps") ? (m === "POST" ? answered({ error: { code: 200 } }, false, 403) : answered({ data: [] })) : healthy(m, path, ""));
+    const seen: (boolean | null)[] = [];
+    const last = await runGraphChecks({ ...input, onSubscribed: (s) => seen.push(s) }, none, NOW);
+    expect(last.checks[2]).toMatchObject({ status: "warn", message: SAFE.webhookCouldNotSubscribe });
+    expect(last.overall).toBe("warn");
+    expect(seen).toEqual([false]);
+  });
+
+  it("does not subscribe while the token check does not pass (a token without both permissions is not written with)", async () => {
+    const weak: Graph = async (m, path) => {
+      if (path.startsWith("debug_token")) return answered({ data: { is_valid: true, scopes: ["whatsapp_business_messaging"] } });
+      if (path.endsWith("/subscribed_apps")) return answered({ data: [] });
+      return healthy(m, path, "");
+    };
+    const call = vi.fn(weak);
+    await runGraphChecks(input, call, NOW);
+    expect(call.mock.calls.some(([m]) => m === "POST")).toBe(false);
+  });
+
+  it("does not subscribe an account the number is not in, and reports nothing was asked when the token was not accepted", async () => {
+    const call = vi.fn(async (m: string, path: string) => (path.endsWith("/subscribed_apps") ? answered({ data: [] }) : healthy(m as "GET", path, "")));
+    await runGraphChecks({ ...input, inAccount: false }, call as unknown as Graph, NOW);
+    expect(call.mock.calls.filter(([m]) => m === "POST")).toEqual([]);
+    const seen: (boolean | null)[] = [];
+    await runGraphChecks({ ...input, accepted: false, onSubscribed: (s) => seen.push(s) }, vi.fn(healthy), NOW);
+    expect(seen).toEqual([]);
   });
 
   it("a wrong token fails the first check and skips what cannot be asked, without calling Meta again", async () => {
