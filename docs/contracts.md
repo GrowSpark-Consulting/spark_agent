@@ -41,6 +41,7 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0022_consent_model_intent` | `record_opt_out` also accepts the source `model_intent` (a clear request to stop read by the model; Dev 1, #69) |
 | `0023_booking_resource_lock` | `hold_slot` and `reschedule_booking` take a per-resource advisory lock, so racing holds for one person queue and the losers get `slot_taken` (23P01) instead of a deadlock error (40P01) |
 | `0024_api_roles_no_truncate` | `anon` and `authenticated` lose TRUNCATE on every table, now and (default privileges) later: row-level security does not cover TRUNCATE. Checked by `supabase/tests/isolation.test.sql` |
+| `0025_set_tenant_feature` | `set_tenant_feature(tenant, key, enabled, settings, actor)`: plan check (PA403), `tenant_features` write and audit row in one transaction (service_role only; section 6, feature toggles) |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -643,12 +644,33 @@ other origins get no CORS headers.
   null when there is no working connection. Until a resource is connected, the bookings table stays the
   source of truth.
 
+**Feature toggles (built, Day 5; `backend/src/features/toggles.ts`, types in `@pakka/types` `features.ts`):**
+
+- `GET /api/features` → `FeatureList` (any member): the plan `{ key, name, monthlyCredits }`, the features in the
+  screen's groups, and `estimatedCreditsPerMonth`, the sum over the features that are on. Each `FeatureRow` has `state`
+  (`on`, `off`, `locked` when the plan does not include it, `disabled` when it cannot work yet), `enabled` (the business's
+  switch whatever the state), `requiredPlan` (the cheapest of starter, growth and pro that includes a locked one),
+  `disabledReason`, `creditsPerMonth` (its `<kind>.sent` audit rows in the last 30 days times its credit cost; null with a
+  `creditNote` for features that cost nothing extra), `settings` and `control`. Disabled, with the reason shown: features
+  with no code yet (`working_hours_mode`, `booking_confirmation`, `auto_topup`, `outbound_webhooks`, `quote_auto_send`,
+  `quote_followup`, `pretrip_info`: "Not available yet."), `review_request` without a review link, `staff_alerts` without an
+  owner or admin alert number, `daily_agenda` without an owner alert number, `booking` without an active service.
+- `PATCH /api/features/:key` `{ enabled?, settings? }` → the `FeatureRow` as it now stands (owner or admin). `settings` is
+  merged into the saved settings (a key sent as null is removed) and must be what the feature's job reads (section 3;
+  `backend/src/features/settings.ts` uses the jobs' own schemas), else `validation_failed` with `fields.settings` saying
+  what is expected. A feature the plan does not include cannot be switched on and its settings cannot change:
+  `plan_required` (403, "Follow-up nudges needs the Growth plan. Upgrade to switch it on."); switching it off is allowed.
+  A feature not available yet cannot be switched on (`not_available`). The write is `set_tenant_feature` (0025): the plan
+  check, the `tenant_features` row and the audit row (`feature.toggled` or `feature.settings_changed`, with who and both
+  values) in one transaction; nothing changes and nothing is audited when the values are the saved ones. This server
+  drops its cached feature states at once; other servers within 60 seconds (`isEnabled`'s cache).
+
 **Read routes (Proposed, screen-contracts Q1).** Entitlements and balances are computed on the
 server, so these are routes, not SQL views:
 
 | Route | Returns | Owner |
 |---|---|---|
-| `GET /api/features` | Every feature with `available`, `enabled`, `creditCost` (`getFeatureStates(…, { fresh: true })`) | Dev 2 |
+| `GET /api/features` | Built (above) | Dev 2 |
 | `GET /api/billing/balance` | Balance plus renewal date and trial end | Dev 2 |
 | `GET /api/dashboard/summary` | Month counts: enquiries, qualified, booked, after-hours handled | Dev 2 |
 

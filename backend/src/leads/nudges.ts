@@ -22,7 +22,7 @@ export interface NudgeTiming {
 export const DEFAULT_NUDGE_TIMING: NudgeTiming = { offsetMinutes: [120, 23 * 60], nurtureAfterMinutes: 48 * 60 };
 
 const Minutes = z.number().int().min(1).max(7 * 24 * 60);
-const TimingSettings = z
+export const TimingSettings = z
   .object({ offset_minutes: z.tuple([Minutes, Minutes]), nurture_after_minutes: Minutes })
   .refine((s) => s.offset_minutes[0] < s.offset_minutes[1] && s.offset_minutes[1] < s.nurture_after_minutes);
 

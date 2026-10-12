@@ -16,7 +16,7 @@ export const REMINDERS = [
 export type ReminderKind = (typeof REMINDERS)[number]["kind"];
 
 /** A business's offset: whole minutes before the start, at most a week. Anything else falls back to the default. */
-const OffsetSettings = z.object({ offset_minutes: z.number().int().min(1).max(7 * 24 * 60) });
+export const OffsetSettings = z.object({ offset_minutes: z.number().int().min(1).max(7 * 24 * 60) });
 
 /** Minutes before the start for each reminder, as this business set them. */
 export async function reminderOffsets(tenantId: string, db: SupabaseClient): Promise<Record<ReminderKind, number>> {
