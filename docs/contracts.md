@@ -224,8 +224,11 @@ must match the body's variables (`validation_failed`, "This template needs 2 val
 `validation_failed` before anything is read. Other kinds cannot pass `template`. The inbox route
 (`POST /api/conversations/:id/messages`, built 12 Oct) takes `{ "template": { "name", "language", "params" } }` instead of
 `{ "body" }` (`SendStaffTemplateInput` in `@pakka/types`; a body with both is refused) and passes it to `notify.send` with the
-staff member as actor; the chat must be in human mode, as for text. The picker reads the approved templates from
-`whatsapp_templates` under RLS (0007).
+staff member as actor; the chat must be in human mode, as for text. **The picker's list (built, 12 Oct):**
+`GET /api/conversations/:id/templates` → `{ connectionId, templates: [{ id, name, language, category, variableCount, body }] }`,
+the approved templates of the WhatsApp number this chat is on (the active connection on its channel, as `notify_target`
+picks it; the browser cannot, since `whatsapp_connections_public` has no `channel_id`). `connectionId` is null, with no
+templates, when that number is not connected. Any member (`backend/src/conversations/templates.ts`).
 
 **Idempotency key (built, 9 Oct):** a job that may retry passes `idempotencyKey` (up to 200 characters, for example
 `reminder_24h:<bookingId>:<start>`). The message id is derived from the business, the kind and the key, so once

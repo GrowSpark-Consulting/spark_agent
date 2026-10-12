@@ -17,6 +17,7 @@ import { handleWhatsAppHandshake } from "../channels/whatsapp/verify-challenge";
 import { setConversationMode } from "../conversations/mode";
 import { dashboardSummary } from "../dashboard/summary";
 import { sendStaffReply } from "../conversations/staff-reply";
+import { conversationTemplates } from "../conversations/templates";
 import { listFeatures, updateFeature } from "../features/toggles";
 import { deleteDocument, KB_UPLOAD_MAX_BODY_BYTES, uploadDocument } from "../kb/documents";
 import { answerGap, createFaq, deleteFaq, dismissGap, listGaps, updateFaq } from "../kb/faqs";
@@ -95,6 +96,9 @@ const testMessage = tenantRoute(({ supabase, context, body }) => sendTestMessage
 // { body } → SendStaffReplyResult. Owner, admin or staff; free text inside the 24-hour window only.
 const staffReply: RouteHandler = (request, deps, params) =>
   tenantRoute(({ context, body, params: p }) => sendStaffReply(context, p.id, body))(request, deps.userClient, params);
+// → { connectionId, templates }: the approved templates this chat's WhatsApp number can send, for the inbox's picker. Any member.
+const conversationTemplateList: RouteHandler = (request, deps, params) =>
+  tenantRoute(({ context, params: p }) => conversationTemplates(context, p.id))(request, deps.userClient, params);
 // { mode: "ai" | "human" } → SetConversationModeResult. Owner, admin or staff; takeover or Return to AI, with a system note.
 const conversationMode: RouteHandler = (request, deps, params) =>
   tenantRoute(({ context, body, params: p }) => setConversationMode(context, p.id, body))(request, deps.userClient, params);
@@ -211,6 +215,7 @@ export const ROUTES: readonly Route[] = [
   // 6 MB: room for a 5 MB file plus its multipart wrapping; the service checks the 5 MB itself, so a big file
   // is a validation_failed with fields.file, and only a body over 6 MB is refused by the server (413).
   { path: "/api/conversations/:id/messages", browser: true, methods: { POST: staffReply } },
+  { path: "/api/conversations/:id/templates", browser: true, methods: { GET: conversationTemplateList } },
   { path: "/api/conversations/:id/mode", browser: true, methods: { POST: conversationMode } },
   { path: "/api/conversations/:id/lead-card", browser: true, methods: { GET: conversationLeadCard } },
   { path: "/api/conversations/:id/suggest", browser: true, methods: { POST: conversationSuggest } },
