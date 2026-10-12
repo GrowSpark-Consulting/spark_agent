@@ -61,3 +61,8 @@ Nothing here changes a file, a table, a migration or an endpoint of yours. Every
 - The access token is read back (decrypted) only inside the server, for the checks and for the unsubscribe, and is never returned, logged or put in a message.
 - The unsubscribe on disconnect is best effort: a revoked token or an unreachable Meta cannot do it, and the disconnect stands anyway (the audit row says whether it worked).
 - A server that stops in the middle of a recheck leaves the number `validating`. A new recheck is refused as "already running" until the status is changed. This is rare and has no automatic recovery yet.
+
+## 7. Corrections, 12 Oct
+
+- Section 5, point 2: the suite has **52** chats, not 64 (64 is the highest file number, `64-voice-note-asks-to-type.yaml`). It is still past the 20 asked for.
+- Section 5, point 2, second sentence: the prompt-injection chat (05) now also asserts that the lead stays `engaged` (what any understood first message gives), the score stays 0 and nothing is booked or cancelled, and that the chat goes to a person as a discount request (`handoff` negotiation/high, `mode` human), the same as chat 62.
