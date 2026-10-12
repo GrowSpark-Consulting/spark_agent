@@ -123,6 +123,7 @@ export async function recheckConnection(context: TenantContext, connectionId: st
         token,
         method: row.method,
         accepted,
+        tokenExpired: probe.state === "rejected" && probe.reason === "token_expired",
         inAccount: probe.state === "ok" && probe.numberInAccount,
         facts: { nameStatus: probe.state === "ok" ? (probe.info.facts?.nameStatus ?? null) : null, platformType: probe.state === "ok" ? (probe.info.facts?.platformType ?? null) : null },
         webhookSeen: () => deps.webhookSeen(tenantId, connectionId),
