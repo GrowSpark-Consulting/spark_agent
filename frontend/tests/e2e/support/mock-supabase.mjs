@@ -205,6 +205,19 @@ function createTeamAccount({ role = "owner", phone = null, refused = false, read
   return { email, tenantId: t.id, userId: idOf(email) };
 }
 
+// WhatsApp recheck and disconnect: each test makes its own business with one number (POST /__mock/whatsapp-account), because the
+// tests change it. What the real API would have stored after a recheck or a disconnect is set with POST /__mock/whatsapp-connection,
+// and the page reads it back from whatsapp_connections_public like any other state.
+const WA_PATCHABLE = ["status", "last_check", "display_phone", "verified_name", "quality_rating", "messaging_limit"];
+/** { role?, status?, method?, lastCheck?, readError? } → { email, tenantId, connectionId }. */
+function createWhatsappAccount({ role = "owner", status = "active", method = "manual_byo", lastCheck = {} } = {}) {
+  const email = `wa-${randomUUID()}@test.local`;
+  const t = tenant(randomUUID(), "Bright Interiors", "interiors");
+  const connectionId = randomUUID();
+  USERS[email] = { memberships: [[t, role]], view: { status: 200, body: [{ ...connection(t.id, status), id: connectionId, method, coexistence: false, last_check: lastCheck }] } };
+  return { email, tenantId: t.id, connectionId };
+}
+
 // Day 3 (leads, calendar, booking setup). Each test makes its own business through
 // POST /__mock/day3-account, so the desktop, tablet and phone projects never share rows. The business's
 // pack key is made up ("sample-pack"): the screens must work for any pack. Times are fixed (the week of
@@ -678,6 +691,17 @@ ${choose("Cancel", "cancel=1")}
   }
   if (path === "/__mock/team-account" && req.method === "POST") {
     return send(res, 200, createTeamAccount(await readBody(req)));
+  }
+  if (path === "/__mock/whatsapp-account" && req.method === "POST") {
+    return send(res, 200, createWhatsappAccount(await readBody(req)));
+  }
+  if (path === "/__mock/whatsapp-connection" && req.method === "POST") {
+    // { email, status?, last_check?, … } → that account's number as the view returns it from now on.
+    const { email, ...patch } = await readBody(req);
+    const rows = USERS[email]?.view?.body;
+    if (!Array.isArray(rows) || rows.length === 0) return send(res, 404, { msg: "no such connection" });
+    for (const key of WA_PATCHABLE) if (key in patch) rows[0][key] = patch[key];
+    return send(res, 200, rows[0]);
   }
   if (path === "/__mock/memberships") {
     // A user's membership rows as stored, for checking writes: ?email=<email>.
