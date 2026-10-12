@@ -222,8 +222,16 @@ export async function sendText(
   }
 }
 
-/** An approved template: its exact versioned name, its language code and its body variables in {{1}}… order. */
-export type TemplateMessage = { name: string; language: string; params: string[] };
+/**
+ * An approved template: its exact versioned name, its language code and its body variables in {{1}}… order. `buttons`
+ * are the payloads of its quick-reply buttons, in their order: a tap comes back with that payload (our button id), as a
+ * tap on an interactive button does. Leave them out to let Meta return the button's text.
+ */
+export type TemplateMessage = { name: string; language: string; params: string[]; buttons?: string[] };
+
+/** Meta allows up to 10 quick-reply buttons on a template; our ids are well under this length. */
+const TEMPLATE_BUTTONS_MAX = 10;
+const BUTTON_PAYLOAD_MAX = 256;
 
 // Meta's rules: names are lowercase letters, digits and underscores; languages are codes like en, ta or
 // en_US. A variable may not be empty or contain a newline or tab or more than 4 spaces in a row (Meta
@@ -234,8 +242,8 @@ const validParam = (param: unknown) =>
   typeof param === "string" && param.trim() !== "" && param.length <= TEMPLATE_BODY_MAX && !/[\r\n\t]| {5}/.test(param);
 
 /**
- * Sends an approved template, the only kind of message allowed outside the 24-hour window. Body
- * variables only: templates with header or button variables need a new parameter here first.
+ * Sends an approved template, the only kind of message allowed outside the 24-hour window: body variables, and the
+ * payloads of its quick-reply buttons when given. Header variables need a new parameter here first.
  */
 export async function sendTemplate(
   connection: SendConnection,
@@ -245,7 +253,7 @@ export async function sendTemplate(
 ): Promise<AdapterResult<SendResult>> {
   try {
     const number = normalizeE164(to);
-    const { name, language, params }: Partial<TemplateMessage> = template ?? {};
+    const { name, language, params, buttons = [] }: Partial<TemplateMessage> = template ?? {};
     if (
       number === null ||
       typeof name !== "string" ||
@@ -253,15 +261,21 @@ export async function sendTemplate(
       typeof language !== "string" ||
       !TEMPLATE_LANGUAGE.test(language) ||
       !Array.isArray(params) ||
-      !params.every(validParam)
+      !params.every(validParam) ||
+      !Array.isArray(buttons) ||
+      buttons.length > TEMPLATE_BUTTONS_MAX ||
+      !buttons.every((payload) => typeof payload === "string" && payload !== "" && payload.length <= BUTTON_PAYLOAD_MAX)
     ) {
       return failFor("validation_failed");
     }
-    const body = params.length > 0 ? [{ type: "body", parameters: params.map((text) => ({ type: "text", text })) }] : undefined;
+    const components = [
+      ...(params.length > 0 ? [{ type: "body", parameters: params.map((text) => ({ type: "text", text })) }] : []),
+      ...buttons.map((payload, index) => ({ type: "button", sub_type: "quick_reply", index: String(index), parameters: [{ type: "payload", payload }] })),
+    ];
     return await sendMessage(
       connection,
       number,
-      { type: "template", template: { name, language: { code: language }, ...(body && { components: body }) } },
+      { type: "template", template: { name, language: { code: language }, ...(components.length > 0 && { components }) } },
       deps,
     );
   } catch {

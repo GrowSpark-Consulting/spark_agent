@@ -66,6 +66,17 @@ describe("fixtures", () => {
     });
   });
 
+  it("reads a tap on a template's quick-reply button like a button reply: the payload we sent, else the text (unconfirmed)", () => {
+    const tap = (button: unknown) => only(parseWebhook(withMessages([msg({ type: "button", button, context: { id: "wamid.SYNTHETIC_TEMPLATE_0001" } })])).messages);
+    expect(tap({ payload: "booking:9b2f0a4e-1c3d-4e5f-8a6b-7c8d9e0f1a2b:confirm", text: "Confirm" })).toMatchObject({
+      type: "interactive",
+      buttonId: "booking:9b2f0a4e-1c3d-4e5f-8a6b-7c8d9e0f1a2b:confirm",
+      text: "Confirm",
+    });
+    expect(tap({ text: "Confirm" })).toMatchObject({ type: "interactive", buttonId: "Confirm", text: "Confirm" });
+    expect(tap({ payload: "x" })).toMatchObject({ type: "unsupported", unsupportedType: "button" });
+  });
+
   it("parses an image with its media id, MIME type and caption", () => {
     expect(only(parseWebhook(imageMessage).messages)).toMatchObject({
       type: "image",

@@ -6,7 +6,7 @@ import { oneLine, type ReminderBooking } from "./reminders";
 // pipeline answers it the same way: by offering slots.
 
 /** The offer: one "Pick a new time" button inside the window, or the noshow_rebook template outside it ({{1}} what, {{2}} business). */
-export function noShowMessage(booking: ReminderBooking): { interactive: Interactive; templateParams: string[] } {
+export function noShowMessage(booking: ReminderBooking): { interactive: Interactive; templateParams: string[]; templateButtons: string[] } {
   const what = oneLine(booking.what, 40);
   const business = oneLine(booking.business, 40);
   return {
@@ -16,5 +16,6 @@ export function noShowMessage(booking: ReminderBooking): { interactive: Interact
       buttons: [{ id: `booking:${booking.bookingId}:reschedule`, title: "Pick a new time" }],
     },
     templateParams: [what, business],
+    templateButtons: [`booking:${booking.bookingId}:reschedule`],
   };
 }

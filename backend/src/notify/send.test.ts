@@ -13,7 +13,7 @@ vi.mock("../features/is-enabled", () => ({ isEnabled }));
 const inngestSend = vi.fn<(event: unknown) => Promise<{ ids: string[] }>>(async () => ({ ids: [] }));
 vi.mock("../inngest/client", () => ({ inngest: { send: (event: unknown) => inngestSend(event) } }));
 
-const { keyedMessageId, send, templateVariableCount, TEST_MESSAGES_PER_HOUR } = await import("./send");
+const { keyedMessageId, send, templateQuickReplyCount, templateVariableCount, TEST_MESSAGES_PER_HOUR } = await import("./send");
 const { OutsideWindowError, registerSender, SendError } = await import("./sender");
 
 const TENANT = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
@@ -530,5 +530,52 @@ describe("before the adapter exists", () => {
       error: { code: "not_available", retryable: false, outcomeUnknown: false },
     });
     expect(calls("spend_credits")).toHaveLength(0);
+  });
+});
+
+describe("the ids of a template's quick-reply buttons", () => {
+  const ids = ["booking:b1:confirm", "booking:b1:reschedule", "booking:b1:cancel"];
+  const outside = () => {
+    rpcHandlers.notify_target = () => ok([target({ last_customer_msg_at: null })]);
+  };
+  const metaButtons = (n: number) => [
+    { type: "BODY", text: "Reminder: your {{1}} with {{2}} is on {{3}}." },
+    { type: "BUTTONS", buttons: Array.from({ length: n }, (_, i) => ({ type: "QUICK_REPLY", text: `B${i}` })) },
+  ];
+
+  it("go with the kind's template when it has exactly that many quick-reply buttons", async () => {
+    outside();
+    tables.whatsapp_templates = { data: [{ components: metaButtons(3) }], error: null };
+    await send(TENANT, "reminder_24h", { conversationId: CONVERSATION, text: "x", templateParams: ["a", "b", "c"], templateButtons: ids });
+    expect(sender.sendTemplate).toHaveBeenCalledWith("+919840012345", "reminder_24h_v2", "en", ["a", "b", "c"], ids);
+    for (const [column, value] of [["tenant_id", TENANT], ["connection_id", target().connection_id], ["name", "reminder_24h_v2"], ["language", "en"]]) {
+      expect(db.calls).toContainEqual({ table: "whatsapp_templates", method: "eq", args: [column, value] });
+    }
+  });
+
+  it("are left out when the approved template has another number of buttons, or none can be read", async () => {
+    outside();
+    tables.whatsapp_templates = { data: [{ components: metaButtons(2) }], error: null };
+    await send(TENANT, "reminder_24h", { conversationId: CONVERSATION, text: "x", templateParams: ["a", "b", "c"], templateButtons: ids });
+    expect(sender.sendTemplate).toHaveBeenLastCalledWith("+919840012345", "reminder_24h_v2", "en", ["a", "b", "c"]);
+    tables.whatsapp_templates = { data: [], error: null };
+    await send(TENANT, "reminder_24h", { conversationId: CONVERSATION, text: "x", templateParams: ["a", "b", "c"], templateButtons: ids });
+    expect(sender.sendTemplate).toHaveBeenLastCalledWith("+919840012345", "reminder_24h_v2", "en", ["a", "b", "c"]);
+  });
+
+  it("are not looked for inside the window, where the interactive buttons carry them", async () => {
+    await send(TENANT, "reminder_24h", { conversationId: CONVERSATION, text: "x", templateButtons: ids });
+    expect(sender.sendTemplate).not.toHaveBeenCalled();
+    expect(db.calls.filter((c) => c.table === "whatsapp_templates")).toHaveLength(0);
+  });
+
+  it("are counted from Meta's components or the submitted ones", () => {
+    expect(templateQuickReplyCount(metaButtons(3))).toBe(3);
+    expect(templateQuickReplyCount([{ type: "BODY", text: "Hi" }])).toBe(0);
+    expect(templateQuickReplyCount([{ type: "BUTTONS", buttons: [{ type: "QUICK_REPLY" }, { type: "URL", url: "https://x" }] }])).toBe(1);
+    expect(templateQuickReplyCount({ body: "Hi {{1}}", buttons: [{ text: "Yes" }, { text: "No" }] })).toBe(2);
+    expect(templateQuickReplyCount({ body: "Hi" })).toBe(0);
+    expect(templateQuickReplyCount(null)).toBeNull();
+    expect(templateQuickReplyCount([{ type: "BUTTONS", buttons: "?" }])).toBeNull();
   });
 });

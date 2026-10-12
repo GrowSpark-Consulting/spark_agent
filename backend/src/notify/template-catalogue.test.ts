@@ -80,6 +80,34 @@ describe("the template catalogue", () => {
     for (const t of TEMPLATE_CATALOGUE) expect(t.variables.length, t.name).toBe(sent[t.base]);
   });
 
+  it("gives each template button the id the jobs send with it, one for one", () => {
+    const booking: ReminderBooking = {
+      bookingId: "9b2f0a4e-1c3d-4e5f-8a6b-7c8d9e0f1a2b",
+      status: "confirmed",
+      start: "2026-10-10T11:30:00.000Z",
+      end: "2026-10-10T12:30:00.000Z",
+      leadId: "5c6d7e8f-9a0b-4c1d-8e2f-3a4b5c6d7e8f",
+      staffUserId: null,
+      what: "site visit",
+      business: "Skyline Homes",
+      timeZone: "Asia/Kolkata",
+      conversationId: null,
+    };
+    const sent: Record<string, string[]> = {
+      reminder_24h: reminderMessage(booking).templateButtons,
+      reminder_2h: reminderMessage(booking).templateButtons,
+      feedback: ratingMessage(booking).templateButtons,
+      noshow_rebook: noShowMessage(booking).templateButtons,
+    };
+    for (const [base, ids] of Object.entries(sent)) {
+      const t = byBase.get(base)!;
+      for (const language of LANGUAGES) expect(ids, `${t.name} ${language}`).toHaveLength(t.text[language].quickReplies?.length ?? 0);
+    }
+    // Confirm, Reschedule, Cancel; and the ratings best first, as the template lists them.
+    expect(sent.reminder_24h.map((id) => id.split(":").pop())).toEqual(["confirm", "reschedule", "cancel"]);
+    expect(sent.feedback.map((id) => id.split(":").pop())).toEqual(["5", "4", "3", "2", "1"]);
+  });
+
   it("builds Meta's components for submission", () => {
     expect(templateComponents(byName.get("reminder_24h_v1")!, "en")).toEqual([
       {

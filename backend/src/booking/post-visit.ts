@@ -24,7 +24,7 @@ export async function feedbackDelay(tenantId: string, db: SupabaseClient): Promi
 const RATING_WORDS: Record<number, string> = { 5: "Excellent", 4: "Good", 3: "Okay", 2: "Poor", 1: "Very poor" };
 
 /** The rating question: a list of five ratings inside the window, or the feedback template outside it ({{1}} what, {{2}} business). */
-export function ratingMessage(booking: ReminderBooking): { interactive: Interactive; templateParams: string[] } {
+export function ratingMessage(booking: ReminderBooking): { interactive: Interactive; templateParams: string[]; templateButtons: string[] } {
   const what = oneLine(booking.what, 40);
   const business = oneLine(booking.business, 40);
   return {
@@ -39,6 +39,8 @@ export function ratingMessage(booking: ReminderBooking): { interactive: Interact
       ],
     },
     templateParams: [what, business],
+    // The template's five rating buttons, best first, carry the list's ids.
+    templateButtons: [5, 4, 3, 2, 1].map((n) => `rating:${booking.bookingId}:${n}`),
   };
 }
 
