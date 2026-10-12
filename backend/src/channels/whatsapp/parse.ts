@@ -122,6 +122,9 @@ const Interactive = z.looseObject({
     z.looseObject({ type: z.literal("list_reply"), list_reply: Reply }),
   ]),
 });
+// A tap on a template's quick-reply button (type "button"): the payload sent with the template (our button id, from
+// Dev 2's notify.send), or the button's text when none was sent. Shape from Meta's docs, unconfirmed on a live number.
+const TemplateButton = z.looseObject({ button: z.looseObject({ payload: str.optional().catch(undefined), text: str }) });
 const Media = z.looseObject({ id: nonEmpty, mime_type: nonEmpty, caption: str.optional().catch(undefined) });
 const Location = z.looseObject({
   location: z.looseObject({
@@ -201,6 +204,13 @@ function parseMessage(
       const { interactive } = parsed.data;
       const reply = interactive.type === "button_reply" ? interactive.button_reply : interactive.list_reply;
       return { ...common, type: "interactive", buttonId: reply.id, text: reply.title };
+    }
+    case "button": {
+      const parsed = TemplateButton.safeParse(raw);
+      if (!parsed.success) return unsupported();
+      const { payload, text } = parsed.data.button;
+      // Handled like a tap on an interactive button, so the pipeline reads both the same way.
+      return { ...common, type: "interactive", buttonId: payload?.trim() ? payload : text, text };
     }
     case "image":
     case "audio":

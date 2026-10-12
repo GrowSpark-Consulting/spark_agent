@@ -139,17 +139,20 @@ const BUTTON_TITLES: Record<BookingButtonAction, string> = { confirm: "Confirm",
  * The reminder: Confirm / Reschedule / Cancel buttons inside the 24-hour window, or the approved reminder template
  * outside it, whose variables are {{1}} what, {{2}} the business, {{3}} the local date and time ("Fri 9 Oct, 5:00 pm").
  */
-export function reminderMessage(booking: ReminderBooking): { interactive: Interactive; templateParams: string[] } {
+export function reminderMessage(booking: ReminderBooking): { interactive: Interactive; templateParams: string[]; templateButtons: string[] } {
   const what = oneLine(booking.what, 40);
   const business = oneLine(booking.business, 40);
   const when = slotLabel(new Date(booking.start), booking.timeZone);
+  const ids = BOOKING_BUTTON_ACTIONS.map((action) => `booking:${booking.bookingId}:${action}`);
   return {
     interactive: {
       type: "buttons",
       body: `Reminder: your ${what} with ${business} is on ${when}.`,
-      buttons: BOOKING_BUTTON_ACTIONS.map((action) => ({ id: `booking:${booking.bookingId}:${action}`, title: BUTTON_TITLES[action] })),
+      buttons: BOOKING_BUTTON_ACTIONS.map((action, i) => ({ id: ids[i], title: BUTTON_TITLES[action] })),
     },
     templateParams: [what, business, when],
+    // The template's Confirm, Reschedule and Cancel buttons carry the same ids.
+    templateButtons: ids,
   };
 }
 

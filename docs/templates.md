@@ -30,9 +30,10 @@ Marketing footer: "Reply STOP to stop these messages" / "இந்த செய�
 **Known limits**
 
 - Variable values (dates, counts, the alert line) are filled in English for now, also in the Tamil templates.
-- A quick reply tapped on a **template** comes back with the button's text ("Confirm"), not our id
-  (`booking:<id>:confirm`): the adapter does not yet send quick-reply payloads with a template. Inside the window the
-  jobs send interactive buttons that do carry the ids. Follow-up: payload parameters in `sendTemplate`, so template
-  taps carry the same ids.
+- A quick reply tapped on a **template** carries our id (`booking:<id>:confirm`, `rating:<id>:5`), like the interactive
+  buttons inside the window: `notify.send` sends the payloads with the template when the approved template has exactly
+  as many quick-reply buttons as the job gives ids (`templateButtons`), and the webhook reads a `button` tap like a button
+  reply. So the quick replies above must stay in this order. With another number of buttons the ids are left out and a
+  tap comes back with the button's text. Both shapes follow Meta's documentation and are unconfirmed on a live number.
 - Submission is Dev 1's (`whatsapp/connected` submits the pack's templates); `templateComponents(template, language)`
   gives Meta's `components` array.

@@ -71,6 +71,8 @@ describe("handleBookingConfirmed", () => {
       conversationId: CONVERSATION,
       interactive: expect.objectContaining({ type: "buttons", body: "Reminder: your site visit with Skyline Homes is on Sat 10 Oct, 5:00 pm." }),
       templateParams: ["site visit", "Skyline Homes", "Sat 10 Oct, 5:00 pm"],
+      // The template's Confirm, Reschedule and Cancel buttons carry the same ids as the interactive ones.
+      templateButtons: [`booking:${BOOKING}:confirm`, `booking:${BOOKING}:reschedule`, `booking:${BOOKING}:cancel`],
       idempotencyKey: `reminder_24h:${BOOKING}:${START}`,
     });
     expect(send.mock.calls[1][2].idempotencyKey).toBe(`reminder_2h:${BOOKING}:${START}`);
