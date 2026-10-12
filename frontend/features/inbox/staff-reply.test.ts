@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { replyFailure, sendStaffReply, StaffReplyDataError } from "./staff-reply";
+import { replyFailure, sendStaffReply, sendStaffTemplate, StaffReplyDataError } from "./staff-reply";
 import { ApiError } from "@/lib/errors";
 
 const postJson = vi.hoisted(() => vi.fn());
@@ -50,5 +50,33 @@ describe("replyFailure", () => {
     expect(replyFailure(apiError(502, "upstream_failed")).maybeSent).toBe(true);
     expect(replyFailure(apiError(500, "internal")).maybeSent).toBe(true);
     expect(replyFailure(new StaffReplyDataError())).toMatchObject({ maybeSent: true, retryable: false });
+  });
+});
+
+describe("sendStaffTemplate", () => {
+  beforeEach(() => {
+    postJson.mockReset();
+  });
+
+  it("posts only the template (name, language, trimmed values) with the business in the tenant header, and parses the answer", async () => {
+    postJson.mockResolvedValue({ messageId: "m1", providerMsgId: "wamid.1", status: "accepted" });
+    await expect(sendStaffTemplate(TENANT, CHAT, { name: "reminder_24h_v1", language: "en", params: [" Asha ", "5 pm"] })).resolves.toMatchObject({ status: "accepted" });
+    expect(postJson).toHaveBeenCalledWith(
+      `/api/conversations/${CHAT}/messages`,
+      { template: { name: "reminder_24h_v1", language: "en", params: ["Asha", "5 pm"] } },
+      { tenantId: TENANT },
+    );
+  });
+
+  it("rejects an answer of the wrong shape instead of showing it as sent", async () => {
+    postJson.mockResolvedValue({ ok: true });
+    await expect(sendStaffTemplate(TENANT, CHAT, { name: "a_v1", language: "en", params: [] })).rejects.toBeInstanceOf(StaffReplyDataError);
+  });
+
+  it("passes the API's refusals through (not approved, wrong number of values)", async () => {
+    postJson.mockImplementation(() => Promise.reject(apiError(404, "not_found", "That template is not approved for this WhatsApp number.")));
+    await expect(sendStaffTemplate(TENANT, CHAT, { name: "a_v1", language: "en", params: [] })).rejects.toMatchObject({ status: 404 });
+    postJson.mockImplementation(() => Promise.reject(apiError(422, "validation_failed", "This template needs 2 values.")));
+    await expect(sendStaffTemplate(TENANT, CHAT, { name: "a_v1", language: "en", params: ["x"] })).rejects.toMatchObject({ status: 422 });
   });
 });

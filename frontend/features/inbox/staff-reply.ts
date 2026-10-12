@@ -7,7 +7,7 @@ import { ApiError, formatError, type FormattedError } from "@/lib/errors";
 // (`outside_window`) and a customer who opted out (`conflict`), so the UI's own window check is only a courtesy.
 // The new message reaches the chat through realtime; nothing is added to the list here.
 //
-// Not offered, because the API cannot do it yet: a template chosen by staff outside the window, and a retry
+// A template chosen by staff is the route's other body (sendStaffTemplate, below). Not offered: a retry
 // key. Without a key, sending the same text again sends a second message, so a failure whose outcome is
 // unknown is reported as such (see replyFailure) and never retried automatically.
 
@@ -44,4 +44,21 @@ export function replyFailure(err: unknown): ReplyFailure {
     return { ...formatted, code: "internal", title: "Couldn't confirm the message", message: "We couldn't confirm whether the message was sent.", retryable: false, maybeSent };
   }
   return { ...formatted, maybeSent };
+}
+
+/**
+ * An approved template, for a chat whose 24-hour window has closed (or any chat): `{ template: { name, language, params } }`,
+ * the other body of the same route (`SendStaffTemplateInput`). The server refuses a template that isn't approved for the chat's number
+ * (`not_found`) and a wrong number of values (`validation_failed`). Same answer, same rules about an unknown outcome as free text.
+ */
+export async function sendStaffTemplate(
+  tenantId: string,
+  conversationId: string,
+  template: { name: string; language: string; params: string[] },
+): Promise<StaffReplyResult> {
+  const body = { template: { name: template.name, language: template.language, params: template.params.map((p) => p.trim()) } };
+  const json = await postJson<unknown>(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, body, { tenantId });
+  const parsed = Result.safeParse(json);
+  if (!parsed.success) throw new StaffReplyDataError();
+  return parsed.data;
 }
