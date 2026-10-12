@@ -76,6 +76,17 @@ export async function readJson(request: Request): Promise<unknown> {
   }
 }
 
+/** The JSON body, or `{}` when the browser sent none (a POST whose details are all optional). */
+export async function optionalJson(request: Request): Promise<unknown> {
+  const text = await request.text();
+  if (text.trim() === "") return {};
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new AppError("validation_failed", "Send the details as JSON.");
+  }
+}
+
 /** Whether the user works for us across businesses (platform_admins, migration 0016; server only). */
 export async function isPlatformAdmin(userId: string): Promise<boolean> {
   const { data, error } = await supabaseAdmin()

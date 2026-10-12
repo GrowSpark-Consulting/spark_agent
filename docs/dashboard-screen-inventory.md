@@ -157,8 +157,8 @@ Stage moves are local.
 **Future API dependency:**
 - `bookings`, `resources`, `services`: **RLS READ**.
 - Free slots for reschedule: `findSlots()`: **HANDOVER** contract (Dev 2); needs a read route,
-  **PROPOSED** `GET /api/bookings/:id/slots`.
-- `POST /api/bookings/:id/(reschedule|cancel|complete|no-show)`: **HANDOVER**, Dev 2.
+  **BUILT** `GET /api/bookings/:id/slots` (Dev 2, 12 Oct).
+- `POST /api/bookings/:id/(reschedule|cancel|complete|no-show)`: **BUILT**, Dev 2 (12 Oct; docs/contracts.md, section 4). Staff act only on their own calendar's bookings.
 **HTTP method:** GET, POST.
 **Request:** `reschedule { slot }`, `cancel { reason }`.
 **Response:** `Booking[]`, `Slot[]`, updated `Booking`.

@@ -124,7 +124,7 @@ const BookingRow = z.object({
   details: z.record(z.string(), z.unknown()),
 });
 
-function toBooking(data: unknown): Booking {
+export function toBooking(data: unknown): Booking {
   const r = BookingRow.parse(data);
   return {
     id: r.id,
@@ -147,7 +147,7 @@ const readable = (message: string) => {
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
 };
 
-function bookingError(error: { code?: string; message: string }, what: string): Error {
+export function bookingError(error: { code?: string; message: string }, what: string): Error {
   switch (error.code) {
     case "23P01":
       return new AppError("slot_taken", "That time was just taken. Pick another one.");
@@ -162,7 +162,7 @@ function bookingError(error: { code?: string; message: string }, what: string): 
   }
 }
 
-async function announce(deps: BookingDeps, event: { id: string; name: string; data: Record<string, unknown> }): Promise<void> {
+export async function announce(deps: Pick<BookingDeps, "send">, event: { id: string; name: string; data: Record<string, unknown> }): Promise<void> {
   // The booking is already saved; a lost event is logged, and the fixed id makes a retry safe.
   try {
     await deps.send(event);

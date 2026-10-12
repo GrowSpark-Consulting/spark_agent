@@ -5,6 +5,7 @@ import { suggestReply } from "../agent/leadcard/suggest";
 import { getBalance } from "../billing/credits";
 import { startTrialFor } from "../billing/start-trial";
 import { createTrialTenant } from "../billing/trial";
+import { cancelFromCalendar, completeFromCalendar, noShowFromCalendar, rescheduleFromCalendar, slotsForMove } from "../booking/actions";
 import { googleConnectUrl, handleGoogleCallback } from "../booking/google-calendar";
 import { sendTestMessage } from "../channels/whatsapp/test-message";
 import { handleWhatsAppWebhook } from "../channels/whatsapp/inbound";
@@ -20,7 +21,7 @@ import { answerGap, createFaq, deleteFaq, dismissGap, listGaps, updateFaq } from
 import { serverEnv } from "../lib/env";
 import { requireRole, resolveTenant } from "../lib/tenant";
 import { createTemplate } from "../notify/templates";
-import { adminRoute, authenticate, readJson, requireTenant, tenantRoute, type UserClientFactory } from "./auth";
+import { adminRoute, authenticate, optionalJson, readJson, requireTenant, tenantRoute, type UserClientFactory } from "./auth";
 
 // Every HTTP endpoint of the API. A route only parses the request and calls a backend service;
 // business logic stays in the modules it imports.
@@ -111,6 +112,30 @@ const featureList = tenantRoute(({ context }) => listFeatures(context));
 // and every change is in the audit log.
 const featureUpdate: RouteHandler = (request, deps, params) =>
   tenantRoute(({ context, body, params: p }) => updateFeature(context, p.key, body))(request, deps.userClient, params);
+// The calendar's buttons (booking/actions.ts). Owners and admins on any booking of the business, staff on their own
+// calendar's; each sends booking.changed so the jobs follow. Complete and no-show have no body, and cancel's is
+// optional, so those three authenticate themselves (like the gap routes) and let the app turn an error into the envelope.
+// { start, end, resourceId? } → Booking: the new confirmed booking.
+const bookingReschedule: RouteHandler = (request, deps, params) =>
+  tenantRoute(({ context, body, params: p }) => rescheduleFromCalendar(context, p.id, body))(request, deps.userClient, params);
+// { reason? } or no body → Booking (cancelled).
+const bookingCancel: RouteHandler = async (request, deps, params) => {
+  const { context } = await requireTenant(request, deps.userClient);
+  return Response.json(await cancelFromCalendar(context, params.id, await optionalJson(request)));
+};
+// no body → Booking (completed; the lead moves to visited).
+const bookingComplete: RouteHandler = async (request, deps, params) => {
+  const { context } = await requireTenant(request, deps.userClient);
+  return Response.json(await completeFromCalendar(context, params.id));
+};
+// no body → Booking (no_show; the rebooking offer follows).
+const bookingNoShow: RouteHandler = async (request, deps, params) => {
+  const { context } = await requireTenant(request, deps.userClient);
+  return Response.json(await noShowFromCalendar(context, params.id));
+};
+// ?from=&to= → { slots }: up to 3 free times for the booking's service, a week from now by default.
+const bookingSlots: RouteHandler = (request, deps, params) =>
+  tenantRoute(({ context, params: p }) => slotsForMove(context, p.id, new URL(request.url).searchParams))(request, deps.userClient, params);
 // ?resourceId= → { url }: the Google consent link for one staff member. Owner or admin.
 const googleConnect: RouteHandler = (request, deps, params) =>
   tenantRoute(({ context }) => googleConnectUrl(context, new URL(request.url).searchParams.get("resourceId")))(request, deps.userClient, params);
@@ -199,6 +224,11 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/admin/whatsapp/manual", browser: true, methods: { POST: (request, deps) => adminManualConnect(request, deps.userClient) } },
   // The two buttons of a staff alert (module 6). No login: the signed token says who tapped and which handoff. Answers are redirects or friendly pages.
   { path: "/h/:token", secretParams: ["token"], methods: { GET: (request, _deps, params) => handleHandoffLink(request, { token: params.token }) } },
+  { path: "/api/bookings/:id/reschedule", browser: true, methods: { POST: bookingReschedule } },
+  { path: "/api/bookings/:id/cancel", browser: true, methods: { POST: bookingCancel } },
+  { path: "/api/bookings/:id/complete", browser: true, methods: { POST: bookingComplete } },
+  { path: "/api/bookings/:id/no-show", browser: true, methods: { POST: bookingNoShow } },
+  { path: "/api/bookings/:id/slots", browser: true, methods: { GET: bookingSlots } },
   { path: "/api/calendar/google/connect", browser: true, methods: { GET: googleConnect } },
   // Google sends the browser here after consent (no login: the signed state says who asked). Every answer
   // is a redirect back to the dashboard. The code and state are in the query string, which is never logged.

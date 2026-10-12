@@ -42,6 +42,7 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0023_booking_resource_lock` | `hold_slot` and `reschedule_booking` take a per-resource advisory lock, so racing holds for one person queue and the losers get `slot_taken` (23P01) instead of a deadlock error (40P01) |
 | `0024_api_roles_no_truncate` | `anon` and `authenticated` lose TRUNCATE on every table, now and (default privileges) later: row-level security does not cover TRUNCATE. Checked by `supabase/tests/isolation.test.sql` |
 | `0025_set_tenant_feature` | `set_tenant_feature(tenant, key, enabled, settings, actor)`: plan check (PA403), `tenant_features` write and audit row in one transaction (service_role only; section 6, feature toggles) |
+| `0026_booking_actions` | `bookings.status_changed_at` (kept by a trigger); `complete_booking`, `mark_booking_no_show`, `staff_cancel_booking`, `staff_reschedule_booking`, each with its audit row (service_role only, section 4); `bookings` and `leads` in the Realtime publication |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -356,6 +357,26 @@ localWindow(timeZone, { day: 'today' | 'tomorrow' | 'YYYY-MM-DD', part?: 'mornin
   slot at the same moment; exactly one wins and the other 19 get `slot_taken`. Holds and moves for one person take
   turns (0023): without that, Postgres could report a racing loser as a deadlock (a server error) instead.
 
+**The calendar's actions (built, Day 5; `backend/src/booking/actions.ts`, migration 0026).** For the dashboard, by a
+member: owners and admins on any booking of the business, staff only on bookings whose resource is theirs
+(`resources.user_id`), else `forbidden`. Each is one SQL function that changes the booking and writes its audit row
+together, keeping who did it in `details.<action>_by`; then the API sends `booking.changed` (section 5).
+
+| Route | Body | Does | Answer |
+|---|---|---|---|
+| `POST /api/bookings/:id/reschedule` | `{ start, end, resourceId? }` (ISO 8601 with offset) | `staff_reschedule_booking`: a confirmed booking moves (`reschedule_booking`, 0015/0023); staff only within their own calendar; also sends `booking.confirmed` for the new booking | the new `Booking` |
+| `POST /api/bookings/:id/cancel` | `{ reason? }` or none | `staff_cancel_booking`: a held or confirmed booking is cancelled; again is harmless | `Booking` |
+| `POST /api/bookings/:id/complete` | none | `complete_booking`: a confirmed booking that has started; its lead moves to `visited` (never back from won or lost); again is harmless | `Booking` |
+| `POST /api/bookings/:id/no-show` | none | `mark_booking_no_show`: a confirmed booking that has started; the no-show offer follows; again is harmless | `Booking` |
+| `GET /api/bookings/:id/slots?from=&to=` | none | up to 3 free times for a confirmed booking's service (`findSlots`), a week from now by default | `{ slots: Slot[] }` |
+
+Errors: `slot_taken` (409), `conflict` for the wrong state ("This booking has not started yet."), `not_found`,
+`validation_failed`. Audit rows: `booking.rescheduled` (on the old booking, with the new one's id and times),
+`booking.cancelled` (with the reason), `booking.completed`, `booking.no_show`. `bookings.status_changed_at` (a trigger)
+says when the status last changed, and `bookings` and `leads` are in the Realtime publication (0026), so the calendar
+and the leads board can follow changes without reloading. A customer is not messaged about a cancel or a move made
+from the dashboard: there is no such message in the handover (question for Raja).
+
 **`notify.send` behaviour (Proposed, test message Agreed):**
 
 1. `isEnabled` for the kind's feature, if it has one (`staff_reply`, `consent_notice`, `lead_card` and
@@ -395,7 +416,7 @@ sent twice carries a fixed `id` so Inngest drops the duplicate (`tenant.trial_st
 | `kb/document.uploaded` | `{ tenantId, documentId }`; sent by `POST /api/kb/documents` (id `kb_document_uploaded:<documentId>`), starts the `kb-ingest` job |
 | `whatsapp/connected` | `{ tenantId, connectionId }` |
 | `booking.confirmed` | `{ tenantId, bookingId }`; sent by `confirmBooking` and `rescheduleBooking` (id `booking.confirmed:<bookingId>`); starts `booking-reminders` and `post-visit`, and `google-calendar-sync` adds the booking to Google |
-| `booking.changed` | `{ tenantId, bookingId, change: 'rescheduled' \| 'cancelled' \| 'completed' \| 'no_show' }`; sent by `rescheduleBooking` and `cancelBooking` (id `booking.changed:<bookingId>:<change>`); cancels that booking's `booking-reminders` run, and its `post-visit` run unless the change is `completed`; `google-calendar-sync` removes its Google event when `cancelled` or `rescheduled`; `no_show` starts `noshow-rebooking` |
+| `booking.changed` | `{ tenantId, bookingId, change: 'rescheduled' \| 'cancelled' \| 'completed' \| 'no_show' }`; sent by `rescheduleBooking` and `cancelBooking` and by the calendar's actions, which also send `completed` and `no_show` (id `booking.changed:<bookingId>:<change>`); cancels that booking's `booking-reminders` run, and its `post-visit` run unless the change is `completed`; `google-calendar-sync` removes its Google event when `cancelled` or `rescheduled`; `no_show` starts `noshow-rebooking` |
 | `booking.rated` | `{ tenantId, bookingId, rating }` (1–5); sent by `recordVisitRating` when the customer taps a rating (id `booking.rated:<bookingId>`, so the first rating counts); the `post-visit` run waits for it |
 | `handoff.opened` | `{ tenantId, handoffId, conversationId }`; sent by Dev 1's reply step when it opens a handoff (id `handoff_opened:<handoffId>`); starts `handoff-alert`, which sends one `staff_alert` to each owner and admin with an alert number (section 2). A handoff already resolved by the time the job runs gets no alert. **The job is the only sender of handoff alerts:** the reply step does not alert staff itself. Also starts `handoff-sla`: after the SLA (section 3) it alerts the owners again (`handoff_waiting`) unless someone has the chat: the handoff was picked up, assigned or resolved, a staff member took the chat over, or it is no longer in `human` mode (back with the AI, or on the business's own number) |
 | `handoff.own_number` | `{ tenantId, handoffId }`; to be sent by Dev 1's own-number takeover; starts `own-number-outcome` |
