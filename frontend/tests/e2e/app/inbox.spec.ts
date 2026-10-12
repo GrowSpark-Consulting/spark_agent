@@ -616,3 +616,56 @@ test.describe("Inbox · who replies", () => {
   });
 });
 
+// Links into the inbox: the app and the takeover link write ?chat=<id>, staff alerts write ?conversation=<id>
+// (backend/src/notify/staff-alerts.ts). Both open that chat; anything else leaves the list as it was.
+test.describe("Inbox · opened from a link", () => {
+  test.use({ storageState: SIGNED_OUT });
+
+  const open = async (page: Page, query: string) => {
+    await mockRealtime(page);
+    await signIn(page, "inbox@test.local", `/dashboard/inbox${query}`);
+    await expect(page.getByTestId("inbox")).toBeVisible();
+  };
+
+  for (const param of ["chat", "conversation"]) {
+    test(`?${param}= opens that chat`, async ({ page }) => {
+      await open(page, `?${param}=${cid(2)}`);
+      // Priya, not the newest chat (Karthik), which a plain visit would open on a wide screen.
+      await expect(page.getByRole("log", { name: "Messages with Priya S" })).toBeVisible();
+      await expect(page.getByRole("log")).toHaveCount(1);
+      await expectNoHorizontalOverflow(page);
+
+      // Picking another chat leaves one parameter, `chat`, that agrees with what is open.
+      if (isMobile(page)) await page.getByRole("button", { name: "Back" }).click();
+      await row(page, /Karthik R/).click();
+      await expect(page.getByRole("log", { name: "Messages with Karthik R" })).toBeVisible();
+      await expect(page).toHaveURL(new RegExp(`chat=${cid(1)}`));
+      expect(new URL(page.url()).searchParams.has("conversation")).toBe(false);
+    });
+  }
+
+  test("chat wins when a link carries both", async ({ page }) => {
+    await open(page, `?chat=${cid(2)}&conversation=${cid(1)}`);
+    await expect(page.getByRole("log", { name: "Messages with Priya S" })).toBeVisible();
+  });
+
+  for (const query of ["?conversation=not-an-id", "?conversation=", `?conversation=${cid(1)}x`, `?conversation=${"4".repeat(40)}`]) {
+    test(`${query} is ignored: the inbox loads as on a plain visit`, async ({ page }) => {
+      await open(page, query);
+      await expect(page.locator(".app-inbox-row")).toHaveCount(4);
+      await expect(appAlert(page)).toHaveCount(0);
+      // Wide screens open the newest chat on a plain visit; phones show the list.
+      if (isMobile(page)) await expect(page.getByRole("log")).toHaveCount(0);
+      else await expect(page.getByRole("log", { name: "Messages with Karthik R" })).toBeVisible();
+    });
+  }
+
+  test("a chat that isn't this business's opens nothing and shows no error", async ({ page }) => {
+    // A well-formed id that matches none of the member's chats (another business's, or deleted).
+    await open(page, `?conversation=49999999-0000-0000-0000-000000000001`);
+    await expect(page.locator(".app-inbox-row")).toHaveCount(4);
+    await expect(page.getByRole("log")).toHaveCount(0);
+    await expect(appAlert(page)).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+  });
+});
