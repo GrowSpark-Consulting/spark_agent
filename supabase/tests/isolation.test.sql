@@ -157,14 +157,14 @@ select is(
   'every other table belongs to a business (has tenant_id); a new shared table must be added to this list on purpose');
 
 select is(
-  (select array_agg(format('%s.%s', tablename, policyname) order by 1) from pg_policies
+  (select array_agg(format('%s.%s', tablename, policyname) order by tablename, policyname) from pg_policies
     where schemaname = 'public' and roles <> array['authenticated']::name[]),
   null,
   'every policy is for signed-in users: none for signed-out visitors or for everyone');
 
 -- memberships.own_preferences is narrower than membership: a member may change only their own row.
 select is(
-  (select array_agg(format('%s.%s', p.tablename, p.policyname) order by 1) from pg_policies p
+  (select array_agg(format('%s.%s', p.tablename, p.policyname) order by p.tablename, p.policyname) from pg_policies p
     where p.schemaname = 'public' and p.tablename in (select name from iso.tables)
       and p.qual is not null and p.qual not like '%is_member(tenant_id)%'
       and format('%s.%s', p.tablename, p.policyname) <> 'memberships.own_preferences'),
@@ -172,7 +172,7 @@ select is(
   'every policy on a business table reaches only rows of a business the user belongs to');
 
 select is(
-  (select array_agg(format('%s.%s', p.tablename, p.policyname) order by 1) from pg_policies p
+  (select array_agg(format('%s.%s', p.tablename, p.policyname) order by p.tablename, p.policyname) from pg_policies p
     where p.schemaname = 'public' and p.tablename in (select name from iso.tables)
       and p.with_check is not null and p.with_check not like '%is_member(tenant_id)%'
       and format('%s.%s', p.tablename, p.policyname) <> 'memberships.own_preferences'),
@@ -180,7 +180,7 @@ select is(
   'every policy that lets a member write a business table checks the new row belongs to their business');
 
 select is(
-  (select array_agg(format('%s.%s', c.table_name, c.column_name) order by 1) from information_schema.columns c
+  (select array_agg(format('%s.%s', c.table_name, c.column_name) order by c.table_name, c.column_name) from information_schema.columns c
     where c.table_schema = 'public'
       and (c.column_name like '%\_enc' or c.column_name like '%token_hash%' or c.column_name like '%secret%')
       and (has_column_privilege('authenticated', format('public.%I', c.table_name), c.column_name, 'select')
@@ -189,28 +189,28 @@ select is(
   'no encrypted secret or token hash can be read from the browser');
 
 select is(
-  (select array_agg(p.proname::text order by 1) from pg_proc p
+  (select array_agg(p.proname::text order by p.proname) from pg_proc p
     where p.pronamespace = 'public'::regnamespace and p.prorettype <> 'trigger'::regtype
       and has_function_privilege('authenticated', p.oid, 'execute')),
-  array['is_member'],
-  'a signed-in user can call only is_member; every other function is server-only');
+  array['is_admin', 'is_member'],
+  'a signed-in user can call only is_member and is_admin (the role check in 0028 policies); every other function is server-only');
 
 select is(
-  (select array_agg(p.proname::text order by 1) from pg_proc p
+  (select array_agg(p.proname::text order by p.proname) from pg_proc p
     where p.pronamespace = 'public'::regnamespace and p.prorettype <> 'trigger'::regtype
       and has_function_privilege('anon', p.oid, 'execute')),
   null,
   'a signed-out visitor can call no function');
 
 select is(
-  (select array_agg(c.relname::text order by 1) from pg_class c
+  (select array_agg(c.relname::text order by c.relname) from pg_class c
     where c.relnamespace = 'public'::regnamespace
       and (c.relkind = 'm' or (c.relkind = 'v' and not coalesce('security_invoker=true' = any(c.reloptions), false)))),
   null,
   'every view reads with the caller''s rights (so row-level security applies through it), and there is no materialized view');
 
 select is(
-  (select array_agg(c.relname::text order by 1) from pg_class c
+  (select array_agg(c.relname::text order by c.relname) from pg_class c
     where c.relnamespace = 'public'::regnamespace and c.relkind = 'r'
       and (has_table_privilege('anon', c.oid, 'truncate') or has_table_privilege('authenticated', c.oid, 'truncate'))),
   null,
