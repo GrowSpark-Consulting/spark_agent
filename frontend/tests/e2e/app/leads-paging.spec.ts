@@ -72,6 +72,12 @@ test.describe("Leads board · more than one page", () => {
     await page.waitForTimeout(900);
     await expect(cards(page)).toHaveCount(200);
 
+    // The board subscribes to Realtime and reads its first page once more when the join succeeds (to catch what it missed). Let that
+    // read land before paging, so the reads below are in a known order.
+    await expect(page.getByText("Updating live.")).toBeVisible();
+    await page.waitForTimeout(900);
+    await expect(cards(page)).toHaveCount(200);
+
     await loadMore(page).click();
     await expect(cards(page)).toHaveCount(400);
     await loadMore(page).click();
@@ -80,12 +86,10 @@ test.describe("Leads board · more than one page", () => {
     await expect(page.getByText(/Showing \d+ of \d+ leads/)).toHaveCount(0);
     await expect(page.getByRole("group", { name: "Temperature" }).getByRole("button", { name: "All · 450" })).toBeVisible();
 
-    // Never "everything at once": the first page is read from the start (and once more if the catch-up after Realtime joined ran), and the
-    // two later pages ask for what is older, by cursor.
+    // Never "everything at once": the first page is read twice (the first read, then the catch-up after Realtime joined), and the two
+    // later pages ask for what is older, by cursor.
     const pageReads = reads.filter((u) => u.searchParams.get("limit") === "200");
-    expect(isKeyset(pageReads[0])).toBe(false);
-    expect(pageReads.filter(isKeyset)).toHaveLength(2);
-    expect(pageReads.filter((u) => !isKeyset(u)).length).toBeLessThanOrEqual(2);
+    expect(pageReads.map(isKeyset)).toEqual([false, false, true, true]);
     // Nobody appears twice and nobody is missing.
     const names = await cards(page).allInnerTexts();
     expect(new Set(names).size).toBe(450);

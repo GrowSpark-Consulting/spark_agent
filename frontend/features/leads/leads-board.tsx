@@ -152,7 +152,7 @@ export function LeadsBoard({ tenantId, timeZone }: { tenantId: string; timeZone:
     } catch (err) {
       dispatch({ type: "refresh_failed", generation: g, error: formatError(err) });
     }
-  }, [tenantId, applied, load, loadCounts]);
+  }, [tenantId, load]);
   // Only tables the database publishes are listened to; `leads` is one (0026), so a change reads again by itself and the screen says
   // "Updating live". If the join is refused it says "Not updating live" and Refresh is the way (lib/realtime/published-tables.ts).
   const live = useTableRefresh(tenantId, ["leads"], refresh);
