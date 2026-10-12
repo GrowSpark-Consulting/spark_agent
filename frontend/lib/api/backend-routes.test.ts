@@ -87,6 +87,9 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   "PUT /api/inngest": "Inngest calls it: syncs the function list",
   "GET /h/:token": "a staff member's browser follows the link in a WhatsApp alert; it redirects to /dashboard/inbox?chat=<id>",
   "GET /api/calendar/google/callback": "Google redirects the browser here after consent; it redirects back to Booking setup with the outcome",
+  // Not wired yet: built for the inbox's template picker (Dev 3), which still reads whatsapp_templates under RLS and cannot tell a chat's number.
+  // When the picker calls it, this line moves to FRONTEND_CALLS.
+  "GET /api/conversations/:id/templates": "not called yet: the inbox template picker's list of templates this chat's number can send (Dev 2, #141)",
 };
 
 function sourceFiles(dir: string): string[] {
