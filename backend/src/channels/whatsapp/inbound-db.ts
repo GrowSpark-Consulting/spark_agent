@@ -148,9 +148,12 @@ export async function updateConnectionHealth(args: { tenantId: string; connectio
  * made with a client's own Meta app. A row that cannot be decrypted is skipped (it can never verify). The ids come
  * from a body that is not verified yet, so they only choose which secrets to try; nothing else is read from it.
  */
-export async function findByoSecrets(phoneNumberIds: string[]): Promise<{ connectionId: string; secret: string }[]> {
+/** The decrypted app secrets of the manual_byo connections for these numbers; `skipped` counts rows whose saved secret could not be read (only counted, for the refusal log). */
+export type ByoSecrets = { connectionId: string; secret: string }[] & { skipped?: number };
+
+export async function findByoSecrets(phoneNumberIds: string[]): Promise<ByoSecrets> {
   const ids = phoneNumberIds.slice(0, 20);
-  if (ids.length === 0) return [];
+  if (ids.length === 0) return Object.assign([], { skipped: 0 });
   const { data, error } = await supabaseAdmin()
     .from("whatsapp_connections")
     .select("id, tenant_id, app_secret_enc")
@@ -158,14 +161,19 @@ export async function findByoSecrets(phoneNumberIds: string[]): Promise<{ connec
     .in("phone_number_id", ids);
   if (error) throw new WebhookDbError("secret lookup", error.code);
   const found: { connectionId: string; secret: string }[] = [];
+  let skipped = 0;
   for (const row of data ?? []) {
-    if (typeof row.app_secret_enc !== "string") continue;
+    if (typeof row.app_secret_enc !== "string") {
+      skipped++;
+      continue;
+    }
     try {
       const context = connectionSecretContext({ column: "app_secret_enc", tenantId: String(row.tenant_id), connectionId: String(row.id) });
       found.push({ connectionId: String(row.id), secret: decryptSecret(row.app_secret_enc, context) });
     } catch {
       // wrong key or tampered value: this connection cannot verify
+      skipped++;
     }
   }
-  return found;
+  return Object.assign(found, { skipped });
 }

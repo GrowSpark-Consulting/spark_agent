@@ -7,6 +7,7 @@ import * as db from "./inbound-db";
 import { WebhookDbError, type ConnectionRow, type StoreInboundArgs } from "./inbound-db";
 import { noteWebhookSeen } from "./connect/webhook-seen";
 import { parseWebhook, type ParsedMessage } from "./parse";
+import { refusalLog, type RefusalLog } from "./refusal-log";
 import { verifySignature } from "./signature";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 
@@ -75,6 +76,8 @@ export interface WebhookDeps {
    * Best effort, never awaited by the answer. Optional so that a caller built before it still works.
    */
   noteWebhookSeen?: (tenantId: string, connectionId: string) => Promise<void>;
+  /** Where the reason for a refused signature is written (refusal-log.ts). Optional: the shared one is used. */
+  refusalLog?: RefusalLog;
 }
 
 // Looked up when called (not when the module loads), so a test that replaces inbound-db or the queue is honoured.
@@ -93,8 +96,16 @@ const realDeps = (): WebhookDeps => ({
 });
 
 export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps = realDeps()): Promise<Response> {
+  const refusals = deps.refusalLog ?? refusalLog;
   const signature = request.headers.get("x-hub-signature-256");
-  if (signature === null || !SIGNATURE_FORMAT.test(signature)) throw unauthenticated();
+  if (signature === null) {
+    refusals.refused("no_signature_header");
+    throw unauthenticated();
+  }
+  if (!SIGNATURE_FORMAT.test(signature)) {
+    refusals.refused("bad_signature_format");
+    throw unauthenticated();
+  }
 
   let appSecret: string | undefined;
   try {
@@ -111,11 +122,19 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
   // Connections whose own app secret signed this request (manual_byo). Only tried when ours did not match.
   const byoVerified = new Set<string>();
   if (!signedByPlatform) {
+    let phoneIdCount = 0;
+    let byoRows = 0;
+    let byoUndecryptable = 0;
+    let bodyReadable = true;
     try {
       // The ids in a body that is not verified yet only choose which secrets to try.
       const candidates = parseWebhook(JSON.parse(new TextDecoder().decode(raw)));
       const phoneIds = [...new Set([...candidates.messages, ...candidates.statuses, ...candidates.echoes].map((item) => item.phoneNumberId))];
-      for (const { connectionId, secret } of await deps.findByoSecrets(phoneIds)) {
+      phoneIdCount = phoneIds.length;
+      const byo = await deps.findByoSecrets(phoneIds);
+      byoUndecryptable = byo.skipped ?? 0;
+      byoRows = byo.length + byoUndecryptable;
+      for (const { connectionId, secret } of byo) {
         if (verifySignature(raw, signature, secret)) byoVerified.add(connectionId);
       }
     } catch (err) {
@@ -124,12 +143,14 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
         return Response.json({ error: { code: "internal", message: "Something went wrong on our side." } }, { status: 500 });
       }
       // a body that is not JSON cannot name a connection; it falls through to the refusal below
+      bodyReadable = false;
     }
     if (byoVerified.size === 0) {
       if (!appSecret) {
         console.error(`${TAG} META_APP_SECRET is not set`);
         return Response.json({ error: { code: "internal", message: "Something went wrong on our side." } }, { status: 500 });
       }
+      refusals.refused(!bodyReadable ? "body_not_json" : byoRows === 0 ? "no_byo_connection" : "byo_signature_mismatch", { phoneIds: phoneIdCount, byoRows, byoUndecryptable });
       throw unauthenticated();
     }
   }
