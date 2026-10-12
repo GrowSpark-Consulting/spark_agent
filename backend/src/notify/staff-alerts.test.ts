@@ -59,7 +59,7 @@ describe("staffAlertContent", () => {
   it("names the customer and links to the chat", async () => {
     await expect(staffAlertContent(TENANT, { kind: "handoff_opened", conversationId: CONVERSATION }, deps())).resolves.toEqual({
       headline: "Asha Raman is waiting for a person on WhatsApp.",
-      link: `https://app.test/dashboard/inbox?conversation=${CONVERSATION}`,
+      link: `https://app.test/dashboard/inbox?chat=${CONVERSATION}`,
     });
     expect(queries).toContainEqual({ table: "conversations", op: "eq", args: ["tenant_id", TENANT] });
   });
@@ -77,7 +77,7 @@ describe("staffAlertContent", () => {
   it("says how long the customer has waited when no one picked the chat up", async () => {
     await expect(staffAlertContent(TENANT, { kind: "handoff_waiting", conversationId: CONVERSATION, waitedMinutes: 15 }, deps())).resolves.toEqual({
       headline: "Asha Raman has waited 15 minutes and no one has picked up the chat yet.",
-      link: `https://app.test/dashboard/inbox?conversation=${CONVERSATION}`,
+      link: `https://app.test/dashboard/inbox?chat=${CONVERSATION}`,
     });
     const one = await staffAlertContent(TENANT, { kind: "handoff_waiting", conversationId: CONVERSATION, waitedMinutes: 1 }, deps());
     expect(one.headline).toContain("waited 1 minute and");
@@ -87,7 +87,7 @@ describe("staffAlertContent", () => {
     const outcome = await staffAlertContent(TENANT, { kind: "own_number_outcome", conversationId: CONVERSATION }, deps());
     expect(outcome).toEqual({
       headline: "How did your WhatsApp chat with Asha Raman go? Update the lead.",
-      link: `https://app.test/dashboard/inbox?conversation=${CONVERSATION}`,
+      link: `https://app.test/dashboard/inbox?chat=${CONVERSATION}`,
     });
   });
 
@@ -101,7 +101,7 @@ describe("staffAlertContent", () => {
     expect(outcome.headline).toBe("How did the site visit with Asha Raman go? Update the lead so follow-ups stay right.");
     const low = await staffAlertContent(TENANT, { kind: "low_rating", conversationId: CONVERSATION, what: "site visit", rating: 2 }, deps());
     expect(low.headline).toBe("Asha Raman rated their site visit 2 out of 5.");
-    expect(low.link).toBe(`https://app.test/dashboard/inbox?conversation=${CONVERSATION}`);
+    expect(low.link).toBe(`https://app.test/dashboard/inbox?chat=${CONVERSATION}`);
   });
 
   it("tells the owner the business is out of credits, with the billing link", async () => {
@@ -115,7 +115,7 @@ describe("staffAlertContent", () => {
 describe("sendStaffAlert", () => {
   it("sends the line and the link as free text, and both as the template's variables", async () => {
     await sendStaffAlert(TENANT, OWNER, { kind: "handoff_opened", conversationId: CONVERSATION }, deps());
-    const link = `https://app.test/dashboard/inbox?conversation=${CONVERSATION}`;
+    const link = `https://app.test/dashboard/inbox?chat=${CONVERSATION}`;
     expect(sendMock).toHaveBeenCalledWith(TENANT, "staff_alert", {
       staffUserId: OWNER,
       text: `Asha Raman is waiting for a person on WhatsApp.\n${link}`,
