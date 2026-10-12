@@ -366,6 +366,25 @@ describe("sendTemplate", () => {
     expect(init?.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it("sends the payload of each quick-reply button, in order, so a tap comes back with our id", async () => {
+    const f = fakeFetch(async () => okSend());
+    const buttons = ["booking:9b2f0a4e-1c3d-4e5f-8a6b-7c8d9e0f1a2b:confirm", "booking:9b2f0a4e-1c3d-4e5f-8a6b-7c8d9e0f1a2b:cancel"];
+    await sendTemplate(connection(), "+910000000101", template({ buttons }), deps(f));
+    expect(JSON.parse(f.mock.calls[0][1]?.body as string).template.components).toEqual([
+      { type: "body", parameters: [{ type: "text", text: "Karthik" }, { type: "text", text: "4 pm" }] },
+      { type: "button", sub_type: "quick_reply", index: "0", parameters: [{ type: "payload", payload: buttons[0] }] },
+      { type: "button", sub_type: "quick_reply", index: "1", parameters: [{ type: "payload", payload: buttons[1] }] },
+    ]);
+  });
+
+  it("refuses button payloads Meta would reject, without calling it", async () => {
+    const f = fakeFetch(async () => okSend());
+    for (const buttons of [[""], ["x".repeat(257)], Array.from({ length: 11 }, (_, i) => `b${i}`)]) {
+      await expect(sendTemplate(connection(), "+910000000101", template({ buttons }), deps(f))).resolves.toMatchObject({ ok: false, error: { code: "validation_failed" } });
+    }
+    expect(f).not.toHaveBeenCalled();
+  });
+
   it("leaves out components for a template without variables", async () => {
     const f = fakeFetch(async () => okSend());
     await sendTemplate(connection(), "+910000000101", template({ params: [] }), deps(f));

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { CREDIT_COST } from "../billing/credit-costs";
 import { refundCredits, spendCredits } from "../billing/credits";
 import { isEnabled } from "../features/is-enabled";
+import { inngest } from "../inngest/client";
 import { supabaseAdmin } from "../lib/supabase-admin";
 import { Interactive, interactiveSummary } from "./interactive";
 import { KINDS, type MessageCreditReason, type NotificationKind } from "./kinds";
@@ -36,6 +37,12 @@ export type NotifyPayload = {
   interactive?: Interactive;
   /** Template variables in {{1}}… order, used outside the window. */
   templateParams?: string[];
+  /**
+   * Our ids for the kind's template's quick-reply buttons, in their order (`booking:<id>:confirm`…), so a tap on the
+   * template comes back like a tap on the interactive buttons. Sent only when the approved template has exactly that many
+   * quick-reply buttons; otherwise left out, and Meta returns the button's text.
+   */
+  templateButtons?: string[];
   /**
    * staff_reply only: an approved template a staff member chose (the inbox's template picker), by its exact versioned
    * name and language, with its body variables in {{1}}… order. Sent whatever the window; free, like any staff reply.
@@ -134,6 +141,35 @@ async function earlierSend(db: SupabaseClient, tenantId: string, kind: Notificat
   return { status: "sent", messageId: row.id, providerMsgId: row.provider_msg_id ?? "", creditsCharged: row.credits_charged, usedTemplate: row.template_name !== null };
 }
 
+/**
+ * credits.spent for the credit-alerts job (docs/handover.md, module 7), which compares the balance with the plan. Not
+ * awaited, so it never delays or fails a send; the fixed id makes Inngest drop a repeat.
+ */
+function announceSpend(tenantId: string, amount: number, reason: MessageCreditReason, messageId: string): void {
+  inngest
+    .send({ id: `credits.spent:${messageId}`, name: "credits.spent", data: { tenantId, amount, reason, messageId } })
+    .catch((err: unknown) => console.error(`[notify] credits.spent not sent for message ${messageId}: ${err instanceof Error ? err.name : "unknown error"}`));
+}
+
+/**
+ * How many quick-reply buttons a template has, from `whatsapp_templates.components`: as Meta lists it
+ * ([{ type: "BUTTONS", buttons: [{ type: "QUICK_REPLY" }] }]) or as submitted ({ buttons: [...] }). Null when it can't be read.
+ */
+export function templateQuickReplyCount(components: unknown): number | null {
+  const isQuickReply = (b: unknown) => typeof b === "object" && b !== null && /^quick_reply$/i.test(String((b as { type?: unknown }).type ?? "quick_reply"));
+  if (Array.isArray(components)) {
+    const block = components.find((c) => typeof c === "object" && c !== null && String((c as { type?: unknown }).type).toUpperCase() === "BUTTONS") as { buttons?: unknown } | undefined;
+    if (!block) return 0;
+    return Array.isArray(block.buttons) ? block.buttons.filter(isQuickReply).length : null;
+  }
+  if (typeof components === "object" && components !== null) {
+    const buttons = (components as { buttons?: unknown }).buttons;
+    if (buttons === undefined) return 0;
+    return Array.isArray(buttons) ? buttons.filter(isQuickReply).length : null;
+  }
+  return null;
+}
+
 /** A sender's SendError keeps its code and flags; anything else is unexpected, so it is logged and generic. */
 function senderFailure(err: unknown, message: string): SendOutcome {
   if (err instanceof SendError) return failed(err.code, err.message, { retryable: err.retryable, outcomeUnknown: err.outcomeUnknown });
@@ -206,6 +242,8 @@ export async function send(tenantId: string, kind: NotificationKind, payload: No
   const lastCustomerMessage = target.last_customer_msg_at ? Date.parse(target.last_customer_msg_at) : null;
   const insideWindow = lastCustomerMessage !== null && Date.now() - lastCustomerMessage < WINDOW_MS;
   let template: z.infer<typeof Template> | undefined;
+  // The quick-reply payloads to send with the kind's template, once it is known to have exactly that many buttons.
+  let buttonIds: string[] | undefined;
   if (chosen) {
     // Only an approved template of this business's connected number, with exactly the values its body asks for.
     const found = await db
@@ -235,6 +273,19 @@ export async function send(tenantId: string, kind: NotificationKind, payload: No
     if (templateResult.error) throw new Error(`notify_template failed: ${templateResult.error.message}`);
     template = z.array(Template).max(1).parse(templateResult.data)[0];
     if (!template) return { status: "skipped", reason: "outside_window" };
+    if (payload.templateButtons?.length) {
+      const found = await db
+        .from("whatsapp_templates")
+        .select("components")
+        .eq("tenant_id", tenantId)
+        .eq("connection_id", target.connection_id)
+        .eq("name", template.name)
+        .eq("language", template.language)
+        .limit(1);
+      if (found.error) throw new Error(`notify.send: template read failed: ${found.error.message}`);
+      const [row] = z.array(z.object({ components: z.unknown() })).max(1).parse(found.data ?? []);
+      if (templateQuickReplyCount(row?.components) === payload.templateButtons.length) buttonIds = payload.templateButtons;
+    }
   }
 
   const reason: MessageCreditReason | undefined = template
@@ -257,7 +308,13 @@ export async function send(tenantId: string, kind: NotificationKind, payload: No
   let providerMsgId: string;
   try {
     const sent = template
-      ? await sender.sendTemplate(target.to_phone, template.name, template.language, chosen ? chosen.params : (payload.templateParams ?? []))
+      ? await sender.sendTemplate(
+          target.to_phone,
+          template.name,
+          template.language,
+          chosen ? chosen.params : (payload.templateParams ?? []),
+          ...(buttonIds ? ([buttonIds] as [string[]]) : ([] as [])),
+        )
       : payload.interactive
         ? await sender.sendInteractive(target.to_phone, payload.interactive)
         : await sender.sendText(target.to_phone, payload.text as string);
@@ -293,6 +350,7 @@ export async function send(tenantId: string, kind: NotificationKind, payload: No
   });
   // The message has gone out and is paid for; a retry would send it twice. Log and report it as sent.
   if (recorded.error) console.error(`notify_record failed for message ${messageId}: ${recorded.error.message}`);
+  if (cost > 0 && reason) announceSpend(tenantId, cost, reason, messageId);
 
   return { status: "sent", messageId, providerMsgId, creditsCharged: cost, usedTemplate: Boolean(template) };
 }

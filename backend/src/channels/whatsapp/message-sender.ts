@@ -49,7 +49,8 @@ function unwrap<T>(result: AdapterResult<T>): T {
 export function whatsAppSender(connection: SendConnection, deps: AdapterDeps = {}): MessageSender {
   return {
     sendText: async (to, text) => unwrap(await sendText(connection, to, text, deps)),
-    sendTemplate: async (to, name, language, params) => unwrap(await sendTemplate(connection, to, { name, language, params }, deps)),
+    sendTemplate: async (to, name, language, params, buttons) =>
+      unwrap(await sendTemplate(connection, to, { name, language, params, ...(buttons?.length ? { buttons } : {}) }, deps)),
     sendInteractive: async (to, message) => unwrap(await sendInteractive(connection, to, message, deps)),
   };
 }

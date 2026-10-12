@@ -9,7 +9,8 @@ import type { Interactive } from "./interactive";
 // Every method throws a SendError when WhatsApp does not accept the message.
 export interface MessageSender {
   sendText(to: string, text: string): Promise<SendResult>;
-  sendTemplate(to: string, name: string, language: string, params: string[]): Promise<SendResult>;
+  /** `buttons`: the payloads of the template's quick-reply buttons, in their order (only when it has exactly that many). */
+  sendTemplate(to: string, name: string, language: string, params: string[], buttons?: string[]): Promise<SendResult>;
   /** Reply buttons or a list; free-form, so inside the 24-hour window only (like sendText). */
   sendInteractive(to: string, message: Interactive): Promise<SendResult>;
 }

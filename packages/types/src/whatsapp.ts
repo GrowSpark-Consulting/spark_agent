@@ -74,8 +74,8 @@ export interface SendTestMessageResult extends SendResult {
 
 /**
  * Body of POST /api/conversations/:id/messages: a free-text reply from staff, inside the 24-hour window.
- * Strict on purpose: a `template` (or any other field) is refused, not silently dropped, because
- * notify.send picks templates by a kind's base name and cannot send one staff chose.
+ * Strict on purpose: any other field is refused, not silently dropped. A template staff chose is the other body,
+ * SendStaffTemplateInput.
  */
 export const SendStaffReplyInput = z
   .object({
@@ -87,6 +87,25 @@ export const SendStaffReplyInput = z
   })
   .strict();
 export type SendStaffReplyInput = z.infer<typeof SendStaffReplyInput>;
+
+/**
+ * The other body of POST /api/conversations/:id/messages: an approved template staff chose (the inbox's template
+ * picker), by its exact versioned name and language, with its body variables in {{1}}… order. Sent whatever the 24-hour
+ * window, free. Only a template approved for the business's connected number is used (not_found otherwise), and the
+ * number of values must match its body (validation_failed, "This template needs 2 values.").
+ */
+export const SendStaffTemplateInput = z
+  .object({
+    template: z
+      .object({
+        name: z.string().regex(/^[a-z0-9_]{1,512}$/, "Choose a template"),
+        language: z.string().regex(/^[a-z]{2,3}(_[A-Z]{2})?$/, "Choose the template's language"),
+        params: z.array(z.string().trim().min(1, "Fill in every value").max(WHATSAPP_TEXT_MAX)).max(20),
+      })
+      .strict(),
+  })
+  .strict();
+export type SendStaffTemplateInput = z.infer<typeof SendStaffTemplateInput>;
 
 /** Result of POST /api/conversations/:id/messages. "accepted" means Meta took it; delivery arrives later as a status. */
 export interface SendStaffReplyResult extends SendResult {

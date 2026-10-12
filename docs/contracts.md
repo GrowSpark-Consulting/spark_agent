@@ -56,8 +56,12 @@ can TRUNCATE. **A new business table needs one fixture row in that file**, or th
 
 - `kb_chunks.embedding` is `vector(1024)`: Cohere `embed-multilingual-v3.0`, cosine distance (`<=>`).
   Retrieval filters by `tenant_id` and sets `hnsw.iterative_scan = relaxed_order`.
-- Seed: `supabase/seed/` (plans, 21 features, demo and isolation-test businesses, services, resources, hours).
-- Only the 0005 functions write `credit_ledger`.
+- Seed: `supabase/seed/` (plans, 21 features, demo and isolation-test businesses, services, resources, hours). The
+  real-estate demo also has three projects (`catalog_items` with `price_from`, `price_to` and `area`) and names the service
+  the assistant books (`agent_settings.bookingServiceId` = Site visit), so it can be scored and booked (Dev 1's Day 3 note).
+- Only the 0005 functions write `credit_ledger`. Rollover and expiry across renewals are tested month by month in
+  `supabase/tests/credits_renewal.test.sql` (one month of rollover, top-ups expiring at 90 days, soonest-expiring first,
+  an early renewal resetting the month before the newest).
 - **Member writes from the browser** (everything else is read-only for members; server code writes):
 
 | Table | Members can |
@@ -172,7 +176,17 @@ out. Use it only for the STOP confirmation and the out-of-credits holding messag
 stored like any other message. Free text when the member has written to the business in the last 24 hours,
 otherwise the approved `staff_alert_vN` template: `{{1}}` the one-line headline, `{{2}}` the dashboard link.
 **Nobody calls it directly:** `backend/src/notify/staff-alerts.ts` builds the content and picks the recipients
-(owners and admins with an alert number), and the `handoff-alert` job (section 5) sends it.
+(owners and admins with an alert number), and the jobs (section 5) send it.
+
+**The lead card and the take-over links (built, 12 Oct).** `handoff_opened` and `setup_problem` carry, inside the member's
+window, the lead card (Dev 1's `buildLeadCard`: why staff are told, up to five summary lines, a discount asked for, "Next:"
+the next step) and that member's own take-over links (Dev 1's `createHandoffLinks`, signed for them and this handoff):
+"Take over in the inbox: …", and "Reply from your own WhatsApp: …" only on a plan with `handoff_own_number`. Free text
+cannot carry two URL buttons (Meta allows one per message), so the links are lines. A high-priority handoff (a discount
+request, credits out) starts "Priority: ". Outside the window the template's `{{2}}` is the inbox take-over link. A
+`hot_lead` alert carries the card with the chat's dashboard link (not a handoff, so no take-over links). Without
+`API_PUBLIC_URL` (or `ENCRYPTION_KEY`) there are no take-over links, and a card that cannot be built is left out: the
+alert is then the headline and the dashboard link, as before.
 
 | Alert | When | Headline | Link |
 |---|---|---|---|
@@ -184,6 +198,10 @@ otherwise the approved `staff_alert_vN` template: `{{1}}` the one-line headline,
 | `visit_outcome` | `post-visit`, after the visit: to the booked staff member if they have an alert number, else owners and admins | "How did the {what} with {name} go? Update the lead so follow-ups stay right." | `/dashboard/inbox?chat=<id>` |
 | `low_rating` | `post-visit`: the customer rated the visit 1–3; **owners only** | "{name} rated their {what} {n} out of 5." | `/dashboard/inbox?chat=<id>` |
 | `own_number_outcome` | `own-number-outcome`, 4 h after an own-number takeover: the staff member who took it; with Booked / Follow-up / Lost buttons inside their window | "How did your WhatsApp chat with {name} go? Update the lead." | `/dashboard/inbox?chat=<id>` |
+| `credits_low` | `credit-alerts`: a fifth of the plan's monthly credits left; **owners only** | "{business} has {n} credits left of its {monthly} a month. Top up so the assistant keeps replying." | `/dashboard/billing` |
+| `hot_lead` | `event-alerts`, Dev 1's `lead.hot`; with the lead card | "Hot lead: {name} is ready to move." | `/dashboard/inbox?chat=<id>` |
+| `voice_note` | `event-alerts`, Dev 1's `voice_note.received` | "{name} sent a voice note. The assistant asked them to type; you can listen to it in the inbox." | `/dashboard/inbox?chat=<id>` |
+| `external_waiting` | `event-alerts`, Dev 1's `chat.external_waiting`: the member who has the chat on their own WhatsApp (owners and admins if nobody) | "{name} wrote again while you have the chat on your own WhatsApp. Reply to them from your number." | `/dashboard/inbox?chat=<id>` |
 
 **`daily_agenda` (built, 9 Oct):** the day's bookings to the owners, free, behind the `daily_agenda` toggle (Growth and
 Pro). Like `staff_alert` it goes to a member's alert number (`staffUserId`): free text inside their window ("Good
@@ -203,9 +221,11 @@ language and its body variables in {{1}}… order. It is sent whatever the 24-ho
 recorded with its name (`messages.template_name`). Only a template with `status = 'approved'` on the business's
 connected number is used (`not_found`, "That template isn't approved for this WhatsApp number."); the number of values
 must match the body's variables (`validation_failed`, "This template needs 2 values."); a malformed name or language is
-`validation_failed` before anything is read. Other kinds cannot pass `template`. For the inbox route
-(`POST /api/conversations/:id/messages`), the body would be `{ "template": { "name", "language", "params" } }`
-instead of `{ "body" }`, passed through to `notify.send` with the staff member as actor.
+`validation_failed` before anything is read. Other kinds cannot pass `template`. The inbox route
+(`POST /api/conversations/:id/messages`, built 12 Oct) takes `{ "template": { "name", "language", "params" } }` instead of
+`{ "body" }` (`SendStaffTemplateInput` in `@pakka/types`; a body with both is refused) and passes it to `notify.send` with the
+staff member as actor; the chat must be in human mode, as for text. The picker reads the approved templates from
+`whatsapp_templates` under RLS (0007).
 
 **Idempotency key (built, 9 Oct):** a job that may retry passes `idempotencyKey` (up to 200 characters, for example
 `reminder_24h:<bookingId>:<start>`). The message id is derived from the business, the kind and the key, so once
@@ -422,7 +442,7 @@ sent twice carries a fixed `id` so Inngest drops the duplicate (`tenant.trial_st
 | `handoff.opened` | `{ tenantId, handoffId, conversationId }`; sent by Dev 1's reply step when it opens a handoff (id `handoff_opened:<handoffId>`); starts `handoff-alert`, which sends one `staff_alert` to each owner and admin with an alert number (section 2). A handoff already resolved by the time the job runs gets no alert. **The job is the only sender of handoff alerts:** the reply step does not alert staff itself. Also starts `handoff-sla`: after the SLA (section 3) it alerts the owners again (`handoff_waiting`) unless someone has the chat: the handoff was picked up, assigned or resolved, a staff member took the chat over, or it is no longer in `human` mode (back with the AI, or on the business's own number) |
 | `handoff.own_number` | `{ tenantId, handoffId }`; to be sent by Dev 1's own-number takeover; starts `own-number-outcome` |
 | `tenant.trial_started` | `{ tenantId }` |
-| `credits.spent` | `{ tenantId, amount, reason, balanceAfter }` |
+| `credits.spent` | `{ tenantId, amount, reason, messageId }`: sent by `notify.send` after each charged message (id `credits.spent:<messageId>`; not awaited, so it never delays or fails a send); starts `credit-alerts`. No `balanceAfter`: the job reads the balance itself, after its debounce |
 
 **Booking reminders (`booking-reminders`, built 9 Oct; `backend/src/inngest/booking-reminders.ts`).** On
 `booking.confirmed` the run plans the 24 h and 2 h reminders from the booking's start and the business's offsets
@@ -485,6 +505,22 @@ staff_alert template (the question and the chat's link). A handoff that already 
 `{ handoffId, outcome }` and `recordHandoffOutcome(tenantId, handoffId, outcome, actor)` (`backend/src/leads/
 own-number-outcome.ts`) saves the first answer on the handoff (and resolves it), moves the lead to `booked` or `lost`
 (follow-up leaves it) and audits it. The own-number takeover itself, and sending `handoff.own_number`, are Dev 1's.
+
+**Credit alerts (`credit-alerts`, built 12 Oct; `backend/src/inngest/credit-alerts.ts`).** `credits.spent` → after a
+minute without spends (at most ten; debounced per business) the run reads the balance, the plan's monthly credits and
+the newest grant. At or below a fifth of the monthly credits (80% used) each owner with an alert number gets
+`staff_alert` `credits_low` ("Skyline Homes has 280 credits left of its 1500 a month. Top up so the assistant keeps
+replying." with the billing link); at none, `credits_exhausted`. Free, behind `staff_alerts`. Keys
+`credit_alert:<low|used_up>:<newest grant id>:<owner>`, so each alert goes once per grant: a new month, a top-up or an
+admin grant starts again. Credits that expire with no spend wake nothing; the next refused reply raises the
+`credits_exhausted` handoff alert as before. Auto top-up ("if on", the handover) waits for Razorpay (Day 6).
+
+**Event alerts (`event-alerts`, built 12 Oct; `backend/src/inngest/event-alerts.ts`).** Dev 1's events that tell staff
+something become staff alerts (section 2): `lead.hot` → `hot_lead` (with the lead card) and `voice_note.received` →
+`voice_note`, to owners and admins with an alert number; `chat.external_waiting` → `external_waiting`, to the member who
+has the chat on their own WhatsApp (`conversations.assigned_user_id`), else owners and admins. Keys
+`<Dev 1's event id>:<member>`, so a retry never sends one twice. The `handoff-alert` job now passes the handoff and its
+priority, so a handoff alert carries the member's take-over links and says "Priority:" when it is urgent.
 
 **The message pipeline (`process-message`, built: steps 2 and 3).** One conversation at a time (concurrency key
 `conversationId`); messages from one conversation within 3 seconds (never longer than 15) start one run. A debounce keeps
@@ -748,6 +784,7 @@ Plain lists (leads, conversations, bookings, services) are read directly under R
 | 16 | A send whose outcome is unknown (a timeout, a network failure or an unreadable answer from Meta) | **Proposed by Dev 2 (8 Oct):** hold the credit until Meta's status says sent or failed, instead of refunding. Needs Raja, because it changes billing, and a way to match Meta's status webhook to the send. Until then `notify.send` refunds (decision 2) and reports `outcomeUnknown: true`, so no caller sends the message again | Raja |
 | 17 | Handoff SLA (`handoff-sla`) | **Proposed by Dev 2 (9 Oct):** 15 minutes by default, each business can change it (`sla_minutes`, section 3); counted from the handoff at any time of day (business hours not yet considered); the escalation goes to owners only. The handover gives no number | Raja |
 | 18 | Lead nudges timing (`lead-nudges`) | **Proposed by Dev 2 (9 Oct):** the handover says "after 2 h and 24 h, then nurture". The second nudge goes at **23 h**, so it is still free text inside the customer's 24-hour window (at 24 h only an approved marketing template could go, and none is approved yet); a lead still quiet at **48 h** moves to nurture. Each business can change all three (section 3) | Raja |
+| 19 | A booking made in the chat gets no separate confirmation message | **Proposed by Dev 2 (12 Oct):** the assistant's own reply confirms the booking (Dev 1's Day 3 note), so `booking_confirmation` sends nothing on `booking.confirmed` and shows as "Not available yet" on the Features screen; a customer would otherwise get two. The `booking_confirmed_vN` template stays in the catalogue for bookings made outside the chat (by staff from the dashboard, when that exists) | Raja |
 
 ## 9. Knowledge base (PROPOSED, not agreed)
 
