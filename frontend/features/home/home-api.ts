@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { getJson } from "@/lib/api/client";
 
-// Home v1 (docs/dashboard-screen-contracts.md, "Home" and "Shell"). Two read routes, both PROPOSED and owned by Dev 2: they are not built
-// on main or on any branch yet (docs/contracts.md, section 6, "Read routes (Proposed)"). The shapes below are the ones the screen contracts
-// propose, narrowed to the fields Home uses, and every answer is parsed before it is drawn. Until the routes exist the server answers 404 and
-// Home says "not available yet" for that card; it shows no number it was not given. Nothing is read from fixtures here.
+// Home v1 (docs/dashboard-screen-contracts.md, "Home" and "Shell"). Two read routes, built by Dev 2 (docs/contracts.md, section 6, "Home and
+// shell"; the full shapes are AccountStatus and DashboardSummary in @pakka/types). The shapes below are narrowed to the fields Home uses,
+// and every answer is parsed before it is drawn. If a route fails, Home says so for that card; it shows no number it was not given.
+// Nothing is read from fixtures here.
 //   GET /api/dashboard/summary → DashboardSummary
 //   GET /api/billing/balance   → AccountStatus
 
