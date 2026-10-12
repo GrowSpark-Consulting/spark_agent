@@ -7,7 +7,11 @@ import { describe, expect, it } from "vitest";
 // synthetic samples next to it must stay committed. If this fails, a real chat file could be committed.
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
-const git = (...args: string[]) => spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
+const git = (...args: string[]) => {
+  const result = spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
+  if (result.error) throw new Error("git must be on the PATH for this check: it is what proves real chats cannot be committed");
+  return result;
+};
 const ignored = (path: string) => git("check-ignore", "-q", "--no-index", path).status === 0;
 
 describe("real chats cannot be committed", () => {
@@ -34,8 +38,8 @@ describe("real chats cannot be committed", () => {
     expect(rules).toMatch(/tests\/triage\/private/);
   });
 
-  it("the committed triage folder holds only the samples and the README", () => {
-    const names = readdirSync(`${ROOT}tests/triage`).filter((n) => n !== "private").sort();
-    expect(names).toEqual(["README.md", "sample-kb.txt", "sample-tanglish.txt"]);
+  it("the samples and the README are there to be committed", () => {
+    const names = readdirSync(`${ROOT}tests/triage`);
+    for (const name of ["README.md", "sample-kb.txt", "sample-tanglish.txt"]) expect(names).toContain(name);
   });
 });

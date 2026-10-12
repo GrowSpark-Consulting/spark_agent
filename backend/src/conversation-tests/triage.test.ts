@@ -96,16 +96,44 @@ describe("runTriage", () => {
     expect(result.usage.costUsd).toBeCloseTo(0.004, 6);
   });
 
-  it("a model that fails does not end the run: the message shows what the pipeline did instead", async () => {
+  it("a model that fails does not end the run, and the message says what went wrong instead of looking like a silent outcome", async () => {
     const failing: LlmClient = {
       async complete() {
         throw new Error("down");
       },
     };
-    const result = await runTriage([{ name: "x", messages: ["price?"] }], { maxCalls: 5, kb: KB }, failing, () => {});
-    expect(result.rows).toHaveLength(1);
-    expect(result.rows[0].status).toBe("ok");
-    expect(result.rows[0].reply === null || typeof result.rows[0].reply === "string").toBe(true);
+    const p = lines();
+    const result = await runTriage([{ name: "x", messages: ["price?", "visit?"] }], { maxCalls: 9, kb: KB }, failing, p.print);
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows.every((r) => r.status === "ok")).toBe(true);
+    expect(result.rows.every((r) => r.notes.some((n) => /pipeline threw|down/.test(n)))).toBe(true);
+    expect(p.out.join("\n")).toContain("      note: ");
+    expect(p.out.join("\n")).toMatch(/2 with notes/);
+  });
+
+  it("counts a call the client had to retry as the requests it really sent, and the cap counts them too", async () => {
+    const calls: string[] = [];
+    const retrying: LlmClient = {
+      async complete(request) {
+        calls.push(request.role);
+        return {
+          text: request.role === "extraction" ? extraction() : REPLY,
+          model: "stub",
+          stopReason: "end_turn",
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+          costUsd: 0.001,
+          latencyMs: 1,
+          attempts: 3,
+          requestId: null,
+        };
+      },
+    };
+    const result = await runTriage([{ name: "x", messages: ["price?"] }], { maxCalls: 20, kb: KB }, retrying, () => {});
+    expect(result.usage.calls).toBe(6);
+    expect(result.usage.byRole).toEqual({ extraction: 3, reply: 3 });
+    const capped = await runTriage([{ name: "x", messages: ["a", "b", "c"] }], { maxCalls: 4, kb: KB }, retrying, () => {});
+    expect(capped.usage.calls).toBeLessThanOrEqual(4 + 2);
+    expect(capped.rows.some((r) => r.status !== "ok")).toBe(true);
   });
 });
 

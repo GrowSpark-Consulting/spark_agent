@@ -1,6 +1,6 @@
 // The pasted file of real chats the triage harness reads (docs: tests/triage/README.md). Plain text, UTF-8:
 //
-//   # name: Velachery enquiry        optional, names the chat that follows; any other line starting with # is a comment
+//   # name: Velachery enquiry        optional, names the chat that follows; any other line that is "#" or starts with "# " is a comment
 //   anna Velachery la 2BHK price enna?   one customer message per line
 //   site visit venum
 //                                    a blank line starts a new chat
@@ -16,10 +16,17 @@ export interface TriageChat {
   messages: string[];
 }
 
-// A ten-digit mobile number (starting 6 to 9), with or without +91 / 91, and with a space or dash in the middle. Prices, areas, years and times are not matched.
-const PHONE = /(?<!\d)(?:\+?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}(?!\d)/g;
+// Any run of digits with spaces, dots, dashes or brackets between them that, once the separators and an optional +91, 91 or 0 are taken away, is a ten-digit Indian
+// mobile number (starting 6 to 9). Prices, areas, years, pincodes, dates and times are not.
+const CANDIDATE = /(?<!\d)[+(]*\d[\d\s().-]{8,18}\d(?!\d)/g;
 
-export const maskPhones = (text: string): string => text.replace(PHONE, "[phone]");
+export function maskPhones(text: string): string {
+  return text.replace(CANDIDATE, (found) => {
+    const digits = found.replace(/\D/g, "");
+    const core = digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : digits.length === 11 && digits.startsWith("0") ? digits.slice(1) : digits;
+    return /^[6-9]\d{9}$/.test(core) ? "[phone]" : found;
+  });
+}
 
 export function parseTriageFile(text: string, options: { keepNumbers?: boolean } = {}): { chats: TriageChat[] } {
   const chats: TriageChat[] = [];
@@ -28,8 +35,10 @@ export function parseTriageFile(text: string, options: { keepNumbers?: boolean }
   let total = 0;
 
   const flush = () => {
-    if (current.length > 0) chats.push({ name: pendingName ?? `chat ${chats.length + 1}`, messages: current });
-    if (current.length > 0) pendingName = null;
+    if (current.length > 0) {
+      chats.push({ name: pendingName ?? `chat ${chats.length + 1}`, messages: current });
+      pendingName = null;
+    }
     current = [];
   };
 
@@ -39,9 +48,10 @@ export function parseTriageFile(text: string, options: { keepNumbers?: boolean }
       flush();
       continue;
     }
-    if (line.startsWith("#")) {
+    // A comment is "#" alone or "#" and a space; "#2BHK price?" is a customer's message.
+    if (line === "#" || line.startsWith("# ")) {
       const name = /^#\s*name:\s*(.+)$/i.exec(line);
-      if (name && current.length === 0) pendingName = name[1].trim();
+      if (name && current.length === 0) pendingName = options.keepNumbers ? name[1].trim() : maskPhones(name[1].trim());
       continue;
     }
     if (line.length > MAX_LINE_CHARS) throw new Error(`Line ${index + 1} is ${line.length} characters long; the longest a message may be is ${MAX_LINE_CHARS}.`);

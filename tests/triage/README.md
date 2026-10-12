@@ -12,13 +12,13 @@ Plain UTF-8 text.
 
 - One customer message per line.
 - A blank line starts a new chat.
-- `# name: Velachery enquiry` names the chat that follows; any other line starting with `#` is a comment.
+- `# name: Velachery enquiry` names the chat that follows; any other line that is `#` alone or starts with `# ` (a hash and a space) is a comment. A message that starts with a hash but no space, like `#2BHK price?`, is a customer message.
 - At most 200 messages, and 1000 characters per line.
-- Indian mobile numbers (ten digits, with or without +91) are masked as `[phone]` before the models see the text or anything is printed. `--keep-numbers` turns that off.
+- Indian mobile numbers (ten digits starting 6 to 9, with or without +91 or 0, with spaces, dots, dashes or brackets in them) are masked as `[phone]` in messages and chat names before the models see the text or anything is printed. Prices, areas, pincodes and dates are left alone. `--keep-numbers` turns the masking off. Other personal details (a name in a message) are not masked: check a file before you paste it anywhere.
 
 See `sample-tanglish.txt`. **Put real chats in `tests/triage/private/`: git ignores that folder** (a test fails if that stops being true). Never commit a real chat.
 
-The fake knowledge base is `sample-kb.txt` (one fact per line) unless you pass `--kb <file>`; an empty file means no question has an answer. Every chat runs against the same
+The fake knowledge base is `sample-kb.txt` (one fact per line) unless you pass `--kb <file>`. It returns **every fact for every question**, so it cannot show how a message that has no good answer behaves; an empty file (no facts) means no question has an answer, which shows that path. Every chat runs against the same
 fixed business: a real-estate pack, a clock of 10 Oct 2026, one catalog entry in Velachery and three free visit times, so offers and bookings show up.
 
 ## Running it
@@ -29,8 +29,9 @@ pnpm triage:chats tests/triage/private/raja-1.txt --live                    # re
 pnpm triage:chats tests/triage/private/raja-1.txt --live --max-calls 12 --kb tests/triage/private/kb.txt
 ```
 
-`--live` needs `ANTHROPIC_API_KEY` in `backend/.env.local`. A message costs one extraction call and usually one reply call, so 20 calls is about 10 to 15 messages.
-`--max-calls` is a hard cap: the call after it is never made, the message it stops is marked, and the rest are listed as not run.
+`--live` needs `ANTHROPIC_API_KEY` in `backend/.env.local`. A message costs one extraction request and usually one reply request, so 20 is about 10 to 15 messages.
+`--max-calls` is a hard cap on requests to the model, **retries included** (the client retries a failed request on its own, and each try counts): the request that would cross it is never made, the message it stops is marked, and the rest are listed as not run. A request already in flight can use its retries, so the total can pass the cap by at most two.
+A message that went wrong in the pipeline (an error, a failed check) prints a `note:` line under it and is counted in the summary, so an error is not mistaken for a quiet outcome.
 
 ## What it prints
 

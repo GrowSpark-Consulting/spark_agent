@@ -15,6 +15,7 @@ const row = (over: Partial<MessageRow> = {}): MessageRow => ({
   handoff: null,
   optedOut: false,
   reply: "Velachery la 2BHK ₹78 lakh la start aagum.",
+  notes: [],
   ...over,
 });
 
@@ -38,6 +39,11 @@ describe("formatChat", () => {
     expect(lines).toContain("action: stop_phrase, OPTED OUT");
     expect(lines).toContain("language: -");
     expect(lines).toContain("intent:   - (-)");
+  });
+
+  it("prints what went wrong with a message under it, so an error is not mistaken for a silent outcome", () => {
+    const text = formatChat(1, "x", [row({ notes: ["the pipeline threw: the model said no"] })]).join("\n");
+    expect(text).toContain("      note: the pipeline threw: the model said no");
   });
 
   it("marks a reading below 0.6, and only that", () => {
@@ -90,12 +96,18 @@ describe("summarize and formatSummary", () => {
 
   it("prints a table with a line per language, the totals, the calls and the estimated cost", () => {
     const text = formatSummary(summarize(rows), { calls: 17, max: 20, byRole: { extraction: 9, reply: 8 }, costUsd: 0.0123 }).join("\n");
+    expect(text).not.toContain("with notes");
     expect(text).toContain("summary: 6 messages run, 1 not run");
     expect(text).toMatch(/language\s+messages\s+confidence below 0\.6/);
     expect(text).toMatch(/ta-en\s+3\s+2/);
     expect(text).toMatch(/ta\s+1\s+1/);
     expect(text).toContain("total");
     expect(text).toContain("calls: 17 of 20 (extraction 9, reply 8); estimated cost $0.01");
+  });
+
+  it("says how many messages had something wrong, when any did", () => {
+    const text = formatSummary(summarize([row({ notes: ["x"] }), row()]), { calls: 2, max: 20, byRole: { extraction: 1, reply: 1 }, costUsd: 0.01 }).join("\n");
+    expect(text).toContain("summary: 2 messages run, 0 not run, 1 with notes");
   });
 
   it("says the cap was reached when messages were not run", () => {

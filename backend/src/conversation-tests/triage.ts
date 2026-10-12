@@ -1,12 +1,8 @@
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { isAbsolute, resolve } from "node:path";
-import { createAnthropicClient } from "../agent/llm/anthropic";
-import { noopTracer } from "../agent/llm/tracing";
 import type { LlmClient } from "../agent/llm";
 import { runChat } from "./run-chat";
-import type { Chat } from "./schema";
-import { parseKbFile, parseTriageFile, type TriageChat } from "./triage-format";
+import { Chat } from "./schema";
+import type { TriageChat } from "./triage-format";
 import { formatChat, formatSummary, summarize, type MessageRow, type TriageUsage } from "./triage-report";
 
 // pnpm triage:chats <file> [--live] [--max-calls N] [--kb <file>] [--keep-numbers]   (tests/triage/README.md)
@@ -17,9 +13,9 @@ import { formatChat, formatSummary, summarize, type MessageRow, type TriageUsage
 
 export type { TriageUsage };
 
-const DEFAULT_MAX_CALLS = 20;
+export const DEFAULT_MAX_CALLS = 20;
 const MAX_CALLS_LIMIT = 200;
-const SAMPLE_KB = fileURLToPath(new URL("../../../tests/triage/sample-kb.txt", import.meta.url));
+export const SAMPLE_KB = fileURLToPath(new URL("../../../tests/triage/sample-kb.txt", import.meta.url));
 
 /** The business every chat runs against: the fixed clock, catalog and free times of the booking chats, so offers and bookings show up. */
 const BOOKING = {
@@ -80,10 +76,22 @@ export function checkSummary(chats: TriageChat[]): string[] {
   return [`${plural(chats.length, "chat")}, ${plural(messages, "message")}: the file is in the right format.`, "No model was called. Add --live to run it with the real models."];
 }
 
-const toChat = (chat: TriageChat, kb: string[]): Chat =>
-  ({ name: chat.name, pack: "real-estate", settings: {}, contact: { language: null, alreadySawNotice: true }, kb, booking: BOOKING, turns: chat.messages.map((customer) => ({ customer })) }) as unknown as Chat;
+// Parsed through the chat schema, so its defaults (the pack, the contact) and checks apply and a change to the schema shows up here. The turns are the pasted
+// messages with nothing asserted, which the schema's own rule for a hand-written turn would refuse, so they are put in after the parse.
+function toChat(chat: TriageChat, kb: string[]): Chat {
+  const base = Chat.parse({ name: chat.name, kb, booking: BOOKING, turns: [{ customer: "x", expect: { aiReplies: 1 } }] });
+  return { ...base, turns: chat.messages.map((customer) => ({ customer })) };
+}
 
-const notRunRow = (customer: string): MessageRow => ({ customer, status: "not_run", language: null, sentiment: null, fields: {}, intent: null, confidence: null, action: "-", handoff: null, optedOut: false, reply: null });
+const notRunRow = (customer: string): MessageRow => ({ customer, status: "not_run", language: null, sentiment: null, fields: {}, intent: null, confidence: null, action: "-", handoff: null, optedOut: false, reply: null, notes: [] });
+
+/** The runner's failures for one turn ("turn 3 (...): the pipeline threw: ..."), without the label. They are what went wrong, not a verdict on the chat. */
+function notesFor(failures: string[], turn: number): string[] {
+  return failures.flatMap((failure) => {
+    const match = /^turn (\d+) \([^)]*\): ([\s\S]*)$/.exec(failure);
+    return match && Number(match[1]) === turn + 1 ? [match[2]] : [];
+  });
+}
 
 export async function runTriage(
   chats: TriageChat[],
@@ -92,6 +100,7 @@ export async function runTriage(
   print: (line: string) => void,
 ): Promise<{ rows: MessageRow[]; usage: TriageUsage }> {
   const usage: TriageUsage = { calls: 0, max: options.maxCalls, byRole: {}, costUsd: 0 };
+  // The cap is on requests: the call that would cross it is refused before it is made.
   let capped = false;
   let turnNow = -1;
   let cappedTurn = -1;
@@ -104,9 +113,11 @@ export async function runTriage(
         capped = true;
         throw new CallCapReached();
       }
-      usage.calls++;
-      usage.byRole[request.role] = (usage.byRole[request.role] ?? 0) + 1;
       const result = await llm.complete(request);
+      // The client retries a failed request on its own (result.attempts): every request it really sent counts, and counts towards the cap.
+      const sent = Math.max(1, result.attempts);
+      usage.calls += sent;
+      usage.byRole[request.role] = (usage.byRole[request.role] ?? 0) + sent;
       usage.costUsd = usage.costUsd === null || result.costUsd === null ? null : usage.costUsd + result.costUsd;
       return result;
     },
@@ -134,6 +145,7 @@ export async function runTriage(
           handoff: t.handoff,
           optedOut: t.optedOut,
           reply: stopped ? null : t.reply,
+          notes: stopped ? [] : notesFor(report.failures, turn),
         };
       });
     }
@@ -143,36 +155,4 @@ export async function runTriage(
   }
   for (const line of formatSummary(summarize(rows), usage)) print(line);
   return { rows, usage };
-}
-
-/** Relative paths are taken from where the command was typed (pnpm runs in backend/, and sets INIT_CWD to the folder you were in). */
-const fromHere = (path: string) => (isAbsolute(path) ? path : resolve(process.env.INIT_CWD ?? process.cwd(), path));
-
-async function main(): Promise<number> {
-  const args = parseTriageArgs(process.argv.slice(2));
-  const { chats } = parseTriageFile(readFileSync(fromHere(args.file), "utf8"), { keepNumbers: args.keepNumbers });
-  if (!args.live) {
-    for (const line of checkSummary(chats)) console.log(line);
-    return 0;
-  }
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) {
-    console.error("--live needs ANTHROPIC_API_KEY in the environment (backend/.env.local).");
-    return 2;
-  }
-  const kb = parseKbFile(readFileSync(args.kb ? fromHere(args.kb) : SAMPLE_KB, "utf8"));
-  console.log(`LIVE (real models), at most ${args.maxCalls} calls; fake sender, fake knowledge base (${kb.length} facts${args.kb ? "" : ", the sample"}); nothing is sent.\n`);
-  await runTriage(chats, { maxCalls: args.maxCalls, kb }, createAnthropicClient(key, noopTracer), (line) => console.log(line));
-  return 0;
-}
-
-// Only when run as the command, not when a test imports it.
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  main().then(
-    (code) => process.exit(code),
-    (error: unknown) => {
-      console.error(error instanceof Error ? error.message : String(error));
-      process.exit(2);
-    },
-  );
 }

@@ -16,6 +16,8 @@ export interface MessageRow {
   handoff: string | null;
   optedOut: boolean;
   reply: string | null;
+  /** What went wrong with this message (the pipeline threw, a check failed), so an error is not mistaken for a silent outcome. */
+  notes: string[];
 }
 
 export interface TriageUsage {
@@ -45,6 +47,7 @@ export function formatChat(index: number, name: string, rows: MessageRow[]): str
     );
     out.push(`      fields:   ${fields.length === 0 ? "(none)" : fields.map(([k, v]) => `${k}=${showField(v)}`).join(", ")}`);
     out.push(`      reply:    ${row.reply ?? "(none)"}`);
+    for (const note of row.notes) out.push(`      note: ${note}`);
     if (row.status === "capped") out.push("      (stopped at the call cap)");
   }
   return out;
@@ -54,6 +57,7 @@ export interface Summary {
   run: number;
   notRun: number;
   low: number;
+  withNotes: number;
   languages: { language: string; messages: number; low: number }[];
 }
 
@@ -63,12 +67,14 @@ export function summarize(rows: MessageRow[]): Summary {
   let notRun = 0;
   let lowTotal = 0;
   let run = 0;
+  let withNotes = 0;
   for (const row of rows) {
     if (row.status === "not_run") {
       notRun++;
       continue;
     }
     run++;
+    if (row.notes.length > 0) withNotes++;
     const key = row.language ?? "-";
     const entry = byLanguage.get(key) ?? { messages: 0, low: 0 };
     entry.messages++;
@@ -81,11 +87,11 @@ export function summarize(rows: MessageRow[]): Summary {
   const languages = [...byLanguage.entries()]
     .map(([language, v]) => ({ language, ...v }))
     .sort((a, b) => b.messages - a.messages || a.language.localeCompare(b.language));
-  return { run, notRun, low: lowTotal, languages };
+  return { run, notRun, low: lowTotal, withNotes, languages };
 }
 
 export function formatSummary(summary: Summary, usage: TriageUsage): string[] {
-  const out = [`summary: ${plural(summary.run, "message")} run, ${summary.notRun} not run${summary.notRun > 0 ? " (call cap reached)" : ""}`];
+  const out = [`summary: ${plural(summary.run, "message")} run, ${summary.notRun} not run${summary.notRun > 0 ? " (call cap reached)" : ""}${summary.withNotes > 0 ? `, ${summary.withNotes} with notes` : ""}`];
   if (summary.languages.length > 0) {
     const width = Math.max(8, ...summary.languages.map((l) => l.language.length)) + 3;
     const line = (a: string, b: string | number, c: string | number) => `${a.padEnd(width)}${String(b).padEnd(11)}${c}`;

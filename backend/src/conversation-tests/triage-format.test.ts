@@ -40,6 +40,15 @@ describe("parseTriageFile", () => {
     expect(() => parseTriageFile(`ok\n${"x".repeat(MAX_LINE_CHARS + 1)}`)).toThrow(/line 2 .*1000/i);
   });
 
+  it("keeps a message that starts with # but is not a comment (a comment is '#' then a space)", () => {
+    const { chats } = parseTriageFile("#2BHK price?\n#1 interested\n# a comment\n#\nreal");
+    expect(chats[0].messages).toEqual(["#2BHK price?", "#1 interested", "real"]);
+  });
+
+  it("masks a number in a chat's name too", () => {
+    expect(parseTriageFile("# name: Ramesh 98765 43210\nhi").chats[0].name).toBe("Ramesh [phone]");
+  });
+
   it("masks Indian mobile numbers before anything is run or printed, and keeps them with keepNumbers", () => {
     const text = "call me on 98765 43210 or +91 9876543210 please";
     expect(parseTriageFile(text).chats[0].messages[0]).toBe("call me on [phone] or [phone] please");
@@ -49,11 +58,13 @@ describe("parseTriageFile", () => {
 
 describe("maskPhones", () => {
   it("masks a ten-digit mobile number in every common spelling", () => {
-    for (const phone of ["9876543210", "98765 43210", "98765-43210", "+919876543210", "+91 98765 43210", "91-9876543210"]) expect(maskPhones(`x ${phone} y`)).toBe("x [phone] y");
+    for (const phone of ["9876543210", "98765 43210", "98765-43210", "+919876543210", "+91 98765 43210", "91-9876543210", "98 7654 3210", "9876-543-210", "+91 (98765) 43210", "098765 43210", "98765.43210", "(+91) 98765 43210"]) {
+      expect(maskPhones(`x ${phone} y`), phone).toBe("x [phone] y");
+    }
   });
 
   it("leaves prices, areas, years and times alone, including large rupee amounts", () => {
-    for (const text of ["budget 60 lakh", "₹7800000", "12000000 rupees", "950 sq ft", "2026", "3:30 pm", "1.2 crore", "pincode 600042"]) expect(maskPhones(text)).toBe(text);
+    for (const text of ["budget 60 lakh", "₹7800000", "12000000 rupees", "950 sq ft", "2026", "3:30 pm", "1.2 crore", "pincode 600042", "78,00,000", "10-12-2026", "1234567890", "5555 5555 55"]) expect(maskPhones(text)).toBe(text);
   });
 });
 
