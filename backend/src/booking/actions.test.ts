@@ -49,7 +49,7 @@ function deps(options: { booking?: FakeDbResponse; rpc?: Record<string, FakeDbRe
   };
   for (const [name, response] of Object.entries(options.rpc ?? {})) responses[`rpc:${name}`] = response;
   const db = fakeDb(responses);
-  const send = vi.fn(async () => undefined);
+  const send = vi.fn(async (_event: { id: string; name: string; data: Record<string, unknown> }) => undefined);
   const slots = vi.fn(async () => [{ start: "2026-10-13T05:30:00.000Z", end: "2026-10-13T06:30:00.000Z", resourceId: RESOURCE, resourceName: "Asha", serviceId: SERVICE, label: "Tue 13 Oct, 11:00 am" }]);
   const actionDeps: BookingActionDeps = { db: db.client, now: () => new Date("2026-10-12T06:00:00Z"), send, slots };
   return { actionDeps, calls: db.calls, send, slots };
