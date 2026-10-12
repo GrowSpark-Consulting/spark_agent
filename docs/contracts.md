@@ -40,6 +40,16 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0021_consent_functions` | `record_notice_shown` and `record_opt_out` (service_role only): the contact update and the `consent_logs` row in one transaction, once (Dev 1; after 0019 `notify_staff_target` and 0020 `whatsapp_webhook_tokens`) |
 | `0022_consent_model_intent` | `record_opt_out` also accepts the source `model_intent` (a clear request to stop read by the model; Dev 1, #69) |
 | `0023_booking_resource_lock` | `hold_slot` and `reschedule_booking` take a per-resource advisory lock, so racing holds for one person queue and the losers get `slot_taken` (23P01) instead of a deadlock error (40P01) |
+| `0024_api_roles_no_truncate` | `anon` and `authenticated` lose TRUNCATE on every table, now and (default privileges) later: row-level security does not cover TRUNCATE. Checked by `supabase/tests/isolation.test.sql` |
+
+**Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
+that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
+change, move, delete or add the other's rows, a signed-out visitor sees and adds nothing, and afterwards every row is
+where it was. It also checks the catalogue: RLS on every table; the only tables without `tenant_id` are `features`,
+`plans`, `platform_admins`, `tenants` and `vertical_packs`; every policy is for `authenticated` and checks
+`is_member(tenant_id)` (except a member editing their own `memberships` row); no `*_enc`, token-hash or secret column
+is readable from the browser; the browser can call only `is_member`; views are `security_invoker`; no browser role
+can TRUNCATE. **A new business table needs one fixture row in that file**, or the suite fails.
 
 - `kb_chunks.embedding` is `vector(1024)`: Cohere `embed-multilingual-v3.0`, cosine distance (`<=>`).
   Retrieval filters by `tenant_id` and sets `hnsw.iterative_scan = relaxed_order`.
