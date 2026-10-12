@@ -3,6 +3,7 @@
 export * from "./agent";
 export * from "./connection";
 export * from "./conversation";
+export * from "./dashboard";
 export * from "./errors";
 export * from "./features";
 export * from "./onboarding";

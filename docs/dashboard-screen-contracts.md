@@ -54,7 +54,7 @@ UI: sidebar / tab bar, business name, plan, credits pill and meter, Maya status,
 AccountStatus + Me
   ↓ API
 GET /api/me                                  PROPOSED · Dev 3  (session → membership → tenant)
-GET /api/billing/balance                     PROPOSED · Dev 2  (getBalance + plan + trial)
+GET /api/billing/balance                     BUILT · Dev 2  (getBalance + plan + trial; docs/contracts.md, section 6)
   ↓ loading: shell renders with a credits placeholder
   ↓ error: shell renders; credits pill shows "–"; banner logic is skipped
   ↓ permission: any member
@@ -85,6 +85,7 @@ interface AccountStatus {
   aiPaused: boolean;                 // server decides (zero credits, trial ended, disconnected)
   lowCredits: boolean;               // server decides the 80 % / 20 %-left threshold
   aiAutoReply: boolean;              // isEnabled('ai_auto_reply')
+  aiPausedReason: 'paused' | 'cancelled' | 'trial_ended' | 'no_credits' | null;   // built: added
 }
 ```
 
@@ -96,7 +97,7 @@ Replaces: `SAMPLE_BALANCES`, `TRIAL_CREDITS`, `PLAN_CREDITS`, `RE_BIZ`, the `?ac
 ```
 UI: date, month summary (4 stats), hot leads waiting, today's bookings
   ↓ data: DashboardSummary
-  ↓ API: GET /api/dashboard/summary          PROPOSED · Dev 2
+  ↓ API: GET /api/dashboard/summary          BUILT · Dev 2 (docs/contracts.md, section 6)
   ↓ loading: 4 stat skeletons + 2 list skeletons
   ↓ empty: first-day copy (built)
   ↓ error: per-card retry
@@ -391,7 +392,7 @@ Replaces: `V`, `BASE`, `FEATS`.
 UI: current plan, next bill + GST, daily usage chart, credit history, top-up packs,
     monthly/yearly switch, plan change, setup add-on, invoices
   ↓ data: AccountStatus, BillingOverview, LedgerEntry[]
-  ↓ API: GET  /api/billing/balance (shell)                 PROPOSED · Dev 2
+  ↓ API: GET  /api/billing/balance (shell)                 BUILT · Dev 2
         RLS READ credit_ledger (or view)                  Dev 2
         POST /api/billing/checkout | /topup | /change-plan HANDOVER · Dev 2 → Razorpay widget
   ↓ loading: payment in progress while Razorpay is open

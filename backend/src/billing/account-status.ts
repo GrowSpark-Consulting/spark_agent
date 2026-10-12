@@ -1,0 +1,77 @@
+import type { AccountStatus, TenantContext } from "@pakka/types";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { z } from "zod";
+import { isEnabled } from "../features/is-enabled";
+import { supabaseAdmin } from "../lib/supabase-admin";
+import { alertLevel } from "./credit-alerts";
+
+// GET /api/billing/balance (docs/dashboard-screen-contracts.md, "Shell": AccountStatus): the credits pill and meter, the
+// trial banner and whether the assistant is replying. Decided here, never in the browser: the balance (credit_balance),
+// the meter's denominator, the renewal date, and why the assistant is paused. Any member may read it.
+
+export interface AccountStatusDeps {
+  db: SupabaseClient;
+  now: () => Date;
+  aiAutoReply: (tenantId: string) => Promise<boolean>;
+}
+
+const defaults = (): AccountStatusDeps => ({
+  db: supabaseAdmin(),
+  now: () => new Date(),
+  aiAutoReply: (tenantId) => isEnabled(tenantId, "ai_auto_reply"),
+});
+
+/** Ledger reasons that grant credits (a refund puts spent credits back, so it is not a grant). */
+const GRANT_REASONS = ["plan_grant", "trial_grant", "topup", "admin"];
+
+const Plan = z.object({ key: z.string(), name: z.string(), monthly_credits: z.number().int() });
+const Balance = z.array(z.object({ plan: z.number().int(), topup: z.number().int(), total: z.number().int() })).length(1);
+const Grant = z.object({ delta: z.number().int(), expires_at: z.string().nullable() });
+const Subscription = z.object({ status: z.string(), current_period_end: z.string().nullable() });
+
+function failed(what: string, error: { message: string } | null): void {
+  if (error) throw new Error(`account status: ${what} read failed: ${error.message}`);
+}
+
+export async function accountStatus(context: TenantContext, deps: AccountStatusDeps = defaults()): Promise<AccountStatus> {
+  const tenantId = context.tenant.id;
+  const now = deps.now();
+  const [plan, balance, grants, subscription, aiAutoReply] = await Promise.all([
+    deps.db.from("plans").select("key, name, monthly_credits").eq("key", context.tenant.planKey).maybeSingle(),
+    deps.db.rpc("credit_balance", { p_tenant_id: tenantId }),
+    deps.db.from("credit_ledger").select("delta, expires_at").eq("tenant_id", tenantId).gt("delta", 0).in("reason", GRANT_REASONS),
+    deps.db.from("subscriptions").select("status, current_period_end").eq("tenant_id", tenantId).order("current_period_end", { ascending: false }).limit(1),
+    deps.aiAutoReply(tenantId),
+  ]);
+  failed("plan", plan.error);
+  failed("balance", balance.error);
+  failed("grants", grants.error);
+  failed("subscription", subscription.error);
+  if (!plan.data) throw new Error(`account status: the business's plan ${context.tenant.planKey} is not in the catalogue`);
+  const p = Plan.parse(plan.data);
+  const credits = Balance.parse(balance.data)[0];
+  const creditsGranted = z
+    .array(Grant)
+    .parse(grants.data ?? [])
+    .filter((g) => g.expires_at === null || Date.parse(g.expires_at) > now.getTime())
+    .reduce((sum, g) => sum + g.delta, 0);
+  const [sub] = z.array(Subscription).parse(subscription.data ?? []);
+
+  const { status, trialEndsAt } = context.tenant;
+  const trialEnded = status === "trial" && trialEndsAt !== null && Date.parse(trialEndsAt) <= now.getTime();
+  const aiPausedReason =
+    status === "paused" ? "paused" : status === "cancelled" ? "cancelled" : trialEnded ? "trial_ended" : credits.total <= 0 ? "no_credits" : null;
+
+  return {
+    status,
+    plan: { key: p.key, name: p.name, monthlyCredits: p.monthly_credits },
+    credits,
+    creditsGranted,
+    renewsAt: status === "active" && sub?.current_period_end ? new Date(sub.current_period_end).toISOString() : null,
+    trialEndsAt: status === "trial" && trialEndsAt ? new Date(trialEndsAt).toISOString() : null,
+    aiPaused: aiPausedReason !== null,
+    aiPausedReason,
+    lowCredits: alertLevel(credits.total, p.monthly_credits) !== null,
+    aiAutoReply,
+  };
+}

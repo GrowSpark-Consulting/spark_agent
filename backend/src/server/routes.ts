@@ -2,6 +2,7 @@ import type { StartTrialResult } from "@pakka/types";
 import { handleHandoffLink } from "../agent/handoff/takeover";
 import { getLeadCard } from "../agent/leadcard/route";
 import { suggestReply } from "../agent/leadcard/suggest";
+import { accountStatus } from "../billing/account-status";
 import { getBalance } from "../billing/credits";
 import { startTrialFor } from "../billing/start-trial";
 import { createTrialTenant } from "../billing/trial";
@@ -14,6 +15,7 @@ import { disconnectConnection, recheckConnection } from "../channels/whatsapp/co
 import { getWebhookConfig } from "../channels/whatsapp/connect/webhook-token";
 import { handleWhatsAppHandshake } from "../channels/whatsapp/verify-challenge";
 import { setConversationMode } from "../conversations/mode";
+import { dashboardSummary } from "../dashboard/summary";
 import { sendStaffReply } from "../conversations/staff-reply";
 import { listFeatures, updateFeature } from "../features/toggles";
 import { deleteDocument, KB_UPLOAD_MAX_BODY_BYTES, uploadDocument } from "../kb/documents";
@@ -105,6 +107,10 @@ const conversationSuggest: RouteHandler = async (request, deps, params) => {
   const { context } = await requireTenant(request, deps.userClient);
   return Response.json(await suggestReply(context, params.id));
 };
+// → AccountStatus: the balance, the meter's denominator, renewal and trial dates, and whether the assistant is paused. Any member.
+const billingBalance = tenantRoute(({ context }) => accountStatus(context));
+// → DashboardSummary: the month's numbers, last night's chats, hot leads and today's bookings (staff: their own). Any member.
+const homeSummary = tenantRoute(({ context }) => dashboardSummary(context));
 // → FeatureList: every feature with what the plan includes, the business's switch and settings, and the credits it
 // spent in the last 30 days. Any member.
 const featureList = tenantRoute(({ context }) => listFeatures(context));
@@ -208,6 +214,8 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/conversations/:id/mode", browser: true, methods: { POST: conversationMode } },
   { path: "/api/conversations/:id/lead-card", browser: true, methods: { GET: conversationLeadCard } },
   { path: "/api/conversations/:id/suggest", browser: true, methods: { POST: conversationSuggest } },
+  { path: "/api/billing/balance", browser: true, methods: { GET: (request, deps) => billingBalance(request, deps.userClient) } },
+  { path: "/api/dashboard/summary", browser: true, methods: { GET: (request, deps) => homeSummary(request, deps.userClient) } },
   { path: "/api/features", browser: true, methods: { GET: (request, deps) => featureList(request, deps.userClient) } },
   { path: "/api/features/:key", browser: true, methods: { PATCH: featureUpdate } },
   { path: "/api/kb/documents", browser: true, maxBodyBytes: KB_UPLOAD_MAX_BODY_BYTES, methods: { POST: kbUpload } },
