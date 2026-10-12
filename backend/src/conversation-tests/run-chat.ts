@@ -33,6 +33,8 @@ export interface RunOptions {
   mode: "mock" | "live";
   /** The real client, in live mode. */
   llm?: LlmClient;
+  /** Called with the index of each turn just before it starts (the triage harness uses it to tell which message a model call belongs to). */
+  onTurn?: (index: number) => void;
 }
 
 export interface TurnTranscript {
@@ -43,6 +45,8 @@ export interface TurnTranscript {
   planCase: string;
   optedOut: boolean;
   handoff: string | null;
+  /** What the extraction read from the message; null when no model read it (a STOP phrase, a chat the assistant is out of). */
+  extraction: { language: string | null; sentiment: string | null; fields: Record<string, unknown> } | null;
 }
 export interface ChatReport {
   failures: string[];
@@ -180,6 +184,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
   };
 
   for (const [index, turnSpec] of chat.turns.entries()) {
+    options.onTurn?.(index);
     const label = `turn ${index + 1} (${JSON.stringify(turnSpec.customer.slice(0, 40))})`;
     const fail = (message: string) => failures.push(`${label}: ${message}`);
     extractionScript = turnSpec.mock?.extraction ?? {};
@@ -229,6 +234,13 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
       planCase: stopped ? "stop_phrase" : (outcome?.case ?? (optedOutAtStart ? "gated_opted_out" : "none")),
       optedOut: contact?.optedOut === true,
       handoff: fake.handoffs.length > handoffsBefore ? `${lastHandoff.trigger}/${lastHandoff.priority}` : null,
+      extraction: meta?.extraction
+        ? {
+            language: typeof meta.extraction.language === "string" ? meta.extraction.language : null,
+            sentiment: typeof meta.extraction.sentiment === "string" ? meta.extraction.sentiment : null,
+            fields: typeof meta.extraction.fields === "object" && meta.extraction.fields !== null ? (meta.extraction.fields as Record<string, unknown>) : {},
+          }
+        : null,
     });
 
     // What must hold for every chat, in every mode.
