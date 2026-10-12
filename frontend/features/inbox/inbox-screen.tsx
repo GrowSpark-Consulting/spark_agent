@@ -19,6 +19,7 @@ import {
   type ConversationSummary,
   type InboxFilter,
 } from "./data";
+import { fetchLeadCardAi, unavailableAi, type LeadCardAiState } from "./lead-card-api";
 import { fetchLeadCard } from "./lead-card-data";
 import { LeadCardPanel, LeadCardSheet, type LeadCardState } from "./lead-card-panel";
 import { useInboxRealtime } from "./use-inbox-realtime";
@@ -55,9 +56,12 @@ export function InboxScreen({
   const [now, setNow] = useState(() => new Date());
   /** Lead cards by conversation id; a missing entry is still loading. */
   const [leadCards, setLeadCards] = useState<Record<string, LeadCardState>>({});
+  /** The AI-written part of each lead card (the lead-card route), read apart from the stored lead so each fails on its own. */
+  const [leadAi, setLeadAi] = useState<Record<string, LeadCardAiState>>({});
   const [leadSheetOpen, setLeadSheetOpen] = useState(false);
   /** The newest lead read per conversation: an older one finishing late is ignored. */
   const leadReads = useRef(new Map<string, number>());
+  const leadAiReads = useRef(new Map<string, number>());
 
   // Times ("9:42 am", "Yesterday") and the 24-hour window move with the clock.
   useEffect(() => {
@@ -121,6 +125,22 @@ export function InboxScreen({
     if (activeId) void loadChat(activeId);
   }, [activeId, loadChat]);
 
+  const loadLeadAi = useCallback(
+    async (conversationId: string) => {
+      const seq = (leadAiReads.current.get(conversationId) ?? 0) + 1;
+      leadAiReads.current.set(conversationId, seq);
+      const settle = (state: LeadCardAiState) => {
+        if (leadAiReads.current.get(conversationId) === seq) setLeadAi((prev) => ({ ...prev, [conversationId]: state }));
+      };
+      try {
+        settle({ status: "ready", ai: await fetchLeadCardAi(tenantId, conversationId) });
+      } catch (err) {
+        settle(unavailableAi(err));
+      }
+    },
+    [tenantId],
+  );
+
   const loadLead = useCallback(
     async (conversationId: string, contactId: string) => {
       const seq = (leadReads.current.get(conversationId) ?? 0) + 1;
@@ -129,12 +149,15 @@ export function InboxScreen({
         if (leadReads.current.get(conversationId) === seq) setLeadCards((prev) => ({ ...prev, [conversationId]: state }));
       };
       try {
-        settle({ status: "ready", card: await fetchLeadCard(getSupabaseBrowserClient(), tenantId, contactId, new Date(), timeZone) });
+        const card = await fetchLeadCard(getSupabaseBrowserClient(), tenantId, contactId, new Date(), timeZone);
+        settle({ status: "ready", card });
+        // The AI part is asked for only when there is a lead to write about; a customer who isn't a lead has no card.
+        if (card && leadReads.current.get(conversationId) === seq) void loadLeadAi(conversationId);
       } catch (err) {
         settle({ status: "error", error: formatError(err) });
       }
     },
-    [tenantId, timeZone],
+    [tenantId, timeZone, loadLeadAi],
   );
 
   // Read again whenever a chat is opened, so the card is never older than the chat on screen.
@@ -198,10 +221,17 @@ export function InboxScreen({
   }
 
   const leadState: LeadCardState = activeId ? (leadCards[activeId] ?? { status: "loading" }) : { status: "loading" };
+  const aiState: LeadCardAiState = activeId ? (leadAi[activeId] ?? { status: "loading" }) : { status: "loading" };
+  // Try again on the card retries whichever part failed: the stored lead (then the AI part follows it) or the AI part alone.
   const retryLead = () => {
     if (!selected) return;
-    setLeadCards((prev) => ({ ...prev, [selected.id]: { status: "loading" } }));
-    void loadLead(selected.id, selected.contactId);
+    if (leadState.status === "error") {
+      setLeadCards((prev) => ({ ...prev, [selected.id]: { status: "loading" } }));
+      void loadLead(selected.id, selected.contactId);
+    } else if (aiState.status === "unavailable") {
+      setLeadAi((prev) => ({ ...prev, [selected.id]: { status: "loading" } }));
+      void loadLeadAi(selected.id);
+    }
   };
   const closeLeadSheet = useCallback(() => setLeadSheetOpen(false), []);
 
@@ -247,8 +277,8 @@ export function InboxScreen({
           </div>
         )}
       </div>
-      {selected ? <LeadCardPanel state={leadState} conversation={selected} onRetry={retryLead} /> : null}
-      {selected && leadSheetOpen ? <LeadCardSheet state={leadState} conversation={selected} onRetry={retryLead} onClose={closeLeadSheet} /> : null}
+      {selected ? <LeadCardPanel state={leadState} ai={aiState} conversation={selected} onRetry={retryLead} /> : null}
+      {selected && leadSheetOpen ? <LeadCardSheet state={leadState} ai={aiState} conversation={selected} onRetry={retryLead} onClose={closeLeadSheet} /> : null}
     </div>
   );
 }

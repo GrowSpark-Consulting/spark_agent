@@ -5,7 +5,7 @@ vi.mock("@/lib/supabase/browser", () => ({ getSupabaseBrowserClient: () => ({ au
 const fetchMock = vi.fn<typeof fetch>();
 vi.stubGlobal("fetch", fetchMock);
 
-const { patchJson, postForm, postJson, sendNoContent, TENANT_HEADER } = await import("./client");
+const { getJson, patchJson, postForm, postJson, sendNoContent, TENANT_HEADER } = await import("./client");
 const { ApiError } = await import("@/lib/errors");
 
 const TENANT = "10000000-0000-0000-0000-000000000001";
@@ -55,6 +55,25 @@ describe("postJson", () => {
     vi.stubEnv("NEXT_PUBLIC_API_URL", "https://api.pakkaagent.in/api");
     await expect(postJson("/api/templates", {})).rejects.toThrow(/NEXT_PUBLIC_API_URL/);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("getJson", () => {
+  it("GETs JSON with the user's token and the business, and no body or content type", async () => {
+    fetchMock.mockResolvedValue(Response.json({ ok: true }));
+    expect(await getJson("/api/conversations/c1/lead-card", { tenantId: TENANT })).toEqual({ ok: true });
+    const { url, init, headers } = sentRequest();
+    expect(url).toBe("https://api.pakkaagent.in/api/conversations/c1/lead-card");
+    expect(init.method).toBe("GET");
+    expect(init.body).toBeUndefined();
+    expect(headers.get("authorization")).toBe("Bearer header.payload.sig");
+    expect(headers.get(TENANT_HEADER)).toBe(TENANT);
+    expect(headers.has("content-type")).toBe(false);
+  });
+
+  it("throws ApiError with the API's envelope on an error response", async () => {
+    fetchMock.mockResolvedValue(Response.json({ error: { code: "not_found", message: "That conversation was not found." } }, { status: 404 }));
+    await expect(getJson("/api/conversations/c1/lead-card", { tenantId: TENANT })).rejects.toMatchObject({ status: 404, body: { error: { code: "not_found" } } });
   });
 });
 
