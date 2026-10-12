@@ -5,6 +5,7 @@ import { z } from "zod";
 import { CREDIT_COST } from "../billing/credit-costs";
 import { refundCredits, spendCredits } from "../billing/credits";
 import { isEnabled } from "../features/is-enabled";
+import { inngest } from "../inngest/client";
 import { supabaseAdmin } from "../lib/supabase-admin";
 import { Interactive, interactiveSummary } from "./interactive";
 import { KINDS, type MessageCreditReason, type NotificationKind } from "./kinds";
@@ -132,6 +133,16 @@ async function earlierSend(db: SupabaseClient, tenantId: string, kind: Notificat
   const [row] = z.array(SentRow).parse(data ?? []);
   if (!row) return null;
   return { status: "sent", messageId: row.id, providerMsgId: row.provider_msg_id ?? "", creditsCharged: row.credits_charged, usedTemplate: row.template_name !== null };
+}
+
+/**
+ * credits.spent for the credit-alerts job (docs/handover.md, module 7), which compares the balance with the plan. Not
+ * awaited, so it never delays or fails a send; the fixed id makes Inngest drop a repeat.
+ */
+function announceSpend(tenantId: string, amount: number, reason: MessageCreditReason, messageId: string): void {
+  inngest
+    .send({ id: `credits.spent:${messageId}`, name: "credits.spent", data: { tenantId, amount, reason, messageId } })
+    .catch((err: unknown) => console.error(`[notify] credits.spent not sent for message ${messageId}: ${err instanceof Error ? err.name : "unknown error"}`));
 }
 
 /** A sender's SendError keeps its code and flags; anything else is unexpected, so it is logged and generic. */
@@ -293,6 +304,7 @@ export async function send(tenantId: string, kind: NotificationKind, payload: No
   });
   // The message has gone out and is paid for; a retry would send it twice. Log and report it as sent.
   if (recorded.error) console.error(`notify_record failed for message ${messageId}: ${recorded.error.message}`);
+  if (cost > 0 && reason) announceSpend(tenantId, cost, reason, messageId);
 
   return { status: "sent", messageId, providerMsgId, creditsCharged: cost, usedTemplate: Boolean(template) };
 }

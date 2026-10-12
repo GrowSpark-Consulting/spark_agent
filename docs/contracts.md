@@ -57,7 +57,9 @@ can TRUNCATE. **A new business table needs one fixture row in that file**, or th
 - `kb_chunks.embedding` is `vector(1024)`: Cohere `embed-multilingual-v3.0`, cosine distance (`<=>`).
   Retrieval filters by `tenant_id` and sets `hnsw.iterative_scan = relaxed_order`.
 - Seed: `supabase/seed/` (plans, 21 features, demo and isolation-test businesses, services, resources, hours).
-- Only the 0005 functions write `credit_ledger`.
+- Only the 0005 functions write `credit_ledger`. Rollover and expiry across renewals are tested month by month in
+  `supabase/tests/credits_renewal.test.sql` (one month of rollover, top-ups expiring at 90 days, soonest-expiring first,
+  an early renewal resetting the month before the newest).
 - **Member writes from the browser** (everything else is read-only for members; server code writes):
 
 | Table | Members can |
@@ -422,7 +424,7 @@ sent twice carries a fixed `id` so Inngest drops the duplicate (`tenant.trial_st
 | `handoff.opened` | `{ tenantId, handoffId, conversationId }`; sent by Dev 1's reply step when it opens a handoff (id `handoff_opened:<handoffId>`); starts `handoff-alert`, which sends one `staff_alert` to each owner and admin with an alert number (section 2). A handoff already resolved by the time the job runs gets no alert. **The job is the only sender of handoff alerts:** the reply step does not alert staff itself. Also starts `handoff-sla`: after the SLA (section 3) it alerts the owners again (`handoff_waiting`) unless someone has the chat: the handoff was picked up, assigned or resolved, a staff member took the chat over, or it is no longer in `human` mode (back with the AI, or on the business's own number) |
 | `handoff.own_number` | `{ tenantId, handoffId }`; to be sent by Dev 1's own-number takeover; starts `own-number-outcome` |
 | `tenant.trial_started` | `{ tenantId }` |
-| `credits.spent` | `{ tenantId, amount, reason, balanceAfter }` |
+| `credits.spent` | `{ tenantId, amount, reason, messageId }`: sent by `notify.send` after each charged message (id `credits.spent:<messageId>`; not awaited, so it never delays or fails a send); starts `credit-alerts`. No `balanceAfter`: the job reads the balance itself, after its debounce |
 
 **Booking reminders (`booking-reminders`, built 9 Oct; `backend/src/inngest/booking-reminders.ts`).** On
 `booking.confirmed` the run plans the 24 h and 2 h reminders from the booking's start and the business's offsets
@@ -485,6 +487,15 @@ staff_alert template (the question and the chat's link). A handoff that already 
 `{ handoffId, outcome }` and `recordHandoffOutcome(tenantId, handoffId, outcome, actor)` (`backend/src/leads/
 own-number-outcome.ts`) saves the first answer on the handoff (and resolves it), moves the lead to `booked` or `lost`
 (follow-up leaves it) and audits it. The own-number takeover itself, and sending `handoff.own_number`, are Dev 1's.
+
+**Credit alerts (`credit-alerts`, built 12 Oct; `backend/src/inngest/credit-alerts.ts`).** `credits.spent` → after a
+minute without spends (at most ten; debounced per business) the run reads the balance, the plan's monthly credits and
+the newest grant. At or below a fifth of the monthly credits (80% used) each owner with an alert number gets
+`staff_alert` `credits_low` ("Skyline Homes has 280 credits left of its 1500 a month. Top up so the assistant keeps
+replying." with the billing link); at none, `credits_exhausted`. Free, behind `staff_alerts`. Keys
+`credit_alert:<low|used_up>:<newest grant id>:<owner>`, so each alert goes once per grant: a new month, a top-up or an
+admin grant starts again. Credits that expire with no spend wake nothing; the next refused reply raises the
+`credits_exhausted` handoff alert as before. Auto top-up ("if on", the handover) waits for Razorpay (Day 6).
 
 **The message pipeline (`process-message`, built: steps 2 and 3).** One conversation at a time (concurrency key
 `conversationId`); messages from one conversation within 3 seconds (never longer than 15) start one run. A debounce keeps

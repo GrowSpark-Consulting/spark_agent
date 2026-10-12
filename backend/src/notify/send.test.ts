@@ -10,6 +10,8 @@ const tables: Record<string, FakeResponse> = {};
 const db = fakeSupabase(tables);
 vi.mock("../lib/supabase-admin", () => ({ supabaseAdmin: () => ({ rpc, from: (table: string) => db.client.from(table) }) }));
 vi.mock("../features/is-enabled", () => ({ isEnabled }));
+const inngestSend = vi.fn<(event: unknown) => Promise<{ ids: string[] }>>(async () => ({ ids: [] }));
+vi.mock("../inngest/client", () => ({ inngest: { send: (event: unknown) => inngestSend(event) } }));
 
 const { keyedMessageId, send, templateVariableCount, TEST_MESSAGES_PER_HOUR } = await import("./send");
 const { OutsideWindowError, registerSender, SendError } = await import("./sender");
@@ -48,6 +50,36 @@ beforeEach(() => {
   rpcHandlers.refund_credits = () => ok(1);
   tables.messages = { data: [], error: null };
   db.calls.length = 0;
+  inngestSend.mockReset().mockResolvedValue({ ids: [] });
+});
+
+describe("credits.spent, for the credit-alerts job", () => {
+  it("is announced after a charged message, with a fixed id so a repeat is dropped", async () => {
+    const outcome = await send(TENANT, "reminder_24h", { conversationId: CONVERSATION, text: "See you tomorrow at 5 pm." });
+    expect(outcome).toMatchObject({ status: "sent", creditsCharged: 1 });
+    const messageId = (outcome as { messageId: string }).messageId;
+    expect(inngestSend).toHaveBeenCalledWith({
+      id: `credits.spent:${messageId}`,
+      name: "credits.spent",
+      data: { tenantId: TENANT, amount: 1, reason: "template_utility", messageId },
+    });
+  });
+
+  it("is not announced for a free message or a refused spend", async () => {
+    await send(TENANT, "staff_reply", { conversationId: CONVERSATION, text: "Hi!", actorId: STAFF });
+    rpcHandlers.spend_credits = () => ok(false);
+    await expect(send(TENANT, "ai_reply", { conversationId: CONVERSATION, text: "Hello" })).resolves.toMatchObject({ reason: "insufficient_credits" });
+    expect(inngestSend).not.toHaveBeenCalled();
+  });
+
+  it("never fails the send when Inngest can't be reached", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    inngestSend.mockRejectedValue(new Error("connect ECONNREFUSED"));
+    await expect(send(TENANT, "ai_reply", { conversationId: CONVERSATION, text: "Hello" })).resolves.toMatchObject({ status: "sent" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(logged).toHaveBeenCalledWith(expect.stringMatching(/^\[notify\] credits\.spent not sent for message .+: Error$/));
+    logged.mockRestore();
+  });
 });
 
 describe("a template chosen by staff (staff_reply)", () => {
