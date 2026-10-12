@@ -10,7 +10,7 @@ import { oneLine, type ReminderBooking } from "./reminders";
 // settings, the messages, and what Dev 1's pipeline calls when the customer taps a rating.
 
 export const DEFAULT_FEEDBACK_DELAY_MINUTES = 120;
-const DelaySettings = z.object({ offset_minutes: z.number().int().min(0).max(7 * 24 * 60) });
+export const DelaySettings = z.object({ offset_minutes: z.number().int().min(0).max(7 * 24 * 60) });
 
 /** Minutes after the booking's end before the rating question (feedback_request's `offset_minutes`), else 120. */
 export async function feedbackDelay(tenantId: string, db: SupabaseClient): Promise<number> {
@@ -78,7 +78,7 @@ export async function recordVisitRating(tenantId: string, bookingId: string, rat
   return true;
 }
 
-const ReviewSettings = z.object({ review_url: z.url({ protocol: /^https$/ }) });
+export const ReviewSettings = z.object({ review_url: z.url({ protocol: /^https$/ }) });
 
 /** The business's review link (review_request's `review_url`, https only), or null when it has none. */
 export async function reviewLink(tenantId: string, db: SupabaseClient): Promise<string | null> {

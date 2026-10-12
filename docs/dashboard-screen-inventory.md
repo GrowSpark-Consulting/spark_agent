@@ -179,13 +179,11 @@ reminder timing, working-hours mode.
 **Current data source:** `plans.ts` (`FEATURES`, `GROUPS`, `PLAN_*`); toggle state, lock state and
 estimate are computed **in the browser**. That has to move to the server.
 **Future API dependency:**
-- `GET /api/features`: **PROPOSED**, Dev 2. Features × plan × tenant toggles × 30-day usage. The
-  handover says this screen is rendered from `features` + `plans`. A route keeps entitlement logic on
-  the server; an RLS read of `features`, `plans` and `tenant_features` would also work if the
-  estimate comes from a view.
-- `PATCH /api/features/:key`: **HANDOVER**, Dev 2 (checks plan, writes audit log).
+- `GET /api/features`: **BUILT**, Dev 2 (12 Oct). Features × plan × tenant toggles × 30-day usage, computed on the
+  server (docs/contracts.md, section 6).
+- `PATCH /api/features/:key`: **BUILT**, Dev 2 (checks plan, writes audit log).
 **HTTP method:** GET, PATCH.
-**Request:** `{ enabled?: boolean, settings?: { offsetHours?: 48|24|12|6, mode?: '247'|'after_hours' } }`.
+**Request:** `{ enabled?: boolean, settings?: Record<string, unknown> }`; settings keys are the jobs' own (`offset_minutes` in minutes, `review_url`, …; docs/contracts.md, section 3). Working-hours mode is not built yet (shown as disabled).
 **Response:** `FeatureList` (see contracts: available / locked / disabled per feature).
 **Loading state:** Not built yet. Needs a per-row pending switch while a PATCH is in flight.
 **Empty state:** not applicable.

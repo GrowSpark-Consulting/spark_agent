@@ -15,7 +15,7 @@ import { inngest } from "./client";
 const HandoffOpened = z.object({ tenantId: z.guid(), handoffId: z.guid(), conversationId: z.guid() });
 
 export const DEFAULT_SLA_MINUTES = 15;
-const SlaSettings = z.object({ sla_minutes: z.number().int().min(1).max(24 * 60) });
+export const SlaSettings = z.object({ sla_minutes: z.number().int().min(1).max(24 * 60) });
 
 /** The business's SLA in minutes (1 to 1440), else the default. */
 export async function slaMinutes(tenantId: string, db: SupabaseClient): Promise<number> {
