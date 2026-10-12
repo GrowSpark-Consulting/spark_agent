@@ -254,6 +254,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
         }
         if (r.buttons && JSON.stringify(turnSends[0]?.buttons ?? []) !== JSON.stringify(r.buttons)) fail(`reply buttons: wanted ${JSON.stringify(r.buttons)}, got ${JSON.stringify(turnSends[0]?.buttons ?? [])}`);
         for (const text of r.contains ?? []) if (!replyText?.includes(text)) fail(`reply: should contain ${JSON.stringify(text)}, got ${JSON.stringify(replyText)}`);
+        for (const pattern of r.matches ?? []) if (!new RegExp(pattern, "i").test(replyText ?? "")) fail(`reply: should match /${pattern}/i, but got ${JSON.stringify(replyText)}`);
         for (const text of r.notContains ?? []) if (replyText?.includes(text)) fail(`reply: must not contain ${JSON.stringify(text)}`);
         if (r.notice !== undefined && (replyText?.includes(PRIVACY_URL) ?? false) !== r.notice) fail(`privacy notice on the reply: wanted ${r.notice}`);
       }

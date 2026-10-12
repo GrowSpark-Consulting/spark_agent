@@ -27,6 +27,19 @@ const ReplyExpect = z
     /** The titles of the reply buttons the message carried, in order ([] = it was plain text). */
     buttons: z.array(z.string()).optional(),
     contains: z.array(z.string()).optional(),
+    /** Regular expressions (any letter case) the reply must each match: for wording a real model varies ("10 am", "10:00 am"). Use `contains` under `mockOnly` for the exact words of the mock. */
+    matches: z
+      .array(
+        z.string().refine((p) => {
+          try {
+            new RegExp(p, "i");
+            return true;
+          } catch {
+            return false;
+          }
+        }, "not a valid regular expression"),
+      )
+      .optional(),
     notContains: z.array(z.string()).optional(),
     /** The privacy notice is on the reply (true) or not (false). */
     notice: z.boolean().optional(),

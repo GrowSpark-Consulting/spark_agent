@@ -1,5 +1,5 @@
 name: A ready customer is offered three real times in a normal message, picks one in words, and is booked
-description: "Day 3 exit tests 1 and 2: the score comes from code, the times from the calendar, in one plain message (no list, no buttons). The pick is read from the customer's own words and booked; the lead moves to booked."
+description: "Day 3 exit tests 1 and 2: the score comes from code, the times from the calendar, in one plain message (no list, no buttons). The pick is read from the customer's own words and booked; the lead moves to booked. What is asserted in both modes is what matters (the three times in one plain message, the second one booked, the calendar showing the 3:00 pm booking); the exact words are only checked against the mock, because a real model writes \"10 am\" as often as \"10:00 am\"."
 booking:
   now: "2026-10-10T04:30:00.000Z"
   catalog:
@@ -11,11 +11,12 @@ turns:
       extraction: { language: en, intent: give_details, fields: { config: 2BHK, location: Velachery, budget: 60L, timeline: 0-3m }, question: null }
       reply: "That sounds like a great match. I can do Sunday at 10:00 am, Sunday at 3:00 pm or Monday at 5:30 pm for a site visit. Which suits you?"
     expect:
-      reply: { sent: true, buttons: [], contains: ["10:00 am", "3:00 pm", "5:30 pm"] }
+      reply: { sent: true, buttons: [], matches: ['\b10(:00)?\s?am\b', '\b3(:00)?\s?pm\b', '\b5:30\s?pm\b'] }
       aiReplies: 1
       handoff: null
       calendar: { confirmed: [] }
     mockOnly:
+      reply: { contains: ["10:00 am", "3:00 pm", "5:30 pm"] }
       case: offer_slots
       leadTemperature: hot
       leadScore: 75
@@ -24,10 +25,11 @@ turns:
       extraction: { language: en, intent: give_details, fields: {}, question: null }
       reply: "Done! Your site visit is booked for Sunday at 3:00 pm. See you then!"
     expect:
-      reply: { sent: true, buttons: [], contains: ["3:00 pm"] }
+      reply: { sent: true, buttons: [], matches: ['\b3(:00)?\s?pm\b'] }
       aiReplies: 1
       handoff: null
       leadStage: booked
       calendar: { confirmed: ["2026-10-11T09:30:00.000Z"] }
     mockOnly:
+      reply: { contains: ["3:00 pm"] }
       case: booked

@@ -33,6 +33,32 @@ describe("runChat", () => {
     expect(report.failures.join("\n")).toMatch(message);
   });
 
+  // The reply is plain words with no price, date or time, so the post-check leaves it as scripted.
+  const saying = (reply: string, turn: Record<string, unknown>) => chat({ mock: { extraction: { intent: "question", question: "q?" }, reply }, ...turn });
+  const VISIT = ["\\bcall (or|and) (a )?visit\\b"];
+
+  it("matches: a reply passes when each pattern is found, in any wording the pattern allows and any letter case", async () => {
+    for (const reply of ["We can arrange a call or a visit.", "We can arrange a CALL or visit.", "A call and a visit, as you like."]) {
+      const report = await runChat(saying(reply, { expect: { reply: { matches: VISIT } } }), { mode: "mock" });
+      expect(report.failures).toEqual([]);
+    }
+  });
+
+  it("matches: every pattern must be found, and one that is not fails, naming the pattern and the reply", async () => {
+    const report = await runChat(saying("We can arrange a call or a visit.", { expect: { reply: { matches: VISIT.concat(["\\bcallback\\b"]) } } }), { mode: "mock" });
+    expect(report.failures).toHaveLength(1);
+    expect(report.failures[0]).toMatch(/should match \/\\bcallback\\b\/i, but got "We can arrange a call or a visit\."/);
+  });
+
+  it("matches: a pattern that is not a valid regular expression is refused when the chat is loaded", () => {
+    expect(() => chat({ expect: { reply: { matches: ["("] } } })).toThrow(/regular expression/);
+  });
+
+  it("a strict mockOnly contains still fails in mock mode while expect only has the looser matches (mock mode is not loosened)", async () => {
+    const report = await runChat(saying("We can arrange a call or a visit.", { expect: { reply: { matches: VISIT } }, mockOnly: { reply: { contains: ["site visit"] } } }), { mode: "mock" });
+    expect(report.failures.join("\n")).toMatch(/should contain "site visit"/);
+  });
+
   it("does not check mockOnly in live mode, and refuses live mode without a client", async () => {
     await expect(runChat(chat({ expect: { aiReplies: 1 } }), { mode: "live" })).rejects.toThrow(/live mode needs/);
   });

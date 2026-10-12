@@ -40,7 +40,7 @@ turns:
 ```
 
 What can be asserted: `stop`, `extracted` (intent, language, sentiment, asksIfHuman, notInterested, fields), `case`,
-`reply` (sent, fixed line and language, buttons, contains, notContains, notice), `noInventedPrice`, `optedOut`, `consent` (the new
+`reply` (sent, fixed line and language, buttons, contains, matches, notContains, notice), `noInventedPrice`, `optedOut`, `consent` (the new
 consent_logs of the turn), `handoff` (trigger and priority, or null), `mode`, `leadStage`, `leadFields`, `aiReplies`,
 `confirmations`, and (with a `booking` setup, below) `leadTemperature`, `leadScore`, `hotLead` (staff were told this turn that the lead turned hot), `voiceNoteAlert` (staff were told a voice note is waiting) and `calendar`. Every turn also checks, always: at most one AI reply, sent as an `ai_reply` through notify.send, and nothing
 sent to a contact who opted out.
@@ -93,3 +93,4 @@ A STOP chat's later turns show the gate's opted-out outcome.
   with the AI, and a later voice note after the customer typed is answered again.
 - `65`: an area the business has no homes in (Day 5, out-of-area): the pack has an area rule worth 20 points and no area hard fail, so the customer scores 55 (warm) instead of
   75, is not turned away, and is still offered times because warm passes the offer threshold. This is what the code does today, recorded for Raja to confirm.
+  `matches` is a list of regular expressions (any letter case) the reply must each match. Use it under `expect` for wording a real model varies ("10 am" and "10:00 am"), and keep the exact words under `mockOnly` as `contains`, so mock mode stays strict. Chat 51 does this.
