@@ -7,6 +7,7 @@ import {
   handoffReason,
   isWindowOpen,
   lastWrotePhrase,
+  MESSAGE_LIMIT,
   type ChatMessage,
   type ConversationSummary,
 } from "./data";
@@ -205,6 +206,11 @@ export function ChatView({
       >
         {chat.status === "loading" ? <LoadingState compact title="Loading messages" /> : null}
         {chat.status === "error" ? <ErrorState compact title="Couldn't load this chat" description={chat.error.message} onRetry={onRetry} /> : null}
+        {messages && messages.length >= MESSAGE_LIMIT ? (
+          <div data-testid="chat-truncated" role="status" style={{ alignSelf: "center", fontSize: "12px", background: "var(--wa-sys)", color: "var(--wa-ink)", padding: "5px 10px" }}>
+            Showing the latest {MESSAGE_LIMIT} messages. Earlier ones aren’t shown here.
+          </div>
+        ) : null}
         {messages && messages.length === 0 ? (
           <div style={{ alignSelf: "center", fontSize: "12px", background: "var(--wa-sys)", color: "var(--wa-ink)", padding: "5px 10px" }}>No messages in this chat yet.</div>
         ) : null}

@@ -8,8 +8,9 @@ import type { Lead, LeadCursor, LeadsPage, PackFieldInfo } from "./data";
 //     them). An answer for an older generation is dropped, so a slow answer for the previous business can never land on the new one.
 //   - a "load more" answer says which cursor it was asked for, and counts only if that is still the next page. A page
 //     that arrives twice, or after the list moved on, is ignored; and a lead already shown is never added again.
-// Filters are applied by the screen to whatever is loaded (matchesFilters), the same way to every page, so changing a
-// filter does not start a request and nothing here depends on it.
+// The filters are applied by the database (data.ts, fetchLeadsPage), so changing one starts over from the first page: the
+// screen resets with a new generation and reads again. Nothing here knows the filters; `total` is how many leads match them
+// in the whole business, as the first page counted.
 
 export interface LeadsPaging {
   generation: number;
@@ -18,6 +19,8 @@ export interface LeadsPaging {
   error: FormattedError | null;
   leads: Lead[];
   packFields: PackFieldInfo[];
+  /** How many leads match the filters in the whole business (counted by the database on the first page); null when unknown. */
+  total: number | null;
   /** Where the next page starts; null when every lead has been read. */
   next: LeadCursor | null;
   /** The page after the first: nothing running, one running, or the last one failed. */
@@ -36,11 +39,12 @@ export type LeadsPagingAction =
   | { type: "more_loaded"; generation: number; from: LeadCursor; page: LeadsPage }
   | { type: "more_failed"; generation: number; from: LeadCursor; error: FormattedError }
   | { type: "refresh_started"; generation: number }
-  | { type: "refreshed"; generation: number; page: LeadsPage }
+  /** `replace`: the list is the newest page and nothing else (a filter is on, and merging could never drop a lead that stopped matching). */
+  | { type: "refreshed"; generation: number; page: LeadsPage; replace?: boolean }
   | { type: "refresh_failed"; generation: number; error: FormattedError };
 
 export function initialLeadsPaging(generation = 0): LeadsPaging {
-  return { generation, phase: "loading", error: null, leads: [], packFields: [], next: null, more: "idle", moreError: null, refresh: "idle", refreshError: null };
+  return { generation, phase: "loading", error: null, leads: [], packFields: [], total: null, next: null, more: "idle", moreError: null, refresh: "idle", refreshError: null };
 }
 
 const sameCursor = (a: LeadCursor | null, b: LeadCursor) => a !== null && a.id === b.id && a.updatedAt === b.updatedAt;
@@ -84,7 +88,7 @@ export function leadsPagingReducer(state: LeadsPaging, action: LeadsPagingAction
       return initialLeadsPaging(action.generation);
     case "first_loaded":
       if (action.generation !== state.generation) return state;
-      return { ...state, phase: "ready", error: null, leads: appendNew([], action.page.leads), packFields: action.packFields, next: action.page.next, more: "idle", moreError: null };
+      return { ...state, phase: "ready", error: null, leads: appendNew([], action.page.leads), packFields: action.packFields, total: action.page.total, next: action.page.next, more: "idle", moreError: null };
     case "first_failed":
       if (action.generation !== state.generation) return state;
       return { ...state, phase: "error", error: action.error };
@@ -107,7 +111,10 @@ export function leadsPagingReducer(state: LeadsPaging, action: LeadsPagingAction
       // Merged into what is held (so pages already read stay), never replacing it with a shorter list. The cursor for the
       // next page is untouched: it is a value, so it still marks where the older leads begin.
       if (action.generation !== state.generation || state.phase !== "ready") return state;
-      return { ...state, leads: mergeFresh(state.leads, action.page.leads), refresh: "idle", refreshError: null };
+      if (action.replace) {
+        return { ...state, leads: appendNew([], action.page.leads), total: action.page.total ?? state.total, next: action.page.next, more: "idle", moreError: null, refresh: "idle", refreshError: null };
+      }
+      return { ...state, leads: mergeFresh(state.leads, action.page.leads), total: action.page.total ?? state.total, refresh: "idle", refreshError: null };
     case "refresh_failed":
       // What is on screen stays; only the note changes.
       if (action.generation !== state.generation || state.phase !== "ready") return state;

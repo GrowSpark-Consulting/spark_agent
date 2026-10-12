@@ -3,9 +3,9 @@ import { z } from "zod";
 import { BookingDataError, CALENDAR_BOOKING_COLUMNS, effectiveStatus, isActive, parseBookings, type Booking, type ShownStatus } from "./bookings";
 import { addDays, localParts, weekStart, zonedTime } from "./time";
 
-// The read-only Day 3 calendar (docs/dashboard-screen-contracts.md, Calendar): bookings and resources
-// read directly under RLS for a day or a week, laid out in the business's time zone. No booking is
-// created, moved or cancelled here; those are Dev 2's booking actions, not built as routes yet.
+// The Day 3 calendar (docs/dashboard-screen-contracts.md, Calendar): bookings and resources read directly
+// under RLS for a day or a week, laid out in the business's time zone. Nothing in this file writes: a booking
+// is moved, cancelled or marked only through Dev 2's booking routes (booking-actions.ts), and the range is read again.
 
 export type CalendarView = "day" | "week";
 /** "all", one resource id, or "none" for bookings with no staff member (callbacks and the like). */
@@ -20,6 +20,8 @@ export interface CalendarResource {
   name: string;
   type: string;
   active: boolean;
+  /** resources.user_id: the staff member whose calendar this is, when it is one person's. Decides which bookings staff may change. */
+  userId?: string | null;
 }
 
 export interface CalendarRange {
@@ -37,16 +39,16 @@ export function rangeFor(view: CalendarView, date: string, timeZone: string): Ca
 
 // Reads -------------------------------------------------------------------------------------------------
 
-const ResourceRow = z.object({ id: z.guid(), tenant_id: z.guid(), name: z.string(), type: z.string(), active: z.boolean() });
+const ResourceRow = z.object({ id: z.guid(), tenant_id: z.guid(), name: z.string(), type: z.string(), active: z.boolean(), user_id: z.guid().nullable().optional() });
 
 export async function fetchResources(client: SupabaseClient, tenantId: string): Promise<CalendarResource[]> {
-  const { data, error } = await client.from("resources").select("id, tenant_id, name, type, active").eq("tenant_id", tenantId).order("name", { ascending: true });
+  const { data, error } = await client.from("resources").select("id, tenant_id, user_id, name, type, active").eq("tenant_id", tenantId).order("name", { ascending: true });
   if (error) throw error;
   const parsed = z.array(ResourceRow).safeParse(data ?? []);
   if (!parsed.success) throw new BookingDataError("resource");
   return parsed.data
     .filter((r) => r.tenant_id === tenantId)
-    .map(({ id, name, type, active }) => ({ id, name, type, active }))
+    .map(({ id, name, type, active, user_id }) => ({ id, name, type, active, userId: user_id ?? null }))
     .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }) || a.id.localeCompare(b.id));
 }
 

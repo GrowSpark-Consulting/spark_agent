@@ -191,7 +191,7 @@ describe("reading more than one page", () => {
 });
 
 const lead = (n: number, over: Record<string, unknown> = {}): Lead => toLead(LeadRow.parse(row(n, { temperature: null, ...over })));
-const page = (leads: Lead[], next: LeadCursor | null): LeadsPage => ({ leads, next });
+const page = (leads: Lead[], next: LeadCursor | null, total: number | null = null): LeadsPage => ({ leads, next, total });
 const cursor = (n: number): LeadCursor => ({ updatedAt: stamp(n), id: id(n) });
 const run = (actions: LeadsPagingAction[], from: LeadsPaging = initialLeadsPaging()) => actions.reduce(leadsPagingReducer, from);
 
@@ -398,5 +398,63 @@ describe("when a re-read cannot be merged safely", () => {
   it("is no gap when nothing is held yet, or the page is empty", () => {
     expect(refreshLeavesGap([], page([lead(30)], cursor(30)))).toBe(false);
     expect(refreshLeavesGap(held, page([], cursor(1)))).toBe(false);
+  });
+});
+
+describe("how many leads match, in the whole business", () => {
+  const loaded = (total: number | null) =>
+    run([
+      { type: "reset", generation: 1 },
+      { type: "first_loaded", generation: 1, page: page([lead(5), lead(4)], cursor(4), total), packFields: [] },
+    ]);
+
+  it("starts unknown, and takes the count the first page came with", () => {
+    expect(initialLeadsPaging().total).toBeNull();
+    expect(loaded(1234).total).toBe(1234);
+  });
+
+  it("stays unknown when the first page came without a count, never worked out from what was read", () => {
+    expect(loaded(null).total).toBeNull();
+  });
+
+  it("is kept while more pages are read, which carry no count of their own", () => {
+    const s = run([{ type: "more_started", generation: 1 }, { type: "more_loaded", generation: 1, from: cursor(4), page: page([lead(3)], null, null) }], loaded(1234));
+    expect(s.total).toBe(1234);
+    expect(s.leads).toHaveLength(3);
+  });
+
+  it("is updated by a refresh that brings a count, and kept by one that doesn't", () => {
+    expect(run([{ type: "refresh_started", generation: 1 }, { type: "refreshed", generation: 1, page: page([lead(9)], cursor(9), 1300) }], loaded(1234)).total).toBe(1300);
+    expect(run([{ type: "refresh_started", generation: 1 }, { type: "refreshed", generation: 1, page: page([lead(9)], cursor(9), null) }], loaded(1234)).total).toBe(1234);
+  });
+
+  it("is forgotten on a reset, so the old count never sits on a new list", () => {
+    expect(run([{ type: "reset", generation: 2 }], loaded(1234)).total).toBeNull();
+  });
+});
+
+describe("a refresh while a filter is on", () => {
+  const filtered = () =>
+    run([
+      { type: "reset", generation: 1 },
+      { type: "first_loaded", generation: 1, page: page([lead(5), lead(4), lead(3)], cursor(3), 40), packFields: [] },
+      { type: "refresh_started", generation: 1 },
+    ]);
+
+  it("replaces the list with the newest page, so a lead that stopped matching goes", () => {
+    // Lead 4 no longer matches the filter; lead 9 now does. A merge would keep 4 for ever.
+    const s = leadsPagingReducer(filtered(), { type: "refreshed", generation: 1, page: page([lead(9), lead(5)], null, 39), replace: true });
+    expect(s.leads.map((l) => l.id)).toEqual([id(9), id(5)]);
+    expect(s).toMatchObject({ total: 39, next: null, more: "idle", refresh: "idle", refreshError: null });
+  });
+
+  it("without the flag still merges, as before", () => {
+    const s = leadsPagingReducer(filtered(), { type: "refreshed", generation: 1, page: page([lead(9), lead(5)], cursor(5), 41) });
+    expect(s.leads.map((l) => l.id)).toEqual([id(9), id(5), id(4), id(3)]);
+  });
+
+  it("ignores an answer for an older list", () => {
+    const s = leadsPagingReducer(filtered(), { type: "refreshed", generation: 0, page: page([lead(9)], null, 1), replace: true });
+    expect(s.leads.map((l) => l.id)).toEqual([id(5), id(4), id(3)]);
   });
 });

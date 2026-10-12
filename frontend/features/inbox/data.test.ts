@@ -7,6 +7,7 @@ import {
   attachmentOf,
   conversationTag,
   dayChipLabel,
+  fetchConversation,
   fetchConversations,
   fetchMessages,
   formatListTime,
@@ -456,6 +457,32 @@ describe("reads", () => {
   it("drops a row from another business even if one came back", async () => {
     const { client } = fakeClient({ data: [listRow(), listRow({ id: id(2), tenant_id: OTHER_TENANT })], error: null });
     expect((await fetchConversations(client, TENANT)).map((c) => c.id)).toEqual([id(1)]);
+  });
+
+  it("reads one named conversation for the session's tenant, so a link to a chat older than the newest page still opens", async () => {
+    const { client, calls, table } = fakeClient({ data: [listRow({ id: id(7) })], error: null });
+    const found = await fetchConversation(client, TENANT, id(7));
+    expect(table()).toBe("conversations");
+    expect(calls).toContainEqual(["eq", ["tenant_id", TENANT]]);
+    expect(calls).toContainEqual(["eq", ["id", id(7)]]);
+    expect(calls).toContainEqual(["is", ["handoffs.resolved_at", null]]);
+    expect(calls).toContainEqual(["neq", ["messages.sender", "system"]]);
+    expect(found?.id).toBe(id(7));
+  });
+
+  it("finds nothing for an unknown id, and never returns another business's conversation", async () => {
+    expect(await fetchConversation(fakeClient({ data: [], error: null }).client, TENANT, id(7))).toBeNull();
+    expect(await fetchConversation(fakeClient({ data: null, error: null }).client, TENANT, id(7))).toBeNull();
+    const other = fakeClient({ data: [listRow({ id: id(7), tenant_id: OTHER_TENANT })], error: null });
+    expect(await fetchConversation(other.client, TENANT, id(7))).toBeNull();
+    // A row that isn't the one asked for is not it either.
+    expect(await fetchConversation(fakeClient({ data: [listRow({ id: id(8) })], error: null }).client, TENANT, id(7))).toBeNull();
+  });
+
+  it("passes database errors on and rejects a row of the wrong shape when reading one conversation", async () => {
+    const pgError = { code: "42501", message: "permission denied", details: null, hint: null };
+    await expect(fetchConversation(fakeClient({ data: null, error: pgError }).client, TENANT, id(7))).rejects.toBe(pgError);
+    await expect(fetchConversation(fakeClient({ data: [{ id: "nope" }], error: null }).client, TENANT, id(7))).rejects.toBeInstanceOf(InboxDataError);
   });
 
   it("reads one chat's messages for the tenant, newest page first, shown oldest first", async () => {

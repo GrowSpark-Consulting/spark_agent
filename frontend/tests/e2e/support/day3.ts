@@ -25,13 +25,13 @@ export interface Day3Account {
 
 export async function newDay3Account(
   request: APIRequestContext,
-  options: { seed?: boolean; role?: Day3Role; error?: "leads" | "bookings" | "resources" | "tenants"; inbox?: boolean; /** That many plain leads, for the board's paging. */ manyLeads?: number } = {},
+  options: { seed?: boolean; role?: Day3Role; error?: "leads" | "bookings" | "resources" | "tenants"; inbox?: boolean; /** That many plain leads, for the board's paging. */ manyLeads?: number; /** That many plain chats, oldest last (`ids.oldestChat`), for the inbox's newest-page limit. */ manyChats?: number; /** tenants.agent_settings as the business already has it (persona, tone and so on). */ agentSettings?: Record<string, unknown>; /** That many leads with a known spread of temperature, score and stage (see the mock), for server-side filters and counts. */ mixedLeads?: number; /** The mock sends no Content-Range, as if the count could not be read. */ noLeadCount?: boolean } = {},
 ): Promise<Day3Account> {
   return (await request.post(`${MOCK_SUPABASE_URL}/__mock/day3-account`, { data: options })).json();
 }
 
 export interface StoredDay3 {
-  tenant: { business_hours: Record<string, { start: string; end: string }[]> } | null;
+  tenant: { business_hours: Record<string, { start: string; end: string }[]>; agent_settings: Record<string, unknown> | null } | null;
   resources: { id: string; name: string; type: string; working_hours: Record<string, unknown>; service_area: { pincodes: string[] } | null; active: boolean }[];
   services: { id: string; name: string; buffer_min: number; min_notice_min: number; duration_min: number }[];
   bookings: { id: string; status: string }[];

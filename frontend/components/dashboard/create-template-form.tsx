@@ -14,6 +14,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { EmptyState, ErrorState, LoadingState } from "@/components/shared/states";
 import { postJson } from "@/lib/api/client";
 import { formatError, type FormattedError } from "@/lib/errors";
+import { readTemplateResult, ResultDataError, unconfirmedFailure } from "@/lib/whatsapp/results";
 import { useTenant } from "./tenant-context";
 
 type Status =
@@ -145,10 +146,11 @@ export function CreateTemplateForm() {
     setFields({});
     setStatus({ kind: "submitting" });
     try {
-      const result = await postJson<CreateTemplateResult>("/api/templates", parsed.data, { tenantId: tenant.id });
+      // Checked, not just cast: a 2xx with another body must not read as "was submitted to Meta".
+      const result = readTemplateResult(await postJson<unknown>("/api/templates", parsed.data, { tenantId: tenant.id }));
       setStatus({ kind: "submitted", result });
     } catch (err) {
-      const error = formatError(err);
+      const error = err instanceof ResultDataError ? unconfirmedFailure(err) : formatError(err);
       setFields(error.fields ?? {});
       setStatus({ kind: "failed", error });
       focusFirstInvalid(error.fields ?? {});

@@ -253,6 +253,12 @@ export interface LeadFilters {
   minScore: number | null;
 }
 
+/** No filter: every lead of the business. */
+export const NO_LEAD_FILTERS: LeadFilters = { temperature: "all", minScore: null };
+
+export const hasLeadFilters = (f: LeadFilters): boolean => f.temperature !== "all" || f.minScore !== null;
+
+/** The same test the database applies (leadsFiltered below), on a lead already read. */
 export function matchesFilters(lead: Lead, f: LeadFilters): boolean {
   if (f.temperature === "unscored" && lead.temperature !== null) return false;
   if (f.temperature !== "all" && f.temperature !== "unscored" && lead.temperature !== f.temperature) return false;
@@ -318,29 +324,109 @@ export interface LeadsPage {
   leads: Lead[];
   /** The cursor for the next page, or null when this was the last (it held fewer rows than asked for). */
   next: LeadCursor | null;
+  /**
+   * How many leads match the filters in the whole business, counted by the database. Only the first page asks (a count costs a
+   * scan), so later pages say null. null also means "the answer carried no count": it is never worked out from what was read.
+   */
+  total: number | null;
 }
 
 const CursorRow = z.object({ updated_at: z.string().min(1), id: z.guid() });
 
+/** A usable count from the database: a whole number, zero or more. */
+function usableCount(count: unknown): number | null {
+  return typeof count === "number" && Number.isInteger(count) && count >= 0 ? count : null;
+}
+
 /**
- * One page of the business's leads, newest-updated first (then by id, so the order never ties). Plain PostgREST
- * reads under RLS, like every other screen: no new endpoint. Rows of another business are dropped even if they arrive.
+ * The business's leads that match the filters, as a query to read rows from (`count` asks for the exact number too) or, with
+ * `head`, only to count. The filters are the ones matchesFilters tests: a temperature (not scored is "no temperature") and a
+ * minimum score, which leaves out leads with no score.
  */
-export async function fetchLeadsPage(client: SupabaseClient, tenantId: string, cursor: LeadCursor | null = null, pageSize = LEAD_PAGE_SIZE): Promise<LeadsPage> {
-  let query = client.from("leads").select(LEAD_COLUMNS).eq("tenant_id", tenantId);
+function leadsFiltered(client: SupabaseClient, tenantId: string, filters: LeadFilters, columns: string, options?: { count?: "exact"; head?: boolean }) {
+  let query = client.from("leads").select(columns, options).eq("tenant_id", tenantId);
+  if (filters.temperature === "unscored") query = query.is("temperature", null);
+  else if (filters.temperature !== "all") query = query.eq("temperature", filters.temperature);
+  if (filters.minScore !== null) query = query.gte("score", filters.minScore);
+  return query;
+}
+
+/**
+ * One page of the business's leads that match the filters, newest-updated first (then by id, so the order never ties). Plain
+ * PostgREST reads under RLS, like every other screen: no new endpoint. The filters are applied by the database, so a filtered
+ * board reads only the leads it shows. Rows of another business are dropped even if they arrive.
+ */
+export async function fetchLeadsPage(
+  client: SupabaseClient,
+  tenantId: string,
+  cursor: LeadCursor | null = null,
+  pageSize = LEAD_PAGE_SIZE,
+  filters: LeadFilters = NO_LEAD_FILTERS,
+): Promise<LeadsPage> {
+  let query = leadsFiltered(client, tenantId, filters, LEAD_COLUMNS, cursor === null ? { count: "exact" } : undefined);
   if (cursor) {
     // Strictly older than the last lead shown: an older update, or the same moment with a smaller id.
     query = query.or(`updated_at.lt.${cursor.updatedAt},and(updated_at.eq.${cursor.updatedAt},id.lt.${cursor.id})`);
   }
-  const { data, error } = await query.order("updated_at", { ascending: false }).order("id", { ascending: false }).limit(pageSize);
+  const { data, error, count } = await query.order("updated_at", { ascending: false }).order("id", { ascending: false }).limit(pageSize);
   if (error) throw error;
   const rows: unknown[] = Array.isArray(data) ? data : [];
   const leads = parseLeads(rows, tenantId);
-  if (rows.length < pageSize) return { leads, next: null };
+  const total = cursor === null ? usableCount(count) : null;
+  if (rows.length < pageSize) return { leads, next: null, total };
   // A full page: there may be more. The cursor comes from the last row as sent; without a usable one, say so instead of guessing.
   const last = CursorRow.safeParse(rows[rows.length - 1]);
   if (!last.success) throw new LeadDataError("lead");
-  return { leads, next: { updatedAt: last.data.updated_at, id: last.data.id } };
+  return { leads, next: { updatedAt: last.data.updated_at, id: last.data.id }, total };
+}
+
+async function headCount(query: PromiseLike<{ count: number | null; error: unknown }>): Promise<number> {
+  const { count, error } = await query;
+  if (error) throw error;
+  const counted = usableCount(count);
+  if (counted === null) throw new LeadDataError("count");
+  return counted;
+}
+
+/** The numbers on the filter chips and in the page heading, for the whole business. */
+export interface LeadCounts {
+  /** Every lead. The sum of the five temperature counts: each lead is in exactly one (the column only allows four values, or none). */
+  total: number;
+  /** Leads that aren't won or lost. */
+  open: number;
+  hot: number;
+  warm: number;
+  cold: number;
+  disqualified: number;
+  unscored: number;
+}
+
+/**
+ * Counts over the whole business, not the page on screen. Six small head-only requests (no rows come back), because no
+ * endpoint, view or function groups leads yet: the five temperature counts, and the open leads. "All" is their sum, so it needs
+ * no request of its own. The six are read together and a lead can move between them meanwhile, so the numbers are as of that
+ * read; Refresh reads them again. If any fails, none is used.
+ */
+export async function fetchLeadCounts(client: SupabaseClient, tenantId: string): Promise<LeadCounts> {
+  const head = () => client.from("leads").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId);
+  const [hot, warm, cold, disqualified, unscored, open] = await Promise.all([
+    headCount(head().eq("temperature", "hot")),
+    headCount(head().eq("temperature", "warm")),
+    headCount(head().eq("temperature", "cold")),
+    headCount(head().eq("temperature", "disqualified")),
+    headCount(head().is("temperature", null)),
+    headCount(head().not("stage", "in", "(won,lost)")),
+  ]);
+  return { total: hot + warm + cold + disqualified + unscored, open, hot, warm, cold, disqualified, unscored };
+}
+
+/**
+ * How many leads are in each stage of the pipeline, under the same filters as the list. One head-only request per stage, so the
+ * board asks only when the list is cut short (otherwise what is loaded is every lead and its own count is exact).
+ */
+export async function fetchStageCounts(client: SupabaseClient, tenantId: string, filters: LeadFilters): Promise<Record<string, number>> {
+  const counts = await Promise.all(STAGES.map((stage) => headCount(leadsFiltered(client, tenantId, filters, "id", { count: "exact", head: true }).eq("stage", stage))));
+  return Object.fromEntries(STAGES.map((stage, i) => [stage, counts[i]]));
 }
 
 /** One lead, or null when it isn't the business's (RLS shows nothing) or doesn't exist. */

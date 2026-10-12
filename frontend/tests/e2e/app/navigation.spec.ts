@@ -13,6 +13,7 @@ const SECTIONS = [
   { link: "Leads", path: "/dashboard/leads", heading: "Leads" },
   // The calendar's heading is the day it shows (today, in the business's time zone).
   { link: "Calendar", path: "/dashboard/calendar", heading: /^(Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day \d{1,2} [A-Z][a-z]{2}$/ },
+  { link: "Features", path: "/dashboard/features", heading: "Features" },
   { link: "Knowledge base", path: "/dashboard/knowledge", heading: "Knowledge base" },
   { link: "Booking setup", path: "/dashboard/settings/booking", heading: "Booking setup" },
   { link: "Team", path: "/dashboard/team", heading: "Team" },

@@ -62,9 +62,9 @@ test.describe("Leads board · more than one page", () => {
     const reads = leadsReads(page);
     await open(page, account, "/dashboard/leads", "Leads");
     await expect(cards(page)).toHaveCount(200);
-    await expect(page.getByText(/Showing the 200 most recently updated leads/)).toBeVisible();
-    // Counts over what is loaded are minimums while older leads remain.
-    await expect(page.getByRole("group", { name: "Temperature" }).getByRole("button", { name: "All · 200+" })).toBeVisible();
+    await expect(page.getByText("Showing 200 of 450 leads, most recently updated first.")).toBeVisible();
+    // The counts are the database's, for the whole business, not a minimum over the 200 loaded.
+    await expect(page.getByRole("group", { name: "Temperature" }).getByRole("button", { name: "All · 450" })).toBeVisible();
 
     // The board subscribes to Realtime and reads its first page once more when the join succeeds (to catch what it missed). Let that
     // read land before paging, so the reads below are in a known order.
@@ -77,34 +77,37 @@ test.describe("Leads board · more than one page", () => {
     await loadMore(page).click();
     await expect(cards(page)).toHaveCount(450);
     await expect(loadMore(page)).toHaveCount(0);
-    await expect(page.getByText(/Showing the \d+ most recently updated leads/)).toHaveCount(0);
+    await expect(page.getByText(/Showing \d+ of \d+ leads/)).toHaveCount(0);
     await expect(page.getByRole("group", { name: "Temperature" }).getByRole("button", { name: "All · 450" })).toBeVisible();
 
-    // Never "everything at once": the first page is read twice (the first read, then the catch-up after Realtime joined), and the two
-    // later pages ask for what is older, by cursor.
+    // Never "everything at once": the first page is read from the start (and once more if the catch-up after Realtime joined ran), and the
+    // two later pages ask for what is older, by cursor.
     const pageReads = reads.filter((u) => u.searchParams.get("limit") === "200");
-    expect(pageReads.map(isKeyset)).toEqual([false, false, true, true]);
+    expect(isKeyset(pageReads[0])).toBe(false);
+    expect(pageReads.filter(isKeyset)).toHaveLength(2);
+    expect(pageReads.filter((u) => !isKeyset(u)).length).toBeLessThanOrEqual(2);
     // Nobody appears twice and nobody is missing.
     const names = await cards(page).allInnerTexts();
     expect(new Set(names).size).toBe(450);
   });
 
-  test("the same filter applies to every page: leads loaded later are filtered and counted too", async ({ page, request }) => {
+  test("a filter is applied by the database: the counts cover every lead, and a filter that matches nothing says so", async ({ page, request }) => {
     const account = await newDay3Account(request, { manyLeads: 450 });
     await open(page, account, "/dashboard/leads", "Leads");
     const temperature = page.getByRole("group", { name: "Temperature" });
-    await expect(temperature.getByRole("button", { name: "Not scored · 200+" })).toBeVisible();
-    await temperature.getByRole("button", { name: /^Not scored/ }).click();
-    await expect(cards(page)).toHaveCount(200);
-    await page.getByLabel("Score at least").fill("10");
-    await expect(page.getByText("No leads match these filters")).toBeVisible();
-    // With older leads unread, it says so rather than claiming there are none.
-    await expect(page.getByText("None of the leads loaded so far match")).toBeVisible();
-    await page.getByRole("button", { name: "Clear filters" }).first().click();
-    await loadMore(page).click();
-    await loadMore(page).click();
+    // All 450 leads are unscored; the count is exact although only 200 are loaded.
     await expect(temperature.getByRole("button", { name: "Not scored · 450" })).toBeVisible();
     await temperature.getByRole("button", { name: /^Not scored/ }).click();
+    await expect(page.getByText("Showing 200 of 450 matching leads, most recently updated first.")).toBeVisible();
+    await expect(cards(page)).toHaveCount(200);
+    // A minimum score leaves out unscored leads, in the database: nothing matches, and that is the whole business, not a guess.
+    await page.getByLabel("Score at least").fill("10");
+    await expect(page.getByText("No leads match these filters")).toBeVisible();
+    await expect(page.getByText(/Load more to look through older ones/)).toHaveCount(0);
+    await page.getByRole("button", { name: "Clear filters" }).first().click();
+    await expect(cards(page)).toHaveCount(200);
+    await loadMore(page).click();
+    await loadMore(page).click();
     await expect(cards(page)).toHaveCount(450);
   });
 

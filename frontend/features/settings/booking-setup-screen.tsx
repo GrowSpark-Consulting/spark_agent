@@ -4,6 +4,7 @@ import type { Role } from "@pakka/types";
 import { useEffect } from "react";
 import { FlashStatus, useFlash } from "@/features/knowledge/flash";
 import { ServicesEditor } from "@/features/knowledge/services-editor";
+import { BookingServiceSection } from "./booking-service-section";
 import { BusinessHoursSection } from "./business-hours-section";
 import type { CalendarOutcome } from "./google-calendar";
 import { ResourcesSection } from "./resources-section";
@@ -47,6 +48,7 @@ export function BookingSetupScreen({
       <BusinessHoursSection tenantId={tenantId} canWrite={canWrite} onSaved={flash} />
       <ResourcesSection tenantId={tenantId} canWrite={canWrite} onSaved={flash} calendarReturn={calendarReturn} />
       <ServicesEditor tenantId={tenantId} canWrite={canWrite} />
+      <BookingServiceSection tenantId={tenantId} canWrite={canWrite} onSaved={flash} />
       <FlashStatus toast={toast} />
     </div>
   );

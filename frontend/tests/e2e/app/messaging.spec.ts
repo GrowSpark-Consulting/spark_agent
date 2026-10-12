@@ -83,6 +83,17 @@ test.describe("send test message: errors agreed with Dev 2", () => {
     await page.getByLabel("Recipient's WhatsApp number").fill("+919840012345");
   });
 
+  test("a 200 whose body isn't an accepted message is not shown as sent", async ({ page }) => {
+    await page.route("**/api/messages/test", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) }));
+    await page.getByRole("button", { name: "Send test message" }).click();
+    const alert = appAlert(page);
+    await expect(alert).toContainText("Couldn't confirm the message");
+    await expect(alert).toContainText("Check the phone before sending it again.");
+    await expect(alert.getByRole("button", { name: "Try again" })).toHaveCount(0); // it may have gone: no one-click resend
+    await expect(page.getByText(/WhatsApp accepted the message \(ID /)).toHaveCount(0);
+    await expect(page.getByText(/Sent to/)).toHaveCount(0);
+  });
+
   test("outside the 24-hour window", async ({ page }) => {
     await page.route("**/api/messages/test", (route) =>
       route.fulfill({
@@ -205,6 +216,16 @@ test.describe("create template", () => {
     await expect(page.getByRole("status").filter({ hasText: "booking_confirmed_v1" })).toContainText(
       "(English) was submitted to Meta and is waiting for review.",
     );
+  });
+
+  test("a 200 whose body isn't a template is not shown as submitted", async ({ page }) => {
+    await page.route("**/api/templates", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) }));
+    await fillValid(page);
+    await page.getByRole("button", { name: "Submit for review" }).click();
+    const alert = appAlert(page);
+    await expect(alert).toContainText("Couldn't confirm the template");
+    await expect(alert).toContainText("Check your templates before submitting it again.");
+    await expect(page.getByText(/was submitted to Meta|was saved as a draft/)).toHaveCount(0);
   });
 
   test("says when the backend only saved a draft", async ({ page }) => {

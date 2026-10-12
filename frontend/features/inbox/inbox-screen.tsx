@@ -9,11 +9,14 @@ import {
   applyConversationChange,
   applyHandoffChange,
   applyMessageToList,
+  CONVERSATION_LIMIT,
+  fetchConversation,
   fetchConversations,
   fetchMessages,
   matchesFilter,
   matchesSearch,
   ReadSequencer,
+  sortConversations,
   upsertMessage,
   type ChatMessage,
   type ConversationSummary,
@@ -77,14 +80,19 @@ export function InboxScreen({
     const reads = sequencerFor(listReads.current, "list");
     const seq = reads.start();
     try {
-      const fetched = await fetchConversations(getSupabaseBrowserClient(), tenantId);
-      const items = reads.finish(seq, fetched);
-      if (items) setList({ status: "ready", items });
+      const client = getSupabaseBrowserClient();
+      const newest = await fetchConversations(client, tenantId);
+      // A link can name a chat older than the newest page (a staff alert, a takeover link); read it by id so it still opens.
+      // Best effort: if that read fails the list still shows, and the chat simply isn't selected.
+      const linked =
+        initialChatId && !newest.some((c) => c.id === initialChatId) ? await fetchConversation(client, tenantId, initialChatId).catch(() => null) : null;
+      const items = reads.finish(seq, linked ? sortConversations([...newest, linked]) : newest);
+      if (items) setList({ status: "ready", items, truncated: newest.length >= CONVERSATION_LIMIT });
     } catch (err) {
       // A failed refresh keeps what's on screen; only a failed first load shows the error.
       if (reads.fail(seq)) setList((prev) => (prev.status === "ready" ? prev : { status: "error", error: formatError(err) }));
     }
-  }, [tenantId]);
+  }, [tenantId, initialChatId]);
 
   const loadChat = useCallback(
     async (conversationId: string) => {

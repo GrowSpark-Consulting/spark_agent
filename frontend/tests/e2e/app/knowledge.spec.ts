@@ -595,7 +595,9 @@ test.describe("Knowledge base · documents", () => {
     let reads = (await kbReads(request, account.email)).length;
     for (let i = 0; i < 100; i += 1) {
       await page.clock.runFor(3_000);
-      await expect.poll(async () => (await kbReads(request, account.email)).length).toBe(reads + 1);
+      // A short back-off: the default one (100 ms before the second look) is paid on each of the 100 rounds and was most of this
+      // test's 20 s against a 30 s limit. Every round still waits for its own read and checks the exact count.
+      await expect.poll(async () => (await kbReads(request, account.email)).length, { intervals: [20, 50, 100, 250] }).toBe(reads + 1);
       reads += 1;
     }
     await expect(docsRegion(page)).toContainText("Still processing");

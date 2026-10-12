@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { RefreshControl } from "@/components/shared/refresh-control";
 import { EmptyState, ErrorState, LoadingState } from "@/components/shared/states";
 import { bookingTitle, effectiveStatus, isActive, STATUS_LABEL, STATUS_STYLE } from "@/features/calendar/bookings";
 import { formatDate, formatTime, formatWhen, localParts } from "@/features/calendar/time";
 import { formatError, type FormattedError } from "@/lib/errors";
+import { useTableRefresh } from "@/lib/realtime/use-table-refresh";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   answerRows,
@@ -48,16 +50,55 @@ export function LeadDetail({ tenantId, timeZone, leadId, userId }: { tenantId: s
   const [leadState, setLeadState] = useState<LeadState>({ status: "loading" });
   const [packFields, setPackFields] = useState<PackFieldInfo[]>([]);
   const [activity, setActivity] = useState<ActivityState>({ status: "loading" });
-  const [now] = useState(() => new Date());
+  /** When the activity on screen was read: held bookings are judged against it (a hold that lapsed is not an appointment). */
+  const [now, setNow] = useState(() => new Date());
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const refreshInFlight = useRef(false);
 
   const loadActivity = useCallback(
-    (lead: Lead) =>
-      fetchLeadActivity(getSupabaseBrowserClient(), tenantId, lead, now, timeZone).then(
-        (a) => setActivity({ status: "ready", activity: a }),
+    (lead: Lead) => {
+      const at = new Date();
+      return fetchLeadActivity(getSupabaseBrowserClient(), tenantId, lead, at, timeZone).then(
+        (a) => {
+          setNow(at);
+          setActivity({ status: "ready", activity: a });
+        },
         (err: unknown) => setActivity({ status: "error", error: formatError(err) }),
-      ),
-    [tenantId, now, timeZone],
+      );
+    },
+    [tenantId, timeZone],
   );
+
+  // Reads the lead and its activity again without clearing the screen. Both are read before anything is replaced, so a
+  // failure on either leaves what is shown exactly as it was and only says so (RefreshControl); one refresh runs at a time.
+  const refresh = useCallback(async () => {
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
+    setRefreshing(true);
+    try {
+      const client = getSupabaseBrowserClient();
+      const at = new Date();
+      const lead = await fetchLead(client, tenantId, leadId);
+      if (!lead) {
+        setLeadState({ status: "missing" }); // removed since it was opened
+        return;
+      }
+      const fresh = await fetchLeadActivity(client, tenantId, lead, at, timeZone);
+      setLeadState({ status: "ready", lead });
+      setActivity({ status: "ready", activity: fresh });
+      setNow(at);
+      setRefreshFailed(false);
+    } catch {
+      setRefreshFailed(true);
+    } finally {
+      refreshInFlight.current = false;
+      setRefreshing(false);
+    }
+  }, [tenantId, leadId, timeZone]);
+
+  // `leads` and `bookings` aren't in the supabase_realtime publication yet, so this reports "not live" until they are.
+  const live = useTableRefresh(tenantId, ["leads", "bookings"], refresh);
 
   const load = useCallback(() => {
     const client = getSupabaseBrowserClient();
@@ -129,6 +170,8 @@ export function LeadDetail({ tenantId, timeZone, leadId, userId }: { tenantId: s
           </Link>
         ) : null}
       </div>
+
+      <RefreshControl live={live} refreshing={refreshing} failed={refreshFailed} onRefresh={() => void refresh()} />
 
       <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
         <div style={{ fontSize: "11px", letterSpacing: ".1em", textTransform: "uppercase", fontWeight: 600, color: "var(--color-neutral-700)" }}>Stage</div>

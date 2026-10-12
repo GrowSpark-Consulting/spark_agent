@@ -55,7 +55,7 @@ test.describe("Calendar", () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test("booking details are read-only and open the lead", async ({ page, request }) => {
+  test("booking details open the lead and the browser writes no table", async ({ page, request }) => {
     const account = await newDay3Account(request, { seed: true });
     await openDay(page, account);
     await booking(page, "Karthik R", "10:00 am – 11:00 am", "Confirmed").click();
@@ -64,7 +64,8 @@ test.describe("Calendar", () => {
     await expect(details.getByRole("definition")).toHaveText(["Mon 12 Oct, 10:00 am – 11:00 am", "1 h", "Consultation", "Asha", "Appointment"]);
     await expect(details).toContainText("+91 98xxx xxx21");
     await expect(details.getByRole("link", { name: "Open lead" })).toHaveAttribute("href", `/dashboard/leads/${account.ids.karthik}`);
-    await expect(details.getByRole("button", { name: /reschedule|cancel|mark|visited|no-show/i })).toHaveCount(0);
+    // Changes go through the API (calendar-actions.spec.ts), never as table writes from the browser.
+    await expect(details.getByRole("button", { name: "Move to another time" })).toBeVisible();
 
     await details.getByRole("button", { name: "Close" }).click();
     await expect(panel(page)).toHaveCount(0);
@@ -74,7 +75,7 @@ test.describe("Calendar", () => {
     await page.keyboard.press("Escape");
     await expect(panel(page)).toHaveCount(0);
 
-    // Nothing in the calendar writes.
+    // The calendar reads under RLS and never writes a table itself.
     expect(await writesBy(request, account.email)).toEqual([]);
   });
 
