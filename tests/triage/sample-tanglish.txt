@@ -1,0 +1,21 @@
+# Synthetic Tanglish lines for trying the triage harness (pnpm triage:chats tests/triage/sample-tanglish.txt).
+# Nothing here is a real customer. Real chats go in tests/triage/private/, which git ignores.
+
+# name: Price and visit, Tanglish
+anna Velachery la 2BHK price enna?
+budget 60 lakh dhan, 3 maasathula vaanganum
+site visit eppo poga mudiyum?
+
+# name: Plain Tamil script
+வணக்கம், 2BHK விலை என்ன?
+வெளச்சேரி பக்கத்துல இருக்கா?
+
+# name: Wants a person
+enna panreenga, yaaravadhu pesunga please
+unga rate romba jaasthi, konjam kuraikka mudiyuma?
+
+# name: Moving a visit
+naalaikku visit irukku, monday evening ku maathidalaama?
+
+# name: Stop
+STOP

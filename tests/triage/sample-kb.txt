@@ -1,0 +1,5 @@
+# The fake knowledge base the triage harness uses when --kb is not given. Synthetic facts, one per line.
+A 2BHK of 950 sq ft in Velachery starts at ₹78 lakh.
+A 3BHK of 1350 sq ft in Velachery starts at ₹1.05 crore.
+Site visits are held every day between 10 am and 6 pm.
+The project has a clubhouse, a children's play area and covered parking.

@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:conversations": "tsx --env-file-if-exists=.env.local src/conversation-tests/cli.ts",
+    "triage:chats": "tsx --env-file-if-exists=.env.local src/conversation-tests/triage.ts",
     "seed:connection": "tsx --env-file-if-exists=.env.local src/scripts/seed-connection.ts",
     "packs:sync": "tsx --env-file-if-exists=.env.local src/scripts/sync-packs.ts"
   },

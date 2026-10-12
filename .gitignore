@@ -25,6 +25,9 @@ out/
 # production
 /build
 
+# real customer chats for the triage harness (tests/triage/README.md): never committed
+tests/triage/private/
+
 # misc
 .DS_Store
 *.pem
