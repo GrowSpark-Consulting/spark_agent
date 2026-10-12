@@ -225,8 +225,8 @@ UI: day / week, filter by staff (resource), booking detail, reschedule (pick slo
     mark visited, mark no-show, undo
   ↓ data: Resource[], Booking[], Slot[]
   ↓ API: RLS READ bookings + resources + services (range query)
-        GET  /api/bookings/:id/slots                              PROPOSED · Dev 2 (findSlots)
-        POST /api/bookings/:id/(reschedule|cancel|complete|no-show) HANDOVER · Dev 2
+        GET  /api/bookings/:id/slots                              BUILT · Dev 2 (findSlots; → { slots })
+        POST /api/bookings/:id/(reschedule|cancel|complete|no-show) BUILT · Dev 2 (docs/contracts.md, section 4)
   ↓ loading: grid skeleton · empty: empty day columns · error: slot_taken → refresh slots
   ↓ permission: all; staff act on their own resource
   ↓ plan: none

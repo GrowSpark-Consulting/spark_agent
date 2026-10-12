@@ -7,8 +7,8 @@ const { createCoalescer, REFRESH_WAIT_MS, RESUBSCRIBE_MIN_GAP_MS, subscribeToTab
 
 // The "read again when something changed" layer, against a fake Realtime client and fake timers. It shows the logic:
 // which tables are subscribed, that bursts become one read, that nothing outlives the screen, and that another business's
-// change is ignored. It does NOT show that a real Supabase delivers anything: the tables the screens care about
-// (leads, bookings) are not in the publication yet, and only staging can show events arriving.
+// change is ignored. It does NOT show that a real Supabase delivers anything: leads and bookings joined the publication
+// in 0026, and only staging can show events arriving.
 
 const TENANT = "a0000000-0000-4000-8000-00000000000a";
 const OTHER = "b0000000-0000-4000-8000-00000000000b";
@@ -77,7 +77,7 @@ function open(over: Partial<Parameters<typeof subscribeToTableChanges>[0]> = {})
 
 describe("which tables are subscribed", () => {
   it("subscribes to nothing for tables the database doesn't publish, and says updates aren't live", async () => {
-    const { channels, states, onRefresh } = open({ tables: ["leads", "bookings"] });
+    const { channels, states, onRefresh } = open({ tables: ["contacts", "quotes"] });
     await tick(1000);
     expect(channels).toHaveLength(0);
     expect(states).toEqual(["unavailable"]);
@@ -85,7 +85,7 @@ describe("which tables are subscribed", () => {
   });
 
   it("subscribes only to the published ones when some are asked for, for this business only, on every kind of change", async () => {
-    const { channels } = open({ tables: ["leads", "messages", "handoffs"] });
+    const { channels } = open({ tables: ["contacts", "messages", "handoffs"] });
     await tick();
     expect(channels).toHaveLength(1);
     expect(channels[0].topic).toBe(`realtime:refresh:board:${TENANT}`);
