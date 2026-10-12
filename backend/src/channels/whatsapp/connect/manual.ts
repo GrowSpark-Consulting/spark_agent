@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { ManualConnectInput, WhatsAppConnectionPublic } from "@pakka/types";
 import { z } from "zod";
 import { connectionSecretContext, encryptSecret } from "../../../lib/crypto";
@@ -6,7 +6,7 @@ import { serverEnv } from "../../../lib/env";
 import { writeAudit, type AuditEntry } from "../../../lib/audit";
 import { AppError, zodFieldErrors } from "../../../lib/errors";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
-import { graph as realGraph, runGraphChecks, withTestMessage, type Check, type Graph, type LastCheck, type NumberFacts } from "./checks";
+import { graph as realGraph, isExpiredTokenAnswer, runGraphChecks, withTestMessage, type Check, type Graph, type LastCheck, type NumberFacts } from "./checks";
 import { checkTestMessage } from "./test-message-check";
 import { webhookWasSeen } from "./webhook-seen";
 
@@ -61,7 +61,7 @@ export interface ManualConnectDb {
 export type NumberInfo = { displayPhone: string | null; verifiedName: string | null; qualityRating: string | null; facts?: NumberFacts };
 export type MetaProbe =
   | { state: "ok"; info: NumberInfo; numberInAccount: boolean }
-  | { state: "rejected" } // Meta answered, and the token or ids are not accepted
+  | { state: "rejected"; reason?: "token_expired" } // Meta answered, and the token or ids are not accepted; `token_expired` when Meta says the token itself has expired or is no longer valid
   | { state: "unreachable" }; // we could not get an answer
 
 export type ManualConnectDeps = {
@@ -80,6 +80,16 @@ export type ManualConnectDeps = {
   testMessage: (tenantId: string, actor: string) => Promise<Check>;
 };
 
+const PLATFORM_APP_SECRET_MESSAGE = "This is Spark Agent's own Meta app, which our team connects, not this form. Enter the app secret of the business's own Meta app.";
+
+/** Whether `secret` is the app secret of Spark Agent's own Meta app (`META_APP_SECRET`), compared in constant time. False when ours is not set. */
+function isPlatformAppSecret(secret: string): boolean {
+  const platform = serverEnv().META_APP_SECRET;
+  if (!platform) return false;
+  const digest = (value: string) => createHash("sha256").update(value, "utf8").digest();
+  return timingSafeEqual(digest(secret), digest(platform));
+}
+
 /**
  * Asks the Graph API, with the client's token, whether the number is reachable and belongs to the account.
  * UNVERIFIED against a live Meta account: the two reads and their field names follow Meta's Cloud API
@@ -97,12 +107,13 @@ export async function probeMeta(args: { wabaId: string; phoneNumberId: string; t
   try {
     const number = await get(`${args.phoneNumberId}?fields=display_phone_number,verified_name,quality_rating,name_status,platform_type`);
     if (number.status >= 500 || number.status === 429) return { state: "unreachable" };
-    if (!number.ok) return { state: "rejected" };
+    if (!number.ok) return isExpiredTokenAnswer(number.status, number.body) ? { state: "rejected", reason: "token_expired" } : { state: "rejected" };
     const n = (number.body ?? {}) as Record<string, unknown>;
     const text = (v: unknown) => (typeof v === "string" && v !== "" ? v : null);
 
     const account = await get(`${args.wabaId}/phone_numbers?fields=id&limit=100`);
     if (account.status >= 500 || account.status === 429) return { state: "unreachable" };
+    if (!account.ok && isExpiredTokenAnswer(account.status, account.body)) return { state: "rejected", reason: "token_expired" };
     const list = account.ok ? ((account.body as { data?: { id?: unknown }[] } | null)?.data ?? []) : [];
     return {
       state: "ok",
@@ -143,6 +154,10 @@ export async function connectManual(
   if (!parsed.success) throw new AppError("validation_failed", "Some details need fixing.", zodFieldErrors(parsed.error));
   const input = parsed.data;
 
+  // Spark Agent's own app is connected by the team, never here: its webhooks are signed with META_APP_SECRET, so a connection saved with that secret would have
+  // every message dropped on purpose (inbound.ts trusts a manual_byo connection only on its own secret).
+  if (isPlatformAppSecret(input.appSecret)) throw new AppError("validation_failed", "Some details need fixing.", { appSecret: PLATFORM_APP_SECRET_MESSAGE });
+
   if (!(await deps.db.tenantExists(input.tenantId))) throw new AppError("not_found", "We couldn't find that business.");
 
   // A number is connected to one business at a time. Our own failed, disconnected or pending row may be retried in place.
@@ -164,6 +179,7 @@ export async function connectManual(
       token: input.token,
       method: "manual_byo",
       accepted: probe.state === "ok",
+      tokenExpired: probe.state === "rejected" && probe.reason === "token_expired",
       inAccount: probe.state === "ok" && probe.numberInAccount,
       facts: { nameStatus: info.facts?.nameStatus ?? null, platformType: info.facts?.platformType ?? null },
       webhookSeen: () => deps.webhookSeen(input.tenantId, id),

@@ -37,6 +37,7 @@ export const SAFE = {
   tokenPass: "Meta accepted the access token for this number.",
   tokenFail: "Meta did not accept the access token or the Phone number ID. Check both, and that the token can manage this WhatsApp account.",
   tokenScopes: "The access token is missing a WhatsApp permission. It needs both whatsapp_business_management and whatsapp_business_messaging.",
+  tokenExpired: "The access token has expired or is no longer valid. Create a new one in Meta and connect the number again.",
   tokenUnknown: "Meta accepted the token, but we could not confirm which permissions it has.",
   numberPass: "The number belongs to this WhatsApp Business Account and is set up for the Cloud API.",
   numberNotInAccount: "This number isn't in that WhatsApp Business Account. Check the Account ID and the Phone number ID.",
@@ -67,13 +68,22 @@ export interface NumberFacts {
   platformType: string | null;
 }
 
-/** 1. The token is valid and carries both WhatsApp permissions (`debug_token`, asked with the token itself). */
-export async function checkToken(args: { token: string; accepted: boolean }, call: Graph, now: Date): Promise<Check> {
-  if (!args.accepted) return make("token_permissions", "fail", SAFE.tokenFail, now);
+/** Meta's way of saying a token has expired or is no longer valid: OAuth error code 190 in the body, or HTTP 401. Nothing else counts. */
+export function isExpiredTokenAnswer(status: number, body: unknown): boolean {
+  return status === 401 || asRecord(asRecord(body).error).code === 190;
+}
+
+/** 1. The token is valid and carries both WhatsApp permissions (`debug_token`, asked with the token itself). `expired` is set when the number's own read was refused as an expired token. */
+export async function checkToken(args: { token: string; accepted: boolean; expired?: boolean }, call: Graph, now: Date): Promise<Check> {
+  if (!args.accepted) return make("token_permissions", "fail", args.expired ? SAFE.tokenExpired : SAFE.tokenFail, now);
   const answer = await call("GET", `debug_token?input_token=${encodeURIComponent(args.token)}`, args.token);
+  if (answer.state === "answered" && !answer.ok && isExpiredTokenAnswer(answer.status, answer.body)) return make("token_permissions", "fail", SAFE.tokenExpired, now);
   if (answer.state !== "answered" || !answer.ok) return make("token_permissions", "not_verified", SAFE.tokenUnknown, now);
   const data = asRecord(asRecord(answer.body).data);
-  if (data.is_valid === false) return make("token_permissions", "fail", SAFE.tokenFail, now);
+  if (data.is_valid === false) {
+    const ranOut = typeof data.expires_at === "number" && data.expires_at > 0 && data.expires_at * 1000 <= now.getTime();
+    return make("token_permissions", "fail", ranOut || asRecord(data.error).code === 190 ? SAFE.tokenExpired : SAFE.tokenFail, now);
+  }
   if (!Array.isArray(data.scopes)) return make("token_permissions", "not_verified", SAFE.tokenUnknown, now);
   const scopes = new Set(data.scopes.map(String));
   return REQUIRED_SCOPES.every((s) => scopes.has(s)) ? make("token_permissions", "pass", SAFE.tokenPass, now) : make("token_permissions", "fail", SAFE.tokenScopes, now);
@@ -138,6 +148,8 @@ export interface GraphChecksInput {
   method: string;
   /** The Graph answered for the number and the account (manual.ts `probeMeta`). */
   accepted: boolean;
+  /** Meta refused the number's read because the token has expired (only meaningful when `accepted` is false). */
+  tokenExpired?: boolean;
   inAccount: boolean;
   facts: NumberFacts;
   webhookSeen: () => Promise<boolean>;
@@ -146,7 +158,7 @@ export interface GraphChecksInput {
 /** The first five checks, in the contract's order, and the sixth as "not checked yet". The checks are independent: one failing never hides another. */
 export async function runGraphChecks(input: GraphChecksInput, call: Graph, now: Date): Promise<LastCheck> {
   const [token, webhook, payment] = await Promise.all([
-    checkToken({ token: input.token, accepted: input.accepted }, call, now),
+    checkToken({ token: input.token, accepted: input.accepted, expired: input.tokenExpired === true }, call, now),
     input.accepted ? checkWebhook({ wabaId: input.wabaId, token: input.token, method: input.method, webhookSeen: input.webhookSeen }, call, now) : Promise.resolve(make("webhook_subscribed", "skipped", SAFE.later, now)),
     input.accepted ? checkPayment({ wabaId: input.wabaId, token: input.token }, call, now) : Promise.resolve(make("payment_method", "skipped", SAFE.later, now)),
   ]);

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { checkDisplayName, checkNumber, checkPayment, checkToken, checkWebhook, overallOf, runGraphChecks, SAFE, withTestMessage, type Check, type Graph, type GraphAnswer } from "./checks";
+import { checkDisplayName, checkNumber, checkPayment, checkToken, checkWebhook, isExpiredTokenAnswer, overallOf, runGraphChecks, SAFE, withTestMessage, type Check, type Graph, type GraphAnswer } from "./checks";
 
 // The six validation checks (Day 5): what each one answers for each thing Meta can say, in fixed words. Nothing Meta says and no token is ever in a message.
 
@@ -151,5 +151,43 @@ describe("all of them together", () => {
   it("no message in any result holds the token", async () => {
     const last = await runGraphChecks(input, healthy, NOW);
     expect(JSON.stringify(last)).not.toContain(TOKEN);
+  });
+});
+
+describe("1. token: one that has expired (Meta error 190 or HTTP 401)", () => {
+  const expired = (text: string) => expect(text).toBe(SAFE.tokenExpired);
+
+  it("says so, in fixed words, when the number's own read was refused as expired", async () => {
+    const refused = vi.fn();
+    const c = await checkToken({ token: TOKEN, accepted: false, expired: true }, refused, NOW);
+    expect(c).toMatchObject({ key: "token_permissions", status: "fail" });
+    expired(c.message);
+    expect(refused).not.toHaveBeenCalled();
+  });
+
+  it("says so when debug_token answers with error 190, with HTTP 401, or with a token that is not valid and has run out", async () => {
+    for (const answer of [answered({ error: { code: 190, type: "OAuthException" } }, false, 400), answered({}, false, 401), answered({ data: { is_valid: false, error: { code: 190 } } }), answered({ data: { is_valid: false, expires_at: 1 } })]) {
+      const c = await checkToken({ token: TOKEN, accepted: true }, graphOf(answer), NOW);
+      expect(c.status).toBe("fail");
+      expired(c.message);
+    }
+  });
+
+  it("keeps the general message for a token that is not valid for another reason", async () => {
+    const c = await checkToken({ token: TOKEN, accepted: true }, graphOf(answered({ data: { is_valid: false } })), NOW);
+    expect(c.message).toBe(SAFE.tokenFail);
+  });
+
+  it("tells an expired answer from the rest: code 190 or HTTP 401 only", () => {
+    expect(isExpiredTokenAnswer(400, { error: { code: 190 } })).toBe(true);
+    expect(isExpiredTokenAnswer(401, null)).toBe(true);
+    expect(isExpiredTokenAnswer(400, { error: { code: 100 } })).toBe(false);
+    expect(isExpiredTokenAnswer(403, { error: { code: 10 } })).toBe(false);
+    expect(isExpiredTokenAnswer(200, { error: "190" })).toBe(false);
+    expect(isExpiredTokenAnswer(400, undefined)).toBe(false);
+  });
+
+  it("the message names no token and nothing Meta said, and tells the person what to do", () => {
+    expect(SAFE.tokenExpired).toBe("The access token has expired or is no longer valid. Create a new one in Meta and connect the number again.");
   });
 });

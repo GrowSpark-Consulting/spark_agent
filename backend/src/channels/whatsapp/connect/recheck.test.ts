@@ -84,6 +84,15 @@ describe("recheck", () => {
     expect(w.deps.testMessage).not.toHaveBeenCalled();
   });
 
+  it("a token that has expired makes the number `failed`, with the expired message, and sends no test message", async () => {
+    const w = world([row()], { probe: { state: "rejected", reason: "token_expired" } });
+    const result = await recheckConnection(context("owner"), CONN, w.deps);
+    expect(result.status).toBe("failed");
+    const first = (w.conn().last_check as { checks: { key: string; status: string; message: string }[] }).checks[0];
+    expect(first).toMatchObject({ key: "token_permissions", status: "fail", message: expect.stringContaining("expired or is no longer valid") });
+    expect(w.deps.testMessage).not.toHaveBeenCalled();
+  });
+
   it("a failed number that is now right becomes active again", async () => {
     const w = world([row({ status: "failed" })]);
     expect((await recheckConnection(context("owner"), CONN, w.deps)).status).toBe("active");

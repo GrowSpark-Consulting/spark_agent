@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { connectionSecretContext, decryptSecret, encryptSecret } from "../../../lib/crypto";
 import type { Check, Graph, GraphAnswer } from "./checks";
-import { connectManual, type ConnectionRecord, type ManualConnectDb, type MetaProbe } from "./manual";
+import { connectManual, probeMeta, type ConnectionRecord, type ManualConnectDb, type MetaProbe } from "./manual";
 
 const KEY = { ENCRYPTION_KEY: randomBytes(32).toString("base64") };
 vi.stubEnv("ENCRYPTION_KEY", KEY.ENCRYPTION_KEY);
@@ -12,6 +12,8 @@ vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "synthetic-anon-key");
 vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "synthetic-service-key");
 vi.stubEnv("EMBEDDINGS_API_KEY", "synthetic-embeddings-key");
 vi.stubEnv("ANTHROPIC_API_KEY", "synthetic-anthropic-key");
+const PLATFORM_SECRET = "synthetic0platform0app0secret";
+vi.stubEnv("META_APP_SECRET", PLATFORM_SECRET);
 
 const A = "a0000000-0000-4000-8000-00000000000a";
 const B = "b0000000-0000-4000-8000-00000000000b";
@@ -275,5 +277,83 @@ describe("the six checks when a number is connected", () => {
     const everything = JSON.stringify([result, s.updates, s.audit.mock.calls]);
     expect(everything).not.toContain(TOKEN);
     expect(everything).not.toContain(APP_SECRET);
+  });
+});
+
+describe("connectManual: the platform's own app", () => {
+  const platformInput = { ...INPUT, appSecret: PLATFORM_SECRET };
+
+  it("refuses an app secret that is Spark Agent's own, with a plain message on the app secret field, before Meta is asked or anything is saved", async () => {
+    const s = setup();
+    await expect(s.run(platformInput)).rejects.toMatchObject({
+      code: "validation_failed",
+      fields: { appSecret: expect.stringContaining("Spark Agent's own Meta app") },
+    });
+    expect(s.probeFn).not.toHaveBeenCalled();
+    expect(s.saved).toEqual([]);
+    expect(s.audit).not.toHaveBeenCalled();
+  });
+
+  it("never repeats the secret in the refusal", async () => {
+    const error = await setup().run(platformInput).catch((e: unknown) => e);
+    expect(JSON.stringify({ message: (error as Error).message, fields: (error as { fields?: unknown }).fields })).not.toContain(PLATFORM_SECRET);
+  });
+
+  it("connects a business's own app secret as before", async () => {
+    expect((await setup().run()).status).toBe("active");
+  });
+});
+
+describe("connectManual: an access token that has expired", () => {
+  it("is saved as failed, with the token check saying the token has expired or is no longer valid, and no test message", async () => {
+    const s = setup({ state: "rejected", reason: "token_expired" });
+    const result = await s.run();
+    expect(result.status).toBe("failed");
+    const checks = (result.last_check as { checks: { key: string; status: string; message: string }[] }).checks;
+    expect(checks[0]).toMatchObject({ key: "token_permissions", status: "fail", message: expect.stringContaining("expired or is no longer valid") });
+    expect(s.testMessage).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain(TOKEN);
+  });
+
+  it("a token Meta rejects for any other reason keeps the general message", async () => {
+    const result = await setup({ state: "rejected" }).run();
+    expect(JSON.stringify(result.last_check)).toContain("did not accept");
+    expect(JSON.stringify(result.last_check)).not.toContain("expired");
+  });
+});
+
+describe("probeMeta: what Meta says to the two reads", () => {
+  const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const probe = async (...answers: Response[]) => {
+    const fetchMock = vi.fn();
+    for (const a of answers) fetchMock.mockResolvedValueOnce(a);
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      return await probeMeta({ wabaId: INPUT.wabaId, phoneNumberId: INPUT.phoneNumberId, token: TOKEN });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  };
+  const NUMBER = { display_phone_number: "+91 98765 43210", verified_name: "Skyline Homes", quality_rating: "GREEN" };
+
+  it("reads an OAuth error 190 on the number's read as an expired token", async () => {
+    expect(await probe(reply(400, { error: { code: 190, message: "Error validating access token" } }))).toEqual({ state: "rejected", reason: "token_expired" });
+  });
+
+  it("reads HTTP 401 as an expired token", async () => {
+    expect(await probe(reply(401, {}))).toEqual({ state: "rejected", reason: "token_expired" });
+  });
+
+  it("reads an expired token on the account's read too, not as 'the number is not in the account'", async () => {
+    expect(await probe(reply(200, NUMBER), reply(400, { error: { code: 190 } }))).toEqual({ state: "rejected", reason: "token_expired" });
+  });
+
+  it("keeps any other refusal as plain rejected", async () => {
+    expect(await probe(reply(400, { error: { code: 100 } }))).toEqual({ state: "rejected" });
+    expect(await probe(reply(403, { error: { code: 10 } }))).toEqual({ state: "rejected" });
+  });
+
+  it("Meta being down is unreachable, not an expired token", async () => {
+    expect(await probe(reply(500, {}))).toEqual({ state: "unreachable" });
   });
 });
