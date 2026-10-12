@@ -179,6 +179,8 @@ export function InboxScreen({
 
   function setChatParam(id: string | null) {
     const url = new URL(window.location.href);
+    // `?conversation=` (staff alert links) is only the way in; from here the URL says `chat`, so it can't disagree.
+    url.searchParams.delete("conversation");
     if (id) url.searchParams.set("chat", id);
     else url.searchParams.delete("chat");
     window.history.replaceState(null, "", url);
