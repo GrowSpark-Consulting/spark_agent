@@ -36,3 +36,10 @@ For Dev 3: the `last_check` shape is unchanged; a missing subscription now arriv
 7. The stored result is checked only for the fields the update needs, and everything else is passed through, so a check this code does not know yet does not stop the clearing.
 
 For Dev 3: the stored `last_check` can now change without a call from the dashboard (the webhook check going from `not_verified` to `pass`, `overall` from `warn` to `pass`). The shape is unchanged. For Dev 2: nothing.
+
+## 4. Live run of the conversation chats, 12 Oct
+
+1. Chats 51, 55, 61, 63, 06 and 20 were run with the real models (`pnpm test:conversations -- --live`, one chat per command, fake sender and knowledge base, nothing on staging): 17 model calls in all, 5 of 6 passed.
+2. Chat 51 failed on wording only: the model wrote "10 am" and "3 pm" where the chat asked for "10:00 am" and "3:00 pm". The times, the booking and the calendar were right. Chat 51 now asserts the times with patterns in both modes (`matches`) and keeps the exact words under `mockOnly`; a live re-run of 51 passed (4 calls).
+3. Chat 63: the real model gave "the second one" an intent confidence of only 0.4. The booking was still right, because the code picks the slot, not the extraction.
+4. English only: nothing in this run says how the models handle Tamil or Tanglish.
