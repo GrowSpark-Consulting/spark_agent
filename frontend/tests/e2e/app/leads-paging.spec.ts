@@ -4,8 +4,9 @@ import { newDay3Account, open } from "../support/day3";
 
 // The Leads board beyond one page, its loading state and its Refresh button (mocked E2E: mock-supabase.mjs under RLS,
 // with page.route holding or breaking single requests). What this shows is the screen's behaviour. It does NOT show that
-// a real PostgREST accepts the paging filter on a real timestamptz, or that Realtime delivers lead changes: `leads` is not
-// in the supabase_realtime publication yet, so the board says it is not live and Refresh is the way to update.
+// a real PostgREST accepts the paging filter on a real timestamptz, or that a real Realtime server delivers lead changes. `leads`
+// is in the supabase_realtime publication (0026), so the board subscribes; the tests answer the socket with a stand-in
+// (support/realtime.ts), and realtime-refresh.spec.ts covers what a pushed change does.
 
 const board = (page: Page) => page.getByTestId("leads-board");
 const loadMore = (page: Page) => page.getByRole("button", { name: /Load more leads|Loading more leads…/ });
@@ -65,6 +66,12 @@ test.describe("Leads board · more than one page", () => {
     // Counts over what is loaded are minimums while older leads remain.
     await expect(page.getByRole("group", { name: "Temperature" }).getByRole("button", { name: "All · 200+" })).toBeVisible();
 
+    // The board subscribes to Realtime and reads its first page once more when the join succeeds (to catch what it missed). Let that
+    // read land before paging, so the reads below are in a known order.
+    await expect(page.getByText("Updating live.")).toBeVisible();
+    await page.waitForTimeout(900);
+    await expect(cards(page)).toHaveCount(200);
+
     await loadMore(page).click();
     await expect(cards(page)).toHaveCount(400);
     await loadMore(page).click();
@@ -73,9 +80,10 @@ test.describe("Leads board · more than one page", () => {
     await expect(page.getByText(/Showing the \d+ most recently updated leads/)).toHaveCount(0);
     await expect(page.getByRole("group", { name: "Temperature" }).getByRole("button", { name: "All · 450" })).toBeVisible();
 
-    // Three reads, never "everything at once": the first has no cursor, the others ask for what is older.
+    // Never "everything at once": the first page is read twice (the first read, then the catch-up after Realtime joined), and the two
+    // later pages ask for what is older, by cursor.
     const pageReads = reads.filter((u) => u.searchParams.get("limit") === "200");
-    expect(pageReads.map(isKeyset)).toEqual([false, true, true]);
+    expect(pageReads.map(isKeyset)).toEqual([false, false, true, true]);
     // Nobody appears twice and nobody is missing.
     const names = await cards(page).allInnerTexts();
     expect(new Set(names).size).toBe(450);
@@ -139,12 +147,12 @@ test.describe("Leads board · more than one page", () => {
 test.describe("Leads board · Refresh", () => {
   test.use({ storageState: SIGNED_OUT });
 
-  test("says the board isn't updating live (leads aren't published to Realtime yet) and reads again without clearing it", async ({ page, request }) => {
+  test("says the board is updating live, and Refresh still reads again without clearing it", async ({ page, request }) => {
     const account = await newDay3Account(request, { seed: true });
     const reads = leadsReads(page);
     await open(page, account, "/dashboard/leads", "Leads");
     await expect(board(page)).toBeVisible();
-    await expect(page.getByText("Not updating live. Use Refresh.")).toBeVisible();
+    await expect(page.getByText("Updating live.")).toBeVisible();
     const before = reads.length;
     const next = await hold(page);
     await page.getByRole("button", { name: "Refresh", exact: true }).click();

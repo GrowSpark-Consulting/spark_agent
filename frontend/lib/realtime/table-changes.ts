@@ -21,7 +21,12 @@ export type TableChangeState = "connecting" | "live" | "unavailable";
 export function createCoalescer(
   run: () => Promise<void> | void,
   waitMs: number,
-  timers: { set: typeof setTimeout; clear: typeof clearTimeout } = { set: setTimeout, clear: clearTimeout },
+  // Wrapped, not `{ set: setTimeout }`: a browser's setTimeout throws "Illegal invocation" when called as a method of another object
+  // (timers.set(...)), which stopped every refresh the moment a change or the first SUBSCRIBED arrived.
+  timers: { set: typeof setTimeout; clear: typeof clearTimeout } = {
+    set: ((handler: () => void, ms?: number) => setTimeout(handler, ms)) as typeof setTimeout,
+    clear: ((id?: ReturnType<typeof setTimeout>) => clearTimeout(id)) as typeof clearTimeout,
+  },
 ) {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let running = false;
