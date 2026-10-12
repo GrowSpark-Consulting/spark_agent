@@ -44,6 +44,7 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0025_set_tenant_feature` | `set_tenant_feature(tenant, key, enabled, settings, actor)`: plan check (PA403), `tenant_features` write and audit row in one transaction (service_role only; section 6, feature toggles) |
 | `0026_booking_actions` | `bookings.status_changed_at` (kept by a trigger); `complete_booking`, `mark_booking_no_show`, `staff_cancel_booking`, `staff_reschedule_booking`, each with its audit row (service_role only, section 4); `bookings` and `leads` in the Realtime publication |
 | `0027_plan_limits` | Triggers keep a business within its plan's seats (`memberships`, PA413) and WhatsApp numbers (`whatsapp_connections` not disconnected and not `platform`, PA403); each locks the business's row (FOR NO KEY UPDATE) before counting, so racing additions take turns (section 6, plan limits) |
+| `0028_owner_admin_writes` | `is_admin(tenant)` (security definer, callable by `authenticated`); services, resources, catalog_items and the tenant's settings are written by owners and admins only, as the screen inventory's role table says; staff keep reading them, moving leads and setting their own alert number |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -51,7 +52,7 @@ change, move, delete or add the other's rows, a signed-out visitor sees and adds
 where it was. It also checks the catalogue: RLS on every table; the only tables without `tenant_id` are `features`,
 `plans`, `platform_admins`, `tenants` and `vertical_packs`; every policy is for `authenticated` and checks
 `is_member(tenant_id)` (except a member editing their own `memberships` row); no `*_enc`, token-hash or secret column
-is readable from the browser; the browser can call only `is_member`; views are `security_invoker`; no browser role
+is readable from the browser; the browser can call only `is_member` and `is_admin`; views are `security_invoker`; no browser role
 can TRUNCATE. **A new business table needs one fixture row in that file**, or the suite fails.
 
 - `kb_chunks.embedding` is `vector(1024)`: Cohere `embed-multilingual-v3.0`, cosine distance (`<=>`).
@@ -66,11 +67,11 @@ can TRUNCATE. **A new business table needs one fixture row in that file**, or th
 
 | Table | Members can |
 |---|---|
-| `catalog_items` | read/write own tenant |
+| `catalog_items` | read own tenant; **owners and admins** write (0028) |
 | `quotes` | read/write own tenant; lead and catalog item must be in the same tenant |
-| `services`, `resources` | insert/update/delete own tenant |
+| `services`, `resources` | read own tenant; **owners and admins** insert/update/delete (0028) |
 | `leads` | update `stage`, `owner_user_id`, `outcome`, `fields` |
-| `tenants` | update `name`, `timezone`, `business_hours`, `agent_settings` |
+| `tenants` | **owners and admins** update `name`, `timezone`, `business_hours`, `agent_settings` (0028) |
 | `memberships` | update their own `whatsapp_phone`, `takeover_pref` |
 | `consent_logs` | read and insert own tenant (no update or delete) |
 
