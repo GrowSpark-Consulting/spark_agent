@@ -1,30 +1,29 @@
 import type { ConnectionMethod, ConnectionStatus, Role } from "@pakka/types";
+import { sendNoContent } from "@/lib/api/client";
 
-// What a member may do to a WhatsApp connection from the dashboard, and whether the API can do it
-// yet. The handover lists POST /api/whatsapp/connections/:id/recheck and /disconnect (module 10);
-// neither exists on the API today, so both services are null and the buttons say so instead of
-// pretending. To switch one on, set it here to a function that calls the API through
-// lib/api/client.ts; the UI needs no other change.
+// What a member may do to a WhatsApp connection from the dashboard, and how it is done: POST
+// /api/whatsapp/connections/:id/recheck and /disconnect (backend/src/channels/whatsapp/connect/recheck.ts), no body, the
+// business in X-Pakka-Tenant. Each answers 200 with the connection; the page re-reads it from whatsapp_connections_public
+// afterwards, so the answer isn't kept here. Errors: forbidden (staff, another business's connection, a Spark Agent number),
+// not_found, conflict (a check already running, or recheck on a disconnected number), upstream_failed (Meta unreachable;
+// the status is what it was before).
 
 export type ConnectionAction = "recheck" | "disconnect";
 
 /** Runs one action against the API. Resolves once the server has done it; throws ApiError if not. */
 export type ConnectionService = (args: { connectionId: string; tenantId: string }) => Promise<void>;
 
-export const CONNECTION_SERVICES: Record<ConnectionAction, ConnectionService | null> = {
-  recheck: null,
-  disconnect: null,
-};
+const connectionPath = (connectionId: string, action: ConnectionAction) => `/api/whatsapp/connections/${encodeURIComponent(connectionId)}/${action}` as const;
 
-/** Shown next to an action whose API endpoint doesn't exist yet. */
-export const UNAVAILABLE_REASON: Record<ConnectionAction, string> = {
-  recheck: "Recheck will be available when the connection service is switched on.",
-  disconnect: "Disconnecting will be available when the connection service is switched on.",
+export const CONNECTION_SERVICES: Record<ConnectionAction, ConnectionService> = {
+  recheck: ({ connectionId, tenantId }) => sendNoContent(connectionPath(connectionId, "recheck"), "POST", { tenantId }),
+  disconnect: ({ connectionId, tenantId }) => sendNoContent(connectionPath(connectionId, "disconnect"), "POST", { tenantId }),
 };
 
 // Recheck: owner or admin (handover module 10: "Dashboard, admin"). Disconnect: owner only
-// (docs/dashboard-screen-contracts.md, Settings). The handover's endpoint table says "Owner, admin"
-// for disconnect; the stricter rule applies until the team settles it. The API decides in the end.
+// (docs/dashboard-screen-contracts.md, Settings). The API allows owner and admin for both
+// (docs/whatsapp-connection-contract.md); the stricter rule for disconnect is this screen's choice until the team
+// settles it. The API decides in the end.
 const ROLES: Record<ConnectionAction, readonly Role[]> = {
   recheck: ["owner", "admin"],
   disconnect: ["owner"],

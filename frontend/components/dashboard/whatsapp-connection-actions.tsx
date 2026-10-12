@@ -1,16 +1,20 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorState } from "@/components/shared/states";
 import { DialogFrame } from "@/features/knowledge/dialog-frame";
-import { formatError, type FormattedError } from "@/lib/errors";
-import { CONNECTION_SERVICES, UNAVAILABLE_REASON, type ConnectionAction } from "@/lib/whatsapp/connection-actions";
+import { ApiError, formatError, type FormattedError } from "@/lib/errors";
+import { CONNECTION_SERVICES, type ConnectionAction } from "@/lib/whatsapp/connection-actions";
 
-// Recheck and Disconnect for one WhatsApp connection. Each runs through CONNECTION_SERVICES; while a
-// service is null (its API endpoint doesn't exist yet) the control is switched off and says why.
-// Nothing here changes what the page shows until the server has done it: on success the page is
-// re-read from whatsapp_connections_public.
+// Recheck and Disconnect for one WhatsApp connection (lib/whatsapp/connection-actions.ts). Disconnect asks first.
+// Nothing here changes what the page shows until the server has done it: on success the page is re-read from
+// whatsapp_connections_public, and the buttons stay off until that read is back. An answer that says the page was out of
+// date (a check already running, the number already disconnected, the connection gone) re-reads it too, so the screen
+// catches up with what the server holds.
+
+/** Errors that mean the page is showing an old state, not that the request was wrong. */
+const STALE = new Set(["conflict", "not_found", "forbidden"]);
 
 export function WhatsAppConnectionActions({
   connectionId,
@@ -24,26 +28,33 @@ export function WhatsAppConnectionActions({
   actions: ConnectionAction[];
 }) {
   const router = useRouter();
-  const hintId = useId();
   const [busy, setBusy] = useState<ConnectionAction | null>(null);
+  const [refreshing, startRefresh] = useTransition();
   const [error, setError] = useState<FormattedError | null>(null);
+  const [done, setDone] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // A ref, not state: two quick clicks must not both pass the check before a re-render.
+  const inFlight = useRef(false);
 
   if (actions.length === 0) return null;
-  const unavailable = actions.filter((a) => !CONNECTION_SERVICES[a]);
+  const locked = busy !== null || refreshing;
 
   async function run(action: ConnectionAction) {
-    const service = CONNECTION_SERVICES[action];
-    if (!service || busy) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(action);
     setError(null);
+    setDone(null);
     try {
-      await service({ connectionId, tenantId });
+      await CONNECTION_SERVICES[action]({ connectionId, tenantId });
       setConfirming(false);
-      router.refresh();
+      setDone(action === "recheck" ? "Rechecked. The checks below are up to date." : "Disconnected.");
+      startRefresh(() => router.refresh());
     } catch (err) {
       setError(formatError(err));
+      if (err instanceof ApiError && STALE.has(err.body.error.code)) startRefresh(() => router.refresh());
     } finally {
+      inFlight.current = false;
       setBusy(null);
     }
   }
@@ -52,27 +63,35 @@ export function WhatsAppConnectionActions({
     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
       <div className="app-actions">
         {actions.includes("recheck") ? (
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={!CONNECTION_SERVICES.recheck || busy !== null}
-            aria-describedby={CONNECTION_SERVICES.recheck ? undefined : `${hintId}-recheck`}
-            onClick={() => run("recheck")}
-          >
+          <button type="button" className="btn btn-secondary" disabled={locked} aria-busy={busy === "recheck" || undefined} onClick={() => void run("recheck")}>
             {busy === "recheck" ? "Rechecking…" : "Recheck connection"}
           </button>
         ) : null}
         {actions.includes("disconnect") ? (
-          <button type="button" className="btn btn-ghost" disabled={busy !== null} onClick={() => setConfirming(true)}>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={locked}
+            onClick={() => {
+              setError(null);
+              setDone(null);
+              setConfirming(true);
+            }}
+          >
             Disconnect
           </button>
         ) : null}
       </div>
-      {unavailable.map((a) => (
-        <p key={a} id={`${hintId}-${a}`} className="app-hint" style={{ margin: 0 }}>
-          {UNAVAILABLE_REASON[a]}
+      {busy === "recheck" ? (
+        <p role="status" className="app-hint" style={{ margin: 0 }}>
+          Asking Meta. This can take a few seconds.
         </p>
-      ))}
+      ) : null}
+      {done && !confirming ? (
+        <p role="status" className="app-hint" style={{ margin: 0 }}>
+          {done}
+        </p>
+      ) : null}
       {error && !confirming ? <ErrorState compact title={error.title} description={error.message} /> : null}
 
       {confirming ? (
@@ -82,20 +101,9 @@ export function WhatsAppConnectionActions({
               {displayPhone ?? "This number"} will stop sending and receiving messages through Spark Agent, and your
               assistant will stop replying from it. You can connect it again later.
             </div>
-            {CONNECTION_SERVICES.disconnect ? null : (
-              <p id={`${hintId}-confirm`} className="app-notice" style={{ margin: 0 }}>
-                {UNAVAILABLE_REASON.disconnect} Nothing has been changed.
-              </p>
-            )}
             {error ? <ErrorState compact title={error.title} description={error.message} /> : null}
             <div className="dialog-actions" style={{ justifyContent: "flex-start", flexWrap: "wrap" }}>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={!CONNECTION_SERVICES.disconnect || busy !== null}
-                aria-describedby={CONNECTION_SERVICES.disconnect ? undefined : `${hintId}-confirm`}
-                onClick={() => run("disconnect")}
-              >
+              <button type="button" className="btn btn-primary" disabled={locked} aria-busy={busy === "disconnect" || undefined} onClick={() => void run("disconnect")}>
                 {busy === "disconnect" ? "Disconnecting…" : "Disconnect number"}
               </button>
               <button type="button" className="btn btn-secondary" onClick={() => setConfirming(false)} disabled={busy === "disconnect"} autoFocus>

@@ -1,9 +1,15 @@
 import type { ConnectionStatus, Role } from "@pakka/types";
-import { describe, expect, it } from "vitest";
-import { CONNECTION_SERVICES, visibleActions } from "./connection-actions";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const sendNoContent = vi.fn();
+vi.mock("@/lib/api/client", () => ({ sendNoContent: (...args: unknown[]) => sendNoContent(...args) }));
+
+const { CONNECTION_SERVICES, visibleActions } = await import("./connection-actions");
 
 const STATUSES: ConnectionStatus[] = ["pending", "validating", "active", "failed", "disconnected"];
 const ROLES: Role[] = ["owner", "admin", "staff"];
+const CONNECTION = "30000000-0000-0000-0000-000000000001";
+const TENANT = "10000000-0000-0000-0000-000000000003";
 
 describe("visibleActions", () => {
   it("gives the owner recheck and disconnect on a working or broken connection", () => {
@@ -42,9 +48,34 @@ describe("visibleActions", () => {
 });
 
 describe("CONNECTION_SERVICES", () => {
-  it("has no service switched on until the API has the endpoints", () => {
-    // POST /api/whatsapp/connections/:id/recheck and /disconnect are not on the API yet. Switching
-    // one on here without the endpoint would make the button call a route that answers 404.
-    expect(CONNECTION_SERVICES).toEqual({ recheck: null, disconnect: null });
+  // A block body: a beforeEach that returns the mock would have vitest call it again as a cleanup.
+  beforeEach(() => {
+    sendNoContent.mockReset().mockResolvedValue(undefined);
+  });
+
+  it("recheck POSTs with no body to this connection's recheck route, for this business", async () => {
+    await CONNECTION_SERVICES.recheck({ connectionId: CONNECTION, tenantId: TENANT });
+    expect(sendNoContent).toHaveBeenCalledTimes(1);
+    expect(sendNoContent).toHaveBeenCalledWith(`/api/whatsapp/connections/${CONNECTION}/recheck`, "POST", { tenantId: TENANT });
+  });
+
+  it("disconnect POSTs with no body to this connection's disconnect route, for this business", async () => {
+    await CONNECTION_SERVICES.disconnect({ connectionId: CONNECTION, tenantId: TENANT });
+    expect(sendNoContent).toHaveBeenCalledWith(`/api/whatsapp/connections/${CONNECTION}/disconnect`, "POST", { tenantId: TENANT });
+  });
+
+  it("encodes the id, so a hostile one can't change the path", async () => {
+    await CONNECTION_SERVICES.recheck({ connectionId: "../x?y=1", tenantId: TENANT });
+    expect(sendNoContent.mock.calls[0][0]).toBe("/api/whatsapp/connections/..%2Fx%3Fy%3D1/recheck");
+  });
+
+  it("lets the API's error through, so the screen can show it", async () => {
+    const err = new Error("conflict");
+    sendNoContent.mockImplementation(() => Promise.reject(err));
+    const thrown = await CONNECTION_SERVICES.disconnect({ connectionId: CONNECTION, tenantId: TENANT }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(thrown).toBe(err);
   });
 });

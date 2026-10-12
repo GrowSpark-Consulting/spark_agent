@@ -2,10 +2,12 @@ import { getWhatsAppConnections, type ConnectionsResult } from "@pakka/backend/c
 import type { Role, WhatsAppConnectionPublic } from "@pakka/types";
 import { unstable_rethrow } from "next/navigation";
 import { WhatsAppConnectionActions } from "@/components/dashboard/whatsapp-connection-actions";
+import { WhatsAppConnectionChecks } from "@/components/dashboard/whatsapp-connection-checks";
 import { EmptyState, ErrorState } from "@/components/shared/states";
 import { getAuth } from "@/lib/auth/session";
 import { formatError } from "@/lib/errors";
 import { visibleActions } from "@/lib/whatsapp/connection-actions";
+import { parseLastCheck, webhookUnconfirmed } from "@/lib/whatsapp/last-check";
 
 const STATUS: Record<WhatsAppConnectionPublic["status"], { label: string; tone: "ok" | "warn" | "off"; detail: string }> = {
   active: { label: "Connected", tone: "ok", detail: "Your assistant replies to customers from this number." },
@@ -29,6 +31,14 @@ const STATUS: Record<WhatsAppConnectionPublic["status"], { label: string; tone: 
     tone: "off",
     detail: "This number no longer sends or receives messages through Spark Agent.",
   },
+};
+
+// An active number whose stored checks don't show a webhook from the business's app: it can send, but nothing proves that
+// customers' messages reach the assistant, so it is not called plainly "Connected" (lib/whatsapp/last-check.ts).
+const UNCONFIRMED: (typeof STATUS)["active"] = {
+  label: "Connected, webhook not confirmed",
+  tone: "warn",
+  detail: "Messages can be sent from this number, but we haven't confirmed that customers' messages reach your assistant yet. See the checks below.",
 };
 
 const METHOD: Record<WhatsAppConnectionPublic["method"], string> = {
@@ -88,8 +98,10 @@ export async function WhatsAppConnectionPanel({ tenantId, role, compact }: { ten
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <ul className="app-grid" style={{ listStyle: "none", margin: 0, padding: 0 }} aria-label="WhatsApp numbers">
         {result.connections.map((c) => {
-          const s = STATUS[c.status];
+          const last = parseLastCheck(c.last_check);
+          const s = c.status === "active" && webhookUnconfirmed(last) ? UNCONFIRMED : STATUS[c.status];
           const added = addedOn(c.created_at);
+          const actions = role ? visibleActions(c.status, role, c.method) : [];
           return (
             <li key={c.id} className="app-card" style={{ minWidth: 0 }}>
               <span className={`app-status app-status-${s.tone}`}>
@@ -129,14 +141,8 @@ export async function WhatsAppConnectionPanel({ tenantId, role, compact }: { ten
                       <dd style={{ fontFamily: "var(--font-mono, monospace)" }}>{c.phone_number_id}</dd>
                     </div>
                   </dl>
-                  {role ? (
-                    <WhatsAppConnectionActions
-                      connectionId={c.id}
-                      tenantId={tenantId}
-                      displayPhone={c.display_phone}
-                      actions={visibleActions(c.status, role, c.method)}
-                    />
-                  ) : null}
+                  <WhatsAppConnectionChecks lastCheck={last} canRecheck={actions.includes("recheck")} />
+                  {role ? <WhatsAppConnectionActions connectionId={c.id} tenantId={tenantId} displayPhone={c.display_phone} actions={actions} /> : null}
                 </>
               ) : null}
             </li>
