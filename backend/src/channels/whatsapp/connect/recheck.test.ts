@@ -154,7 +154,51 @@ describe("recheck", () => {
   it("is audited with who and what changed", async () => {
     const w = world([row({ status: "failed" })]);
     await recheckConnection(context("owner"), CONN, w.deps);
-    expect(w.audits).toEqual([{ action: "whatsapp_connection.rechecked", actor: USER, tenantId: A, diff: { from: "failed", to: "active" } }]);
+    expect(w.audits).toEqual([{ action: "whatsapp_connection.rechecked", actor: USER, tenantId: A, diff: { from: "failed", to: "active", subscribed: true } }]);
+  });
+
+  const emptyAccount = (post: GraphAnswer): Graph => {
+    let subscribed = false;
+    return async (method, path, token) => {
+      if (path.endsWith("/subscribed_apps") && method !== "DELETE") {
+        if (method === "POST") {
+          if (post.state === "answered" && post.ok) subscribed = true;
+          return post;
+        }
+        return answered({ data: subscribed ? [{ id: "1" }] : [] });
+      }
+      return healthy(method, path, token);
+    };
+  };
+
+  it("subscribes the app, with the connection's token, only when nothing is subscribed", async () => {
+    const w = world([row()], { graph: emptyAccount(answered({ success: true })) });
+    await recheckConnection(context("owner"), CONN, w.deps);
+    const seen = w.graph.mock.calls.filter(([, path]) => path.endsWith("/subscribed_apps")).map(([method]) => method);
+    expect(seen).toEqual(["GET", "POST", "GET"]);
+    expect(w.graph).toHaveBeenCalledWith("POST", "100/subscribed_apps", TOKEN);
+    expect(w.audits[0].diff).toMatchObject({ subscribed: true });
+  });
+
+  it("never posts to an account that has an app subscribed already", async () => {
+    const w = world();
+    await recheckConnection(context("owner"), CONN, w.deps);
+    expect(w.graph.mock.calls.some(([method]) => method === "POST")).toBe(false);
+  });
+
+  it("a failed subscribe never blocks: the number stays active with a warning, and the audit says subscribed: false", async () => {
+    const w = world([row()], { graph: emptyAccount(answered({ error: { code: 200 } }, false, 403)) });
+    const result = await recheckConnection(context("owner"), CONN, w.deps);
+    expect(result.status).toBe("active");
+    expect((w.conn().last_check as { checks: { key: string; status: string }[] }).checks[2]).toMatchObject({ key: "webhook_subscribed", status: "warn" });
+    expect(w.audits[0].diff).toMatchObject({ subscribed: false });
+  });
+
+  it("does not try when Meta rejected the token, and the audit says null: nothing was asked", async () => {
+    const w = world([row()], { probe: { state: "rejected" } });
+    await recheckConnection(context("owner"), CONN, w.deps);
+    expect(w.graph).not.toHaveBeenCalled();
+    expect(w.audits[0].diff).toMatchObject({ subscribed: null });
   });
 });
 

@@ -280,6 +280,79 @@ describe("the six checks when a number is connected", () => {
   });
 });
 
+describe("connectManual: subscribing the app (best effort)", () => {
+  const calls = (graph: Graph) => vi.fn(graph);
+
+  const refused: GraphAnswer = { state: "answered", ok: false, status: 403, body: { error: { code: 200 } } };
+  /** An account with nothing subscribed until the POST is accepted. */
+  const empty = (post: GraphAnswer): Graph => {
+    let subscribed = false;
+    return async (method, path, token) => {
+      if (path.endsWith("/subscribed_apps")) {
+        if (method === "POST") {
+          if (post.state === "answered" && post.ok) subscribed = true;
+          return post;
+        }
+        return answered({ data: subscribed ? [{ id: "1" }] : [] });
+      }
+      return healthyGraph(method, path, token);
+    };
+  };
+
+  it("an account with nothing subscribed gets the app subscribed with the connection's token, and the audit says subscribed: true", async () => {
+    const graph = calls(empty(answered({ success: true })));
+    const s = setup(GOOD, null, { graph });
+    expect((await s.run()).status).toBe("active");
+    const seen = graph.mock.calls.filter(([, path]) => path.endsWith("/subscribed_apps")).map(([method]) => method);
+    expect(seen).toEqual(["GET", "POST", "GET"]);
+    expect(graph).toHaveBeenCalledWith("POST", `${INPUT.wabaId}/subscribed_apps`, TOKEN);
+    expect((s.audit.mock.calls[0] as unknown[])[0]).toMatchObject({ diff: expect.objectContaining({ subscribed: true }) });
+  });
+
+  it("an account with an app subscribed already is never posted to", async () => {
+    const graph = calls(healthyGraph);
+    const s = setup(GOOD, null, { graph });
+    await s.run();
+    expect(graph.mock.calls.some(([method]) => method === "POST")).toBe(false);
+    expect((s.audit.mock.calls[0] as unknown[])[0]).toMatchObject({ diff: expect.objectContaining({ subscribed: true }) });
+  });
+
+  it("is not tried for a number that is not in the account", async () => {
+    const graph = calls(empty(answered({ success: true })));
+    await setup({ ...GOOD, numberInAccount: false } as MetaProbe, null, { graph }).run();
+    expect(graph.mock.calls.some(([method]) => method === "POST")).toBe(false);
+  });
+
+  it("a failed subscribe never blocks: the number is active with a warning when no app is subscribed, and the audit says subscribed: false", async () => {
+    const s = setup(GOOD, null, { graph: empty(refused) });
+    const result = await s.run();
+    expect(result.status).toBe("active");
+    const webhook = (result.last_check as { checks: { key: string; status: string }[] }).checks[2];
+    expect(webhook).toMatchObject({ key: "webhook_subscribed", status: "warn" });
+    expect((s.audit.mock.calls[0] as unknown[])[0]).toMatchObject({ diff: expect.objectContaining({ subscribed: false }) });
+  });
+
+  it("a subscribe call that throws is the same as one that fails", async () => {
+    const graph: Graph = async (method, path, token) => {
+      if (method === "POST") throw new Error("network");
+      return path.endsWith("/subscribed_apps") ? answered({ data: [] }) : healthyGraph(method, path, token);
+    };
+    const s = setup(GOOD, null, { graph });
+    const result = await s.run();
+    expect(result.status).toBe("active");
+    expect((result.last_check as { checks: { key: string; status: string }[] }).checks[2]).toMatchObject({ key: "webhook_subscribed", status: "warn" });
+    expect((s.audit.mock.calls[0] as unknown[])[0]).toMatchObject({ diff: expect.objectContaining({ subscribed: false }) });
+  });
+
+  it("does not try when Meta rejected the token, and the audit says null: nothing was asked", async () => {
+    const graph = calls(healthyGraph);
+    const s = setup({ state: "rejected" }, null, { graph });
+    expect((await s.run()).status).toBe("failed");
+    expect(graph).not.toHaveBeenCalled();
+    expect((s.audit.mock.calls[0] as unknown[])[0]).toMatchObject({ diff: expect.objectContaining({ subscribed: null }) });
+  });
+});
+
 describe("connectManual: the platform's own app", () => {
   const platformInput = { ...INPUT, appSecret: PLATFORM_SECRET };
 

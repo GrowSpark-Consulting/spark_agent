@@ -172,6 +172,8 @@ export async function connectManual(
 
   const id = existing?.id ?? deps.newId();
   const info = probe.state === "ok" ? probe.info : { displayPhone: null, verifiedName: null, qualityRating: null };
+  // Whether an app ends up subscribed to the account's webhooks (null: not asked). The webhook check subscribes ours when none is, best effort.
+  let subscribed: boolean | null = null;
   // The five checks that need only Meta's answers. The sixth (a test message) waits until the number is saved as active.
   const lastCheck = await runGraphChecks(
     {
@@ -180,6 +182,9 @@ export async function connectManual(
       method: "manual_byo",
       accepted: probe.state === "ok",
       tokenExpired: probe.state === "rejected" && probe.reason === "token_expired",
+      onSubscribed: (value) => {
+        subscribed = value;
+      },
       inAccount: probe.state === "ok" && probe.numberInAccount,
       facts: { nameStatus: info.facts?.nameStatus ?? null, platformType: info.facts?.platformType ?? null },
       webhookSeen: () => deps.webhookSeen(input.tenantId, id),
@@ -217,7 +222,7 @@ export async function connectManual(
       action: "whatsapp_connection.connected",
       entity: "whatsapp_connection",
       entityId: saved.data.id,
-      diff: { method: saved.data.method, status: saved.data.status, waba_id: saved.data.waba_id, phone_number_id: saved.data.phone_number_id, reconnected: retry },
+      diff: { method: saved.data.method, status: saved.data.status, waba_id: saved.data.waba_id, phone_number_id: saved.data.phone_number_id, reconnected: retry, subscribed },
     });
   } catch {
     console.error("[whatsapp-connect] audit write failed");
