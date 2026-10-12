@@ -56,7 +56,9 @@ can TRUNCATE. **A new business table needs one fixture row in that file**, or th
 
 - `kb_chunks.embedding` is `vector(1024)`: Cohere `embed-multilingual-v3.0`, cosine distance (`<=>`).
   Retrieval filters by `tenant_id` and sets `hnsw.iterative_scan = relaxed_order`.
-- Seed: `supabase/seed/` (plans, 21 features, demo and isolation-test businesses, services, resources, hours).
+- Seed: `supabase/seed/` (plans, 21 features, demo and isolation-test businesses, services, resources, hours). The
+  real-estate demo also has three projects (`catalog_items` with `price_from`, `price_to` and `area`) and names the service
+  the assistant books (`agent_settings.bookingServiceId` = Site visit), so it can be scored and booked (Dev 1's Day 3 note).
 - Only the 0005 functions write `credit_ledger`. Rollover and expiry across renewals are tested month by month in
   `supabase/tests/credits_renewal.test.sql` (one month of rollover, top-ups expiring at 90 days, soonest-expiring first,
   an early renewal resetting the month before the newest).

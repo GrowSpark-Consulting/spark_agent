@@ -1,7 +1,7 @@
 -- Seed contents (supabase/seed). Expects a database built with the seed: pnpm db:reset, then pnpm db:test.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(16);
+select plan(18);
 
 select results_eq(
   'select key, price_inr, monthly_credits, seats, whatsapp_numbers from public.plans order by price_inr',
@@ -108,6 +108,19 @@ select is(
       and jsonb_typeof(r.service_area -> 'pincodes') is distinct from 'array'),
   0::bigint,
   'seeded service areas list pincodes');
+
+-- The real-estate demo can be scored and booked (Dev 1's Day 3 note, section 7).
+select is(
+  (select count(*) from public.catalog_items c
+    where c.tenant_id = 'd0000000-0000-0000-0000-000000000001' and c.active and c.price_from > 0
+      and (c.attributes ->> 'price_to')::int >= c.price_from and c.attributes ->> 'area' <> ''),
+  3::bigint,
+  'the real-estate demo has three projects with a price band and an area, for the budget and area rules');
+select is(
+  (select s.name from public.tenants t join public.services s on s.id = (t.agent_settings ->> 'bookingServiceId')::uuid and s.tenant_id = t.id and s.active
+    where t.id = 'd0000000-0000-0000-0000-000000000001'),
+  'Site visit',
+  'the real-estate demo names the active service the assistant books');
 
 select * from finish();
 rollback;
