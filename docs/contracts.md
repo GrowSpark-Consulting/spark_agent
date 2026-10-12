@@ -43,6 +43,7 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0024_api_roles_no_truncate` | `anon` and `authenticated` lose TRUNCATE on every table, now and (default privileges) later: row-level security does not cover TRUNCATE. Checked by `supabase/tests/isolation.test.sql` |
 | `0025_set_tenant_feature` | `set_tenant_feature(tenant, key, enabled, settings, actor)`: plan check (PA403), `tenant_features` write and audit row in one transaction (service_role only; section 6, feature toggles) |
 | `0026_booking_actions` | `bookings.status_changed_at` (kept by a trigger); `complete_booking`, `mark_booking_no_show`, `staff_cancel_booking`, `staff_reschedule_booking`, each with its audit row (service_role only, section 4); `bookings` and `leads` in the Realtime publication |
+| `0027_plan_limits` | Triggers keep a business within its plan's seats (`memberships`, PA413) and WhatsApp numbers (`whatsapp_connections` not disconnected and not `platform`, PA403); each locks the business's row (FOR NO KEY UPDATE) before counting, so racing additions take turns (section 6, plan limits) |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -685,6 +686,23 @@ other origins get no CORS headers.
   check, the `tenant_features` row and the audit row (`feature.toggled` or `feature.settings_changed`, with who and both
   values) in one transaction; nothing changes and nothing is audited when the values are the saved ones. This server
   drops its cached feature states at once; other servers within 60 seconds (`isEnabled`'s cache).
+
+**Plan limits (built, Day 5; `backend/src/billing/plan-limits.ts`, migration 0027).** Seats (`plans.seats`: Trial and
+Starter 2, Growth 5, Pro 999 meaning unlimited) and WhatsApp numbers (`plans.whatsapp_numbers`: Trial, Starter and
+Growth 1, Pro 3). A number counts while it is not `disconnected`, a `failed` one included (disconnect it to make room);
+our own `platform` numbers never count. The API asks first, so the answer comes before an invite goes out or Meta is
+asked; the database triggers have the last word, also for two requests at the same moment
+(`scripts/db/plan-limit-concurrency.sh`, CI). A business over a limit after a downgrade keeps what it has; only
+additions are refused.
+
+- `assertSeatAvailable(tenantId)` → `seat_limit` (409), "Your Growth plan includes 5 team members. Upgrade to add more."
+  `seatUsage(tenantId)` → `{ used, limit: number | 'unlimited', planName }`. **For Dev 3:** `POST /api/team/invite` calls
+  `assertSeatAvailable` before inviting; a membership insert past the seats is refused by the database anyway (PA413;
+  `planLimitError(error)` turns it into `seat_limit`).
+- `assertNumberAvailable(tenantId, keepConnectionId)` → `plan_required` (403), "Your Starter plan includes 1 WhatsApp
+  number. Disconnect one, or upgrade to add another." The manual connect routes (`POST /api/whatsapp/manual`,
+  `POST /api/admin/whatsapp/manual`) ask it before Meta (`numberLimit` in `connectManual`'s deps, keeping the row being
+  connected again in place out of the count), and turn the database's refusal (PA403) into the same answer.
 
 **Read routes (Proposed, screen-contracts Q1).** Entitlements and balances are computed on the
 server, so these are routes, not SQL views:

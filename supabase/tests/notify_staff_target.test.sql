@@ -10,8 +10,13 @@ insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-0000000006a4', 'staff-badphone@test.local'),
   ('00000000-0000-0000-0000-0000000006b1', 'staff-other@test.local'),
   ('00000000-0000-0000-0000-0000000006c1', 'staff-offline@test.local');
+-- Staff Alerts has four members, so it is on Pro (0027 refuses more members than the plan's seats).
+insert into public.plans (key, name, price_inr, monthly_credits, seats, whatsapp_numbers, feature_keys)
+  values ('pro', 'Pro', 12999, 15000, 999, 3, array['staff_alerts'])
+  on conflict (key) do nothing;  -- the seed may already have it
+insert into public.tenants (id, name, vertical, plan_key) values
+  ('b6000000-0000-0000-0000-00000000000a', 'Staff Alerts', 'test-pack', 'pro');
 insert into public.tenants (id, name, vertical) values
-  ('b6000000-0000-0000-0000-00000000000a', 'Staff Alerts', 'test-pack'),
   ('b6000000-0000-0000-0000-00000000000b', 'Staff Other', 'test-pack'),
   ('b6000000-0000-0000-0000-00000000000c', 'Staff Offline', 'test-pack');
 insert into public.memberships (tenant_id, user_id, role, whatsapp_phone) values
