@@ -746,10 +746,28 @@ server, so these are routes, not SQL views:
 | Route | Returns | Owner |
 |---|---|---|
 | `GET /api/features` | Built (above) | Dev 2 |
-| `GET /api/billing/balance` | Balance plus renewal date and trial end | Dev 2 |
-| `GET /api/dashboard/summary` | Month counts: enquiries, qualified, booked, after-hours handled | Dev 2 |
+| `GET /api/billing/balance` | Built (below) | Dev 2 |
+| `GET /api/dashboard/summary` | Built (below) | Dev 2 |
 
 Plain lists (leads, conversations, bookings, services) are read directly under RLS.
+
+**Home and shell (built, 12 Oct; types `AccountStatus` and `DashboardSummary` in `@pakka/types` `dashboard.ts`).** Any member.
+
+- `GET /api/billing/balance` → `AccountStatus` (`backend/src/billing/account-status.ts`): `status`, `plan { key, name, monthlyCredits }`,
+  `credits { plan, topup, total }` (`credit_balance`), `creditsGranted` (the meter's denominator: grants of plan, trial,
+  top-up and admin credits whose bucket is still live), `renewsAt` (the subscription's period end, active businesses only),
+  `trialEndsAt`, `aiPaused` with `aiPausedReason` (`paused`, `cancelled`, `trial_ended` or `no_credits`), `lowCredits` (a
+  fifth or less of the monthly credits left, as the credit alerts use) and `aiAutoReply` (the AI-replies switch, apart from
+  a pause).
+- `GET /api/dashboard/summary` → `DashboardSummary` (`backend/src/dashboard/summary.ts`), in the business's time zone:
+  `month` (`2026-10`); `stats`: `enquiries` (leads that started this month), `qualified` (of those, reached qualified or
+  further), `booked` (bookings made this month that stand: confirmed, completed, no-show), `afterHours` (this month's
+  enquiries that started outside `business_hours`; 0 when none are set), `enquiriesChangePct` (against the same stretch of
+  last month; null when it had none); `overnightHandled` (chats the assistant answered from 8 pm to 8 am); `hotLeads` (open
+  hot leads, best score first, at most 5: the newest chat, the open handoff's reason else "Hot lead", `waitingSince` = the
+  customer's last message while a handoff is open, `assignedTo` = the owner's user id); `todayBookings` (held and confirmed,
+  a hold that ran out left out; `place` = `details.place` else the service). Staff get their own hot leads
+  (`leads.owner_user_id`) and their own calendar's bookings (`resources.user_id`); the month's numbers are the business's.
 
 ## 7. Rules
 

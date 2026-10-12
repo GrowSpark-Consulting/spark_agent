@@ -65,6 +65,8 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
   { call: "POST /api/bookings/:id/complete", file: "features/calendar/booking-actions.ts" },
   { call: "POST /api/bookings/:id/no-show", file: "features/calendar/booking-actions.ts" },
   { call: "GET /api/bookings/:id/slots", file: "features/calendar/booking-actions.ts" },
+  { call: "GET /api/dashboard/summary", file: "features/home/home-api.ts" },
+  { call: "GET /api/billing/balance", file: "features/home/home-api.ts" },
 ];
 
 /**
@@ -73,10 +75,7 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
  * stand the route in with page.route. These are checked the other way round from FRONTEND_CALLS: the moment the backend registers one, the
  * test below fails and the line moves to FRONTEND_CALLS, so the list can't go stale and the call can't silently stay a stub.
  */
-const AWAITING_BACKEND: { call: string; file: string; where: string }[] = [
-  { call: "GET /api/dashboard/summary", file: "features/home/home-api.ts", where: "Dev 2, proposed only (docs/contracts.md section 6, no branch)" },
-  { call: "GET /api/billing/balance", file: "features/home/home-api.ts", where: "Dev 2, proposed only (docs/contracts.md section 6, no branch)" },
-];
+const AWAITING_BACKEND: { call: string; file: string; where: string }[] = [];
 
 /** Backend routes the browser never calls, and why. Anything not here and not in FRONTEND_CALLS fails the test. */
 const NO_BROWSER_CALLER: Record<string, string> = {
