@@ -1,0 +1,22 @@
+name: A customer asking for an area the business has no homes in loses the area points, is not turned away, and is still offered times
+description: "The real-estate pack has an area rule, not an area hard fail: a location outside the catalog's areas is worth 0 of the 20 area points, and only a budget below the cheapest home disqualifies. Same customer as chat 51 but in Adyar, with the catalog only in Velachery: score 55 (warm) instead of 75 (hot), not disqualified, and, because warm passes the offer threshold, three times are offered. That last part is what the code does today, written down for Raja to confirm; if the pack gets an area hard fail, this chat changes."
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, area: Velachery } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+turns:
+  - customer: "I want a 2BHK in Adyar, my budget is around 60 lakh and I plan to buy within 3 months"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { config: 2BHK, location: Adyar, budget: 60L, timeline: 0-3m }, question: null }
+      reply: "Thanks for the details. I can do Sunday at 10:00 am, Sunday at 3:00 pm or Monday at 5:30 pm for a site visit. Which suits you?"
+    expect:
+      reply: { sent: true, buttons: [], contains: ["10:00 am", "3:00 pm", "5:30 pm"] }
+      aiReplies: 1
+      handoff: null
+      leadStage: engaged
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: offer_slots
+      leadTemperature: warm
+      leadScore: 55

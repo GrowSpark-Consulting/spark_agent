@@ -91,3 +91,5 @@ A STOP chat's later turns show the gate's opted-out outcome.
   helping and books the visit (63).
 - `64`: a voice note (Day 4, Raja, 11 Oct): one polite line asking the customer to type, once however many voice notes follow, staff told, the chat stays
   with the AI, and a later voice note after the customer typed is answered again.
+- `65`: an area the business has no homes in (Day 5, out-of-area): the pack has an area rule worth 20 points and no area hard fail, so the customer scores 55 (warm) instead of
+  75, is not turned away, and is still offered times because warm passes the offer threshold. This is what the code does today, recorded for Raja to confirm.
