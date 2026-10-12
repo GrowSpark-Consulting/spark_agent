@@ -8,7 +8,7 @@ const HANDOFF = "4a2b1b4c-5d6e-4f70-8a91-b2c3d4e5f602";
 const CONVERSATION = "3f2a1b4c-5d6e-4f70-8a91-b2c3d4e5f601";
 const event = { data: { tenantId: TENANT, handoffId: HANDOFF, conversationId: CONVERSATION } };
 
-let handoff: { trigger: string; resolved_at: string | null } | null;
+let handoff: { trigger: string; priority?: string; resolved_at: string | null } | null;
 const stepIds: string[] = [];
 const step = { run: async <T>(id: string, fn: () => Promise<T>) => (stepIds.push(id), fn()) };
 const alert = vi.fn<HandoffAlertDeps["alert"]>();
@@ -22,7 +22,7 @@ function deps(): HandoffAlertDeps {
 }
 
 beforeEach(() => {
-  handoff = { trigger: "asked_human", resolved_at: null };
+  handoff = { trigger: "asked_human", priority: "normal", resolved_at: null };
   stepIds.length = 0;
   alert.mockReset().mockResolvedValue(sent);
 });
@@ -45,14 +45,20 @@ describe("handleHandoffOpened", () => {
         { userId: "admin-2", status: "sent" },
       ],
     });
-    expect(alert).toHaveBeenCalledWith(TENANT, "owner-1", { kind: "handoff_opened", conversationId: CONVERSATION });
+    expect(alert).toHaveBeenCalledWith(TENANT, "owner-1", { kind: "handoff_opened", conversationId: CONVERSATION, handoffId: HANDOFF, priority: "normal" });
     expect(stepIds).toEqual(["load-handoff", "recipients", "alert-owner-1", "alert-admin-2"]);
   });
 
   it("sends the credits alert for a credits handoff", async () => {
-    handoff = { trigger: "credits_exhausted", resolved_at: null };
+    handoff = { trigger: "credits_exhausted", priority: "high", resolved_at: null };
     await handleHandoffOpened({ event, step }, deps());
-    expect(alert).toHaveBeenCalledWith(TENANT, "owner-1", { kind: "credits_exhausted", conversationId: CONVERSATION });
+    expect(alert).toHaveBeenCalledWith(TENANT, "owner-1", { kind: "credits_exhausted", conversationId: CONVERSATION, handoffId: HANDOFF, priority: "high" });
+  });
+
+  it("passes the handoff and its priority, so each alert carries the member's take-over links and says when it is urgent", async () => {
+    handoff = { trigger: "negotiation", priority: "high", resolved_at: null };
+    await handleHandoffOpened({ event, step }, deps());
+    expect(alert).toHaveBeenCalledWith(TENANT, "admin-2", { kind: "handoff_opened", conversationId: CONVERSATION, handoffId: HANDOFF, priority: "high" });
   });
 
   it("does nothing for a handoff that is gone or already resolved", async () => {

@@ -174,7 +174,17 @@ out. Use it only for the STOP confirmation and the out-of-credits holding messag
 stored like any other message. Free text when the member has written to the business in the last 24 hours,
 otherwise the approved `staff_alert_vN` template: `{{1}}` the one-line headline, `{{2}}` the dashboard link.
 **Nobody calls it directly:** `backend/src/notify/staff-alerts.ts` builds the content and picks the recipients
-(owners and admins with an alert number), and the `handoff-alert` job (section 5) sends it.
+(owners and admins with an alert number), and the jobs (section 5) send it.
+
+**The lead card and the take-over links (built, 12 Oct).** `handoff_opened` and `setup_problem` carry, inside the member's
+window, the lead card (Dev 1's `buildLeadCard`: why staff are told, up to five summary lines, a discount asked for, "Next:"
+the next step) and that member's own take-over links (Dev 1's `createHandoffLinks`, signed for them and this handoff):
+"Take over in the inbox: …", and "Reply from your own WhatsApp: …" only on a plan with `handoff_own_number`. Free text
+cannot carry two URL buttons (Meta allows one per message), so the links are lines. A high-priority handoff (a discount
+request, credits out) starts "Priority: ". Outside the window the template's `{{2}}` is the inbox take-over link. A
+`hot_lead` alert carries the card with the chat's dashboard link (not a handoff, so no take-over links). Without
+`API_PUBLIC_URL` (or `ENCRYPTION_KEY`) there are no take-over links, and a card that cannot be built is left out: the
+alert is then the headline and the dashboard link, as before.
 
 | Alert | When | Headline | Link |
 |---|---|---|---|
@@ -186,6 +196,10 @@ otherwise the approved `staff_alert_vN` template: `{{1}}` the one-line headline,
 | `visit_outcome` | `post-visit`, after the visit: to the booked staff member if they have an alert number, else owners and admins | "How did the {what} with {name} go? Update the lead so follow-ups stay right." | `/dashboard/inbox?chat=<id>` |
 | `low_rating` | `post-visit`: the customer rated the visit 1–3; **owners only** | "{name} rated their {what} {n} out of 5." | `/dashboard/inbox?chat=<id>` |
 | `own_number_outcome` | `own-number-outcome`, 4 h after an own-number takeover: the staff member who took it; with Booked / Follow-up / Lost buttons inside their window | "How did your WhatsApp chat with {name} go? Update the lead." | `/dashboard/inbox?chat=<id>` |
+| `credits_low` | `credit-alerts`: a fifth of the plan's monthly credits left; **owners only** | "{business} has {n} credits left of its {monthly} a month. Top up so the assistant keeps replying." | `/dashboard/billing` |
+| `hot_lead` | `event-alerts`, Dev 1's `lead.hot`; with the lead card | "Hot lead: {name} is ready to move." | `/dashboard/inbox?chat=<id>` |
+| `voice_note` | `event-alerts`, Dev 1's `voice_note.received` | "{name} sent a voice note. The assistant asked them to type; you can listen to it in the inbox." | `/dashboard/inbox?chat=<id>` |
+| `external_waiting` | `event-alerts`, Dev 1's `chat.external_waiting`: the member who has the chat on their own WhatsApp (owners and admins if nobody) | "{name} wrote again while you have the chat on your own WhatsApp. Reply to them from your number." | `/dashboard/inbox?chat=<id>` |
 
 **`daily_agenda` (built, 9 Oct):** the day's bookings to the owners, free, behind the `daily_agenda` toggle (Growth and
 Pro). Like `staff_alert` it goes to a member's alert number (`staffUserId`): free text inside their window ("Good
@@ -496,6 +510,13 @@ replying." with the billing link); at none, `credits_exhausted`. Free, behind `s
 `credit_alert:<low|used_up>:<newest grant id>:<owner>`, so each alert goes once per grant: a new month, a top-up or an
 admin grant starts again. Credits that expire with no spend wake nothing; the next refused reply raises the
 `credits_exhausted` handoff alert as before. Auto top-up ("if on", the handover) waits for Razorpay (Day 6).
+
+**Event alerts (`event-alerts`, built 12 Oct; `backend/src/inngest/event-alerts.ts`).** Dev 1's events that tell staff
+something become staff alerts (section 2): `lead.hot` → `hot_lead` (with the lead card) and `voice_note.received` →
+`voice_note`, to owners and admins with an alert number; `chat.external_waiting` → `external_waiting`, to the member who
+has the chat on their own WhatsApp (`conversations.assigned_user_id`), else owners and admins. Keys
+`<Dev 1's event id>:<member>`, so a retry never sends one twice. The `handoff-alert` job now passes the handoff and its
+priority, so a handoff alert carries the member's take-over links and says "Priority:" when it is urgent.
 
 **The message pipeline (`process-message`, built: steps 2 and 3).** One conversation at a time (concurrency key
 `conversationId`); messages from one conversation within 3 seconds (never longer than 15) start one run. A debounce keeps

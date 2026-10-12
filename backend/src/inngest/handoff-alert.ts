@@ -8,7 +8,9 @@ import { inngest } from "./client";
 // handoff.opened → a staff alert to every recipient (docs/contracts.md, section 5). Dev 1's reply step opens the
 // handoff and emits the event (id handoff_opened:<handoffId>, so Inngest drops a repeat); this is the one place
 // the alert is sent from. One step per recipient: a retry never re-sends to someone who already got it. A
-// failure WhatsApp may still have delivered (outcomeUnknown) is not retried.
+// failure WhatsApp may still have delivered (outcomeUnknown) is not retried. Each recipient's alert carries the lead
+// card and their own take-over links (notify/staff-alerts.ts); the card is built inside the step, so no customer's
+// words are kept in Inngest's step results.
 
 const HandoffOpened = z.object({ tenantId: z.guid(), handoffId: z.guid(), conversationId: z.guid() });
 
@@ -47,12 +49,12 @@ export async function handleHandoffOpened(
   const handoff = await step.run("load-handoff", async () => {
     const { data, error } = await deps.db
       .from("handoffs")
-      .select("trigger, resolved_at")
+      .select("trigger, priority, resolved_at")
       .eq("tenant_id", tenantId)
       .eq("id", handoffId)
       .maybeSingle();
     if (error) throw new Error(`handoff-alert: handoff read failed: ${error.message}`);
-    return (data as { trigger: string; resolved_at: string | null } | null) ?? null;
+    return (data as { trigger: string; priority: string | null; resolved_at: string | null } | null) ?? null;
   });
   if (!handoff) return { skipped: "handoff_not_found" as const };
   if (handoff.resolved_at) return { skipped: "already_resolved" as const };
@@ -62,7 +64,7 @@ export async function handleHandoffOpened(
   const results: ({ userId: string } & StepResult)[] = [];
   for (const userId of recipients) {
     const result = await step.run(`alert-${userId}`, async (): Promise<StepResult> => {
-      const outcome = await deps.alert(tenantId, userId, { kind, conversationId });
+      const outcome = await deps.alert(tenantId, userId, { kind, conversationId, handoffId, priority: handoff.priority === "high" ? "high" : "normal" });
       if (outcome.status === "sent") return { status: "sent" };
       if (outcome.status === "skipped") return { status: "skipped", reason: outcome.reason };
       // Throwing makes Inngest retry this step; never when WhatsApp may already have delivered it.
