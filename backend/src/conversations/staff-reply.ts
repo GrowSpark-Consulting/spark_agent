@@ -1,4 +1,4 @@
-import { ERROR_CODES, SendStaffReplyInput, type ErrorCode, type SendStaffReplyResult, type TenantContext } from "@pakka/types";
+import { ERROR_CODES, SendStaffReplyInput, SendStaffTemplateInput, type ErrorCode, type SendStaffReplyResult, type TenantContext } from "@pakka/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { AppError } from "../lib/errors";
@@ -24,14 +24,13 @@ const isErrorCode = (code: string): code is ErrorCode => (ERROR_CODES as readonl
 const ConversationId = z.guid();
 
 /**
- * A staff member's free-text reply in a customer conversation (POST /api/conversations/:id/messages),
- * through notify.send as `staff_reply` (docs/contracts.md, section 4): 0 credits, recorded with the staff
- * member as the actor. notify.send resolves the conversation inside the business (another business's id is
- * not_found), refuses opted-out customers and enforces the 24-hour window, so none of that is repeated here.
- *
- * Not supported by notify.send today, so not offered: sending a template chosen by staff outside the window
- * (staff_reply has no template base name; the outcome is `outside_window`), and a client retry key (send
- * generates the message id itself). Both need a notify change first.
+ * A staff member's reply in a customer conversation (POST /api/conversations/:id/messages), through notify.send as
+ * `staff_reply` (docs/contracts.md, section 4): 0 credits, recorded with the staff member as the actor. Either free text
+ * `{ body }` (inside the 24-hour window only), or an approved template staff chose `{ template: { name, language, params } }`
+ * (whatever the window). notify.send resolves the conversation inside the business (another business's id is
+ * not_found), refuses opted-out customers, enforces the window for text and checks the template is approved for this
+ * number with the right number of values, so none of that is repeated here. Not offered: a client retry key (send
+ * generates the message id itself).
  */
 export async function sendStaffReply(
   context: TenantContext,
@@ -42,11 +41,11 @@ export async function sendStaffReply(
   requireRole(context, ["owner", "admin", "staff"], "reply to a customer");
   // A malformed id can never name a conversation; answered like a missing one, before it reaches the database.
   if (!ConversationId.safeParse(conversationId).success) throw new AppError("not_found", "That conversation was not found.");
-  // Said plainly, not as a schema error: a client that sends a template must be told it was not honoured.
-  if (typeof rawInput === "object" && rawInput !== null && "template" in rawInput) {
-    throw new AppError("not_available", "Sending a template from the inbox isn't available yet. Nothing was sent. Reply in text while the customer's 24-hour window is open.");
-  }
-  const { body } = SendStaffReplyInput.parse(rawInput);
+  // A template or free text: whichever the body names, checked strictly (a body with both is refused).
+  const reply =
+    typeof rawInput === "object" && rawInput !== null && "template" in rawInput
+      ? { template: SendStaffTemplateInput.parse(rawInput).template }
+      : { text: SendStaffReplyInput.parse(rawInput).body };
 
   // One responder per chat: while the AI has it, staff don't reply (switch to Human first, POST .../mode). This also
   // makes another business's id not_found before anything is sent. A switch back to AI between this read and the
@@ -58,7 +57,7 @@ export async function sendStaffReply(
     throw new AppError("conflict", "The AI is replying in this chat. Switch to Human to reply.");
   }
 
-  const outcome = await send(context.tenant.id, "staff_reply", { conversationId, text: body, actorId: context.user.id });
+  const outcome = await send(context.tenant.id, "staff_reply", { conversationId, ...reply, actorId: context.user.id });
   if (outcome.status === "sent") return { messageId: outcome.messageId, providerMsgId: outcome.providerMsgId, status: "accepted" };
   if (outcome.status === "skipped") throw new AppError(...SKIPPED[outcome.reason]);
   const { code, message } = outcome.error;

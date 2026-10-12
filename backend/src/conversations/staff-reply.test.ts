@@ -75,11 +75,33 @@ describe("sendStaffReply", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("refuses a template, plainly, without sending anything", async () => {
-    for (const input of [{ body: "Hi", template: { name: "nudge_v1", params: [] } }, { template: { name: "nudge_v1" } }]) {
-      await expect(reply(ctx(), CONVERSATION, input)).rejects.toMatchObject({ code: "not_available", status: 501, message: expect.stringContaining("Nothing was sent") });
+  it("sends an approved template staff chose, as the staff member, whatever the window", async () => {
+    const template = { name: "reminder_24h_v1", language: "en", params: ["site visit", "Skyline Homes", "Sat 10 Oct, 5:00 pm"] };
+    await expect(reply(ctx(), CONVERSATION, { template })).resolves.toMatchObject({ status: "accepted" });
+    expect(send).toHaveBeenCalledWith("t1", "staff_reply", expect.objectContaining({ conversationId: CONVERSATION, template }));
+    expect(send.mock.calls[0][2]).not.toHaveProperty("text");
+  });
+
+  it("refuses a template body that is incomplete or also has text, without sending anything", async () => {
+    for (const input of [
+      { body: "Hi", template: { name: "nudge_v1", language: "en", params: [] } },
+      { template: { name: "nudge_v1" } },
+      { template: { name: "Nudge V1", language: "en", params: [] } },
+      { template: { name: "nudge_v1", language: "en", params: [""] } },
+    ]) {
+      await expect(reply(ctx(), CONVERSATION, input)).rejects.toMatchObject({ name: "ZodError" });
     }
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("says plainly when the template isn't approved for this number, or needs other values", async () => {
+    send.mockResolvedValue({ status: "failed", error: { code: "not_found", message: "That template isn't approved for this WhatsApp number.", retryable: false, outcomeUnknown: false } });
+    await expect(reply(ctx(), CONVERSATION, { template: { name: "nudge_v9", language: "en", params: [] } })).rejects.toMatchObject({ code: "not_found", status: 404 });
+    send.mockResolvedValue({ status: "failed", error: { code: "validation_failed", message: "This template needs 2 values.", retryable: false, outcomeUnknown: false } });
+    await expect(reply(ctx(), CONVERSATION, { template: { name: "nudge_v1", language: "en", params: ["Asha"] } })).rejects.toMatchObject({
+      code: "validation_failed",
+      message: "This template needs 2 values.",
+    });
   });
 
   it("treats an id that isn't a UUID as a missing conversation, without touching notify", async () => {
