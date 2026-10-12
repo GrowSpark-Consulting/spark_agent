@@ -15,6 +15,7 @@ export type StaffAlertKind =
   | "handoff_opened"
   | "handoff_waiting"
   | "credits_exhausted"
+  | "credits_low"
   | "setup_problem"
   | "opted_out"
   | "visit_outcome"
@@ -31,6 +32,8 @@ export interface StaffAlert {
   what?: string;
   /** low_rating: the customer's rating, 1 to 5. */
   rating?: number;
+  /** credits_low: the credits left, and the plan's credits a month. */
+  credits?: { left: number; monthly: number };
 }
 
 export type AlertRole = "owner" | "admin";
@@ -91,11 +94,16 @@ export async function staffAlertContent(
   deps: StaffAlertDeps = defaults(),
 ): Promise<{ headline: string; link: string }> {
   const app = deps.appUrl.replace(/\/$/, "");
-  if (alert.kind === "credits_exhausted") {
+  if (alert.kind === "credits_exhausted" || alert.kind === "credits_low") {
     const { data, error } = await deps.db.from("tenants").select("name").eq("id", tenantId).maybeSingle();
     if (error) throw new Error(`staff alert: business read failed: ${error.message}`);
     const name = oneLine((data as { name?: string } | null)?.name ?? "Your business", 40);
-    return { headline: `${name} is out of credits, so the assistant has stopped replying.`, link: `${app}/dashboard/billing` };
+    const link = `${app}/dashboard/billing`;
+    if (alert.kind === "credits_low") {
+      const { left, monthly } = alert.credits ?? { left: 0, monthly: 0 };
+      return { headline: `${name} has ${left} credit${left === 1 ? "" : "s"} left of its ${monthly} a month. Top up so the assistant keeps replying.`, link };
+    }
+    return { headline: `${name} is out of credits, so the assistant has stopped replying.`, link };
   }
   const who = await customerLabel(tenantId, alert.conversationId, deps.db);
   const link = alert.conversationId ? `${app}/dashboard/inbox?chat=${alert.conversationId}` : `${app}/dashboard/inbox`;
@@ -121,13 +129,22 @@ export async function staffAlertContent(
     : { headline: `The assistant couldn't continue the chat with ${who}.`, link };
 }
 
-/** Sends one alert to one member, through notify.send (staff_alert). */
+/**
+ * Sends one alert to one member, through notify.send (staff_alert). `idempotencyKey` names this exact alert, so a job's
+ * retry or a repeat run never sends it twice (notify.send).
+ */
 export async function sendStaffAlert(
   tenantId: string,
   userId: string,
   alert: StaffAlert,
   deps: StaffAlertDeps = defaults(),
+  options: { idempotencyKey?: string } = {},
 ): Promise<SendOutcome> {
   const { headline, link } = await staffAlertContent(tenantId, alert, deps);
-  return deps.send(tenantId, "staff_alert", { staffUserId: userId, text: `${headline}\n${link}`, templateParams: [headline, link] });
+  return deps.send(tenantId, "staff_alert", {
+    staffUserId: userId,
+    text: `${headline}\n${link}`,
+    templateParams: [headline, link],
+    ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
+  });
 }

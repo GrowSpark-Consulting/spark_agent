@@ -110,6 +110,16 @@ describe("staffAlertContent", () => {
       link: "https://app.test/dashboard/billing",
     });
   });
+
+  it("tells the owner how many credits are left when they run low, with the billing link", async () => {
+    await expect(staffAlertContent(TENANT, { kind: "credits_low", credits: { left: 280, monthly: 1500 } }, deps())).resolves.toEqual({
+      headline: "Skyline Homes has 280 credits left of its 1500 a month. Top up so the assistant keeps replying.",
+      link: "https://app.test/dashboard/billing",
+    });
+    await expect(staffAlertContent(TENANT, { kind: "credits_low", credits: { left: 1, monthly: 300 } }, deps())).resolves.toMatchObject({
+      headline: "Skyline Homes has 1 credit left of its 300 a month. Top up so the assistant keeps replying.",
+    });
+  });
 });
 
 describe("sendStaffAlert", () => {
@@ -121,5 +131,10 @@ describe("sendStaffAlert", () => {
       text: `Asha Raman is waiting for a person on WhatsApp.\n${link}`,
       templateParams: ["Asha Raman is waiting for a person on WhatsApp.", link],
     });
+  });
+
+  it("passes an idempotency key through, so a repeat run never sends the alert twice", async () => {
+    await sendStaffAlert(TENANT, OWNER, { kind: "credits_exhausted" }, deps(), { idempotencyKey: `credit_alert:used_up:7:${OWNER}` });
+    expect(sendMock).toHaveBeenLastCalledWith(TENANT, "staff_alert", expect.objectContaining({ idempotencyKey: `credit_alert:used_up:7:${OWNER}` }));
   });
 });

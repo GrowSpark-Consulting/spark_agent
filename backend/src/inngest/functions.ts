@@ -1,4 +1,5 @@
 import { bookingReminders } from "./booking-reminders";
+import { creditAlerts } from "./credit-alerts";
 import { dailyAgenda } from "./daily-agenda";
 import { googleCalendarSync } from "./google-calendar-sync";
 import { handoffAlert } from "./handoff-alert";
@@ -31,4 +32,5 @@ export const functions = [
   dailyAgenda,
   ownNumberOutcome,
   phoneReplyReturn,
+  creditAlerts,
 ];
