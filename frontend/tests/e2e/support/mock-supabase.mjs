@@ -262,11 +262,11 @@ const ist = (date, hhmm) => new Date(`${date}T${hhmm}:00+05:30`).toISOString();
  * a table ("leads", "bookings", "resources", "tenants") whose reads return rows the app can't parse (switched
  * later with POST /__mock/day3-error); inbox (with seed) adds two more chats for the Inbox lead card.
  */
-function createDay3Account({ seed = false, role = "owner", error = null, inbox = false, manyLeads = 0 } = {}) {
+function createDay3Account({ seed = false, role = "owner", error = null, inbox = false, manyLeads = 0, manyChats = 0, agentSettings = null, mixedLeads = 0, noLeadCount = false } = {}) {
   const email = `d3-${randomUUID()}@test.local`;
   const t = tenant(randomUUID(), "Sample Business", "sample-pack");
-  USERS[email] = { memberships: [[t, role]], view: { status: 200, body: [] }, day3Error: error };
-  TENANT_EXTRA.set(t.id, { business_hours: {}, vertical_version: 1 });
+  USERS[email] = { memberships: [[t, role]], view: { status: 200, body: [] }, day3Error: error, noLeadCount };
+  TENANT_EXTRA.set(t.id, { business_hours: {}, vertical_version: 1, agent_settings: agentSettings });
   const ids = {};
   // `manyLeads`: that many plain leads, one per minute going back from 1 Sep 2026, each with its own contact and a
   // microsecond timestamp as PostgREST sends them (for the board's "Load more": paging by updated_at, then id).
@@ -276,6 +276,38 @@ function createDay3Account({ seed = false, role = "owner", error = null, inbox =
     const at = `${new Date(Date.UTC(2026, 8, 1) - i * 60_000).toISOString().replace(/\.\d+Z$/, "")}.123456+00:00`;
     LEADS.push({
       id: randomUUID(), tenant_id: t.id, contact_id: contact.id, stage: ["new", "engaged", "qualified"][i % 3], score: null, temperature: null,
+      fields: {}, owner_user_id: null, created_at: at, updated_at: at,
+    });
+  }
+  // `manyChats`: that many plain chats, one per minute going back from 1 Sep 2026 (the last one is the oldest, `ids.oldestChat`),
+  // each with its contact and one customer message, for the inbox's newest-page limit and a link to a chat beyond it.
+  for (let i = 0; i < manyChats; i++) {
+    const contact = { id: randomUUID(), tenant_id: t.id, name: `Bulk chat ${i + 1}`, phone: `+9180000${String(10000 + i).slice(-5)}` };
+    CONTACTS.push(contact);
+    const at = new Date(Date.UTC(2026, 8, 1) - i * 60_000).toISOString();
+    const conversationId = randomUUID();
+    INBOX.conversations.push({
+      id: conversationId, tenant_id: t.id, contact_id: contact.id, mode: "ai", status: "open", last_customer_msg_at: at, created_at: at,
+      contacts: { name: contact.name, phone: contact.phone, language: "en" }, handoffs: [],
+    });
+    INBOX.messages.push({
+      id: randomUUID(), tenant_id: t.id, conversation_id: conversationId, direction: "in", sender: "customer", kind: "text",
+      body: `Message ${i + 1}`, media: null, meta: null, template_name: null, delivery_status: null, created_at: at,
+    });
+    if (i === manyChats - 1) ids.oldestChat = conversationId;
+  }
+  // `mixedLeads`: that many leads with a known spread, one per minute going back from 1 Sep 2026. Lead i has temperature
+  // [hot, warm, cold, disqualified, none][i % 5], a score to match (hot 90, warm 60, cold 20, disqualified 5, none null) and the
+  // stage STAGE_CYCLE[i % 9], so every count over n leads can be worked out from n alone.
+  const MIX = [["hot", 90], ["warm", 60], ["cold", 20], ["disqualified", 5], [null, null]];
+  const STAGE_CYCLE = ["new", "engaged", "qualified", "booked", "visited", "won", "lost", "nurture", "human"];
+  for (let i = 0; i < mixedLeads; i++) {
+    const contact = { id: randomUUID(), tenant_id: t.id, name: `Mixed lead ${i + 1}`, phone: `+9170000${String(10000 + i).slice(-5)}` };
+    CONTACTS.push(contact);
+    const at = `${new Date(Date.UTC(2026, 8, 1) - i * 60_000).toISOString().replace(/\.\d+Z$/, "")}.123456+00:00`;
+    const [temperature, score] = MIX[i % 5];
+    LEADS.push({
+      id: randomUUID(), tenant_id: t.id, contact_id: contact.id, stage: STAGE_CYCLE[i % 9], score, temperature,
       fields: {}, owner_user_id: null, created_at: at, updated_at: at,
     });
   }
@@ -560,8 +592,8 @@ function emailFromToken(auth) {
 
 // The inbox reads Supabase from the browser (another origin), so answers carry CORS headers like the
 // real API's.
-function send(res, status, body) {
-  res.writeHead(status, { "content-type": "application/json", "access-control-allow-origin": "*" });
+function send(res, status, body, headers = {}) {
+  res.writeHead(status, { "content-type": "application/json", "access-control-allow-origin": "*", "access-control-expose-headers": "content-range", ...headers });
   res.end(body === undefined ? "" : JSON.stringify(body));
 }
 const readBody = (req) => new Promise((resolve) => { let s = ""; req.on("data", (d) => (s += d)); req.on("end", () => { try { resolve(JSON.parse(s || "{}")); } catch { resolve({}); } }); });
@@ -573,7 +605,7 @@ createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
       "access-control-allow-origin": "*",
-      "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
+      "access-control-allow-methods": "GET, HEAD, POST, PATCH, DELETE, OPTIONS",
       "access-control-allow-headers": req.headers["access-control-request-headers"] ?? "*",
     });
     res.end();
@@ -882,7 +914,7 @@ ${choose("Cancel", "cancel=1")}
       // business_hours and agent_settings.
       if (!email) return send(res, 200, []);
       const ownTenants = USERS[email].memberships.map(([t]) => t).filter(filters(url));
-      const row = (t) => ({ ...t, business_hours: TENANT_EXTRA.get(t.id)?.business_hours ?? {}, vertical_version: TENANT_EXTRA.get(t.id)?.vertical_version ?? 1 });
+      const row = (t) => ({ ...t, business_hours: TENANT_EXTRA.get(t.id)?.business_hours ?? {}, vertical_version: TENANT_EXTRA.get(t.id)?.vertical_version ?? 1, agent_settings: TENANT_EXTRA.get(t.id)?.agent_settings ?? null });
       if (req.method === "PATCH") {
         const patch = await readBody(req);
         if (Object.keys(patch).some((k) => !["name", "timezone", "business_hours", "agent_settings"].includes(k))) {
@@ -890,6 +922,7 @@ ${choose("Cancel", "cancel=1")}
         }
         for (const t of ownTenants) {
           if ("business_hours" in patch) TENANT_EXTRA.set(t.id, { vertical_version: 1, ...TENANT_EXTRA.get(t.id), business_hours: patch.business_hours });
+          if ("agent_settings" in patch) TENANT_EXTRA.set(t.id, { vertical_version: 1, ...TENANT_EXTRA.get(t.id), agent_settings: patch.agent_settings });
         }
         return send(res, 200, ownTenants.map(row));
       }
@@ -936,17 +969,35 @@ ${choose("Cancel", "cancel=1")}
     }
     if (table === "leads") {
       if (!email) return send(res, 200, []);
-      if (req.method !== "GET") return send(res, 403, { code: "42501", details: null, hint: null, message: "permission denied for table leads" });
+      if (req.method !== "GET" && req.method !== "HEAD") return send(res, 403, { code: "42501", details: null, hint: null, message: "permission denied for table leads" });
       const own = new Set(USERS[email].memberships.map(([t]) => t.id));
+      // PostgREST filters the board sends beyond eq/lt/gt: temperature=is.null, score=gte.N, stage=not.in.(a,b).
+      const q = url.searchParams;
+      const leadFilter = (l) => {
+        const t = q.get("temperature");
+        if (t === "is.null" && l.temperature !== null) return false;
+        const score = q.get("score");
+        if (score?.startsWith("gte.") && !(l.score !== null && l.score >= Number(score.slice(4)))) return false;
+        const notIn = /^not\.in\.\((.*)\)$/.exec(q.get("stage") ?? "");
+        if (notIn && notIn[1].split(",").includes(l.stage)) return false;
+        return true;
+      };
       let found = LEADS.filter((l) => own.has(l.tenant_id))
         .filter(filters(url))
+        .filter(leadFilter)
         .sort((a, b) => b.updated_at.localeCompare(a.updated_at) || b.id.localeCompare(a.id));
       // The board pages by value: older than the last lead shown, or the same moment with a smaller id (supabase-js sends
       // `or=(updated_at.lt.X,and(updated_at.eq.X,id.lt.Y))`), newest first, `limit` rows at a time.
       const keyset = /^\(updated_at\.lt\.(.+),and\(updated_at\.eq\.(.+),id\.lt\.(.+)\)\)$/.exec(url.searchParams.get("or") ?? "");
       if (keyset) found = found.filter((l) => l.updated_at < keyset[1] || (l.updated_at === keyset[1] && l.id < keyset[3]));
+      // Prefer: count=exact makes PostgREST say how many rows match (before the page limit) in Content-Range, and a HEAD
+      // answers with only that. The unknown-count error is for tests: USERS[email].noCount drops the header.
+      const wantsCount = /count=exact/.test(String(req.headers.prefer ?? ""));
+      const total = found.length;
       const rows = found.slice(0, Number(url.searchParams.get("limit") ?? Infinity)).map((l) => ({ ...l, contacts: contactOf(l.contact_id) }));
-      return send(res, 200, day3Rows(email, "leads", rows));
+      const range = USERS[email].noLeadCount || !wantsCount ? {} : { "content-range": rows.length > 0 && req.method === "GET" ? `0-${rows.length - 1}/${total}` : `*/${total}` };
+      if (req.method === "HEAD") { res.writeHead(200, { "access-control-allow-origin": "*", "access-control-expose-headers": "content-range", ...range }); return res.end(); }
+      return send(res, 200, day3Rows(email, "leads", rows), range);
     }
     if (table === "bookings") {
       // Members read; only the booking engine (service role) writes.
@@ -1046,8 +1097,9 @@ ${choose("Cancel", "cancel=1")}
           handoffs: handoffs.map(({ id, trigger, picked_at = null, resolved_at }) => ({ id, trigger, picked_at, resolved_at })),
         })));
       }
+      // Newest first and at most `limit`, as PostgREST answers the inbox list (the real client always asks for both).
       return table === "conversations"
-        ? send(res, 200, rows.map(inboxListRow))
+        ? send(res, 200, [...rows].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, limit).map(inboxListRow))
         : send(res, 200, [...rows].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, limit));
     }
     return send(res, 404, { code: "PGRST205", details: null, hint: null, message: `Could not find the table 'public.${table}' in the schema cache` });

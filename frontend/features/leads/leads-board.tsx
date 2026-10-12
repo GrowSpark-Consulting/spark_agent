@@ -7,17 +7,23 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/shared/states
 import { formatError } from "@/lib/errors";
 import { useTableRefresh } from "@/lib/realtime/use-table-refresh";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { chipLabel, headingText, stageCountLabel, truncationNotice } from "./board-view";
 import {
+  fetchLeadCounts,
   fetchLeadsPage,
   fetchPackFields,
+  fetchStageCounts,
   formatAgo,
   groupByStage,
-  matchesFilters,
+  hasLeadFilters,
+  LEAD_PAGE_SIZE,
+  NO_LEAD_FILTERS,
   parseMinScore,
   qualificationSummary,
   TEMPERATURE_LABEL,
-  temperatureCounts,
+  type LeadCounts,
   type LeadCursor,
+  type LeadFilters,
   type PackFieldInfo,
   type TemperatureFilter,
 } from "./data";
@@ -30,8 +36,10 @@ import { ScoreBadge } from "./score-badge";
 // dragging cards isn't part of Day 3. Score and temperature are shown as Dev 1's engine stored them.
 
 // Leads are read a page at a time (data.ts, fetchLeadsPage; the state machine is paging.ts): the board never assumes
-// every lead came in one answer. Filters and the counts on them are worked out over the leads loaded so far, the same
-// way for every page; while older leads remain, the screen says so and "Load more leads" reads the next page.
+// every lead came in one answer. The filters are applied by the database, so a filtered board reads only the leads it shows,
+// and the numbers on the chips, in the heading and on the columns are the database's counts for the whole business
+// (fetchLeadCounts, fetchStageCounts), never worked out from the page on screen. Changing a filter starts over from the first
+// page. While older matching leads remain, the screen says so and "Load more leads" reads the next page.
 
 const FILTERS: TemperatureFilter[] = ["all", "hot", "warm", "cold", "disqualified", "unscored"];
 
@@ -46,14 +54,26 @@ const chip = (on: boolean): CSSProperties => ({
   cursor: "pointer",
 });
 
+type CountsState = { status: "loading" } | { status: "error" } | { status: "ready"; data: LeadCounts };
+
+/** How long a typed minimum score waits for the next key before the list is read again. */
+const MIN_SCORE_PAUSE_MS = 400;
+
 export function LeadsBoard({ tenantId, timeZone }: { tenantId: string; timeZone: string }) {
   const [state, dispatch] = useReducer(leadsPagingReducer, undefined, () => initialLeadsPaging());
   const [temperature, setTemperature] = useState<TemperatureFilter>("all");
   const [minScoreText, setMinScoreText] = useState("");
+  /** The filters the list was last asked for: a temperature at once, a typed score after a short pause. */
+  const [applied, setApplied] = useState<LeadFilters>(NO_LEAD_FILTERS);
+  const [counts, setCounts] = useState<CountsState>({ status: "loading" });
+  const [stageCounts, setStageCounts] = useState<{ key: string; counts: Record<string, number> } | null>(null);
+  /** Goes up on every successful refresh, so the per-stage counts are read again with the list. */
+  const [refreshes, setRefreshes] = useState(0);
   const [now] = useState(() => new Date());
-  // Every start of the first page gets a new number; an answer carrying an older one (another business, an earlier try)
-  // is dropped by the reducer.
+  // Every start of the first page gets a new number; an answer carrying an older one (an earlier filter, an earlier try)
+  // is dropped by the reducer. The counts have their own.
   const generation = useRef(0);
+  const countsGeneration = useRef(0);
 
   const load = useCallback(() => {
     const g = ++generation.current;
@@ -61,29 +81,56 @@ export function LeadsBoard({ tenantId, timeZone }: { tenantId: string; timeZone:
     const client = getSupabaseBrowserClient();
     // Labels are a nicety: without the pack, answers show with their keys.
     const packFields = fetchPackFields(client, tenantId).catch((): PackFieldInfo[] => []);
-    return Promise.all([fetchLeadsPage(client, tenantId), packFields]).then(
+    return Promise.all([fetchLeadsPage(client, tenantId, null, LEAD_PAGE_SIZE, applied), packFields]).then(
       ([page, fields]) => dispatch({ type: "first_loaded", generation: g, page, packFields: fields }),
       (err: unknown) => dispatch({ type: "first_failed", generation: g, error: formatError(err) }),
     );
-  }, [tenantId]);
+  }, [tenantId, applied]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  // The numbers for the whole business, read apart from the list so each fails on its own. If they fail the numbers are left
+  // out (and the list still works); they are never replaced by a count of what is loaded.
+  const loadCounts = useCallback(() => {
+    const g = ++countsGeneration.current;
+    return fetchLeadCounts(getSupabaseBrowserClient(), tenantId).then(
+      (data) => {
+        if (g === countsGeneration.current) setCounts({ status: "ready", data });
+      },
+      () => {
+        if (g === countsGeneration.current) setCounts((prev) => (prev.status === "ready" ? prev : { status: "error" }));
+      },
+    );
+  }, [tenantId]);
+
+  useEffect(() => {
+    void loadCounts();
+  }, [loadCounts]);
+
+  // A typed score is read after a short pause; anything that isn't a number yet changes nothing (the message under the box says why).
+  useEffect(() => {
+    const parsed = parseMinScore(minScoreText);
+    if (parsed === undefined) return;
+    const timer = setTimeout(() => setApplied((a) => (a.minScore === parsed ? a : { ...a, minScore: parsed })), MIN_SCORE_PAUSE_MS);
+    return () => clearTimeout(timer);
+  }, [minScoreText]);
+
   const loadMore = (from: LeadCursor) => {
     // One page at a time: the reducer ignores a second request while one is running.
     const g = generation.current;
     dispatch({ type: "more_started", generation: g });
-    return fetchLeadsPage(getSupabaseBrowserClient(), tenantId, from).then(
+    return fetchLeadsPage(getSupabaseBrowserClient(), tenantId, from, LEAD_PAGE_SIZE, applied).then(
       (page) => dispatch({ type: "more_loaded", generation: g, from, page }),
       (err: unknown) => dispatch({ type: "more_failed", generation: g, from, error: formatError(err) }),
     );
   };
 
-  // Read again without clearing the screen: the newest page is merged into what is held (leads already read stay), and
-  // if a burst may have left a gap the list starts over from the first page instead. Used by the Refresh button and,
-  // when the database sends changes, by Realtime (below). A failed read leaves the list as it was and says so.
+  // Read again without clearing the screen. With no filter the newest page is merged into what is held (leads already read
+  // stay), and if a burst may have left a gap the list starts over from the first page. With a filter the list becomes the
+  // newest page, because a lead can stop matching and a merge would never drop it. The numbers are read again too. Used by
+  // the Refresh button and, when the database sends changes, by Realtime (below). A failed read leaves the list as it was.
   const latest = useRef(state);
   useEffect(() => {
     latest.current = state;
@@ -91,14 +138,17 @@ export function LeadsBoard({ tenantId, timeZone }: { tenantId: string; timeZone:
   const refresh = useCallback(async () => {
     const g = generation.current;
     if (latest.current.phase !== "ready" || latest.current.refresh === "loading") return;
+    void loadCounts();
     dispatch({ type: "refresh_started", generation: g });
+    const filtering = hasLeadFilters(applied);
     try {
-      const page = await fetchLeadsPage(getSupabaseBrowserClient(), tenantId);
-      if (refreshLeavesGap(latest.current.leads, page)) {
+      const page = await fetchLeadsPage(getSupabaseBrowserClient(), tenantId, null, LEAD_PAGE_SIZE, applied);
+      if (!filtering && refreshLeavesGap(latest.current.leads, page)) {
         await load();
         return;
       }
-      dispatch({ type: "refreshed", generation: g, page });
+      dispatch({ type: "refreshed", generation: g, page, replace: filtering });
+      setRefreshes((n) => n + 1);
     } catch (err) {
       dispatch({ type: "refresh_failed", generation: g, error: formatError(err) });
     }
@@ -108,20 +158,40 @@ export function LeadsBoard({ tenantId, timeZone }: { tenantId: string; timeZone:
   const live = useTableRefresh(tenantId, ["leads"], refresh);
 
   const ready = state.phase === "ready";
-  // "123+" while older leads are still unread: a count over what is loaded is a minimum, and says so.
-  const plus = state.next !== null ? "+" : "";
-
-  const minScore = parseMinScore(minScoreText);
-  const minScoreInvalid = minScore === undefined;
   const leads = ready ? state.leads : [];
-  const filtered = leads.filter((l) => matchesFilters(l, { temperature, minScore: minScore ?? null }));
-  const counts = temperatureCounts(leads);
-  const filtering = temperature !== "all" || (minScore !== null && minScore !== undefined);
-  const open = leads.filter((l) => l.stage !== "won" && l.stage !== "lost").length;
+  const truncated = ready && state.next !== null;
+  const filtering = hasLeadFilters(applied);
+  const minScoreInvalid = parseMinScore(minScoreText) === undefined;
+  const serverCounts = counts.status === "ready" ? counts.data : null;
+  const stageKey = `${applied.temperature}|${applied.minScore ?? ""}`;
 
+  // The per-stage counts are only worth a request when the list is cut short: otherwise what is loaded is every matching lead.
+  useEffect(() => {
+    if (!truncated) return;
+    let cancelled = false;
+    void fetchStageCounts(getSupabaseBrowserClient(), tenantId, applied).then(
+      (c) => {
+        if (!cancelled) setStageCounts({ key: stageKey, counts: c });
+      },
+      () => {
+        // the columns keep saying "N+": a minimum, never a guess
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [truncated, tenantId, applied, stageKey, state.generation, refreshes]);
+
+  const countFor = (f: TemperatureFilter): number | null => (serverCounts === null ? null : f === "all" ? serverCounts.total : serverCounts[f]);
+  const showFilters = serverCounts !== null ? serverCounts.total > 0 || filtering : leads.length > 0 || filtering;
+  const pickTemperature = (f: TemperatureFilter) => {
+    setTemperature(f);
+    setApplied((a) => (a.temperature === f ? a : { ...a, temperature: f }));
+  };
   const clear = () => {
     setTemperature("all");
     setMinScoreText("");
+    setApplied(NO_LEAD_FILTERS);
   };
 
   return (
@@ -130,18 +200,18 @@ export function LeadsBoard({ tenantId, timeZone }: { tenantId: string; timeZone:
         <div>
           <h1 className="app-h1">Leads</h1>
           <p style={{ margin: "4px 0 0", color: "var(--color-neutral-700)" }}>
-            {ready ? `${open}${plus} open · ${counts.hot}${plus} hot` : "Every WhatsApp enquiry, by stage."}
+            {ready ? headingText(serverCounts) : "Every WhatsApp enquiry, by stage."}
           </p>
         </div>
         {ready ? <RefreshControl live={live} refreshing={state.refresh === "loading"} failed={state.refresh === "error"} onRefresh={() => void refresh()} /> : null}
       </div>
 
-      {ready && leads.length > 0 ? (
+      {showFilters ? (
         <div style={{ display: "flex", gap: "12px 16px", flexWrap: "wrap", alignItems: "flex-end" }}>
           <div role="group" aria-label="Temperature" style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-            {FILTERS.filter((f) => f === "all" || f === "hot" || f === "warm" || f === "cold" || counts[f] > 0).map((f) => (
-              <button key={f} type="button" aria-pressed={temperature === f} style={chip(temperature === f)} onClick={() => setTemperature(f)}>
-                {f === "all" ? "All" : TEMPERATURE_LABEL[f]} · {counts[f]}{plus}
+            {FILTERS.filter((f) => f === "all" || f === "hot" || f === "warm" || f === "cold" || temperature === f || (countFor(f) ?? 0) > 0).map((f) => (
+              <button key={f} type="button" aria-pressed={temperature === f} style={chip(temperature === f)} onClick={() => pickTemperature(f)}>
+                {chipLabel(f === "all" ? "All" : TEMPERATURE_LABEL[f], countFor(f))}
               </button>
             ))}
           </div>
@@ -174,6 +244,22 @@ export function LeadsBoard({ tenantId, timeZone }: { tenantId: string; timeZone:
         </div>
       ) : null}
 
+      {counts.status === "error" ? (
+        <p role="status" className="app-hint" style={{ margin: 0 }}>
+          Couldn’t count all your leads, so the totals are left out.{" "}
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => {
+              setCounts({ status: "loading" });
+              void loadCounts();
+            }}
+          >
+            Try again
+          </button>
+        </p>
+      ) : null}
+
       {state.phase === "loading" ? <LoadingState compact title="Loading your leads" /> : null}
       {state.phase === "error" && state.error ? (
         <ErrorState
@@ -186,21 +272,20 @@ export function LeadsBoard({ tenantId, timeZone }: { tenantId: string; timeZone:
         />
       ) : null}
 
-      {ready && leads.length === 0 ? (
+      {ready && leads.length === 0 && !filtering ? (
         <EmptyState compact title="No leads yet" description="Every new WhatsApp enquiry becomes a lead here. The AI fills in their answers and moves them along as they reply." />
       ) : null}
 
-      {ready && state.next !== null ? (
+      {truncated ? (
         <p className="app-notice" style={{ margin: 0 }}>
-          Showing the {leads.length} most recently updated leads. Filters and counts cover these; load more to include older ones.
+          {truncationNotice({ loaded: leads.length, total: state.total, filtering })}
         </p>
       ) : null}
 
-      {ready && leads.length > 0 && filtered.length === 0 && !minScoreInvalid ? (
+      {ready && leads.length === 0 && filtering ? (
         <EmptyState
           compact
           title="No leads match these filters"
-          description={state.next !== null ? "None of the leads loaded so far match. Load more to look through older ones." : undefined}
           action={
             <button type="button" className="btn btn-secondary" onClick={clear}>
               Clear filters
@@ -209,14 +294,17 @@ export function LeadsBoard({ tenantId, timeZone }: { tenantId: string; timeZone:
         />
       ) : null}
 
-      {ready && filtered.length > 0 ? (
+      {ready && leads.length > 0 ? (
         <div className="app-leads-board" data-testid="leads-board">
           <div style={{ display: "grid", gridAutoFlow: "column", gridAutoColumns: "minmax(232px, 232px)", gap: "2px", background: "var(--color-divider)", borderTop: "2px solid var(--color-text)", width: "max-content", minHeight: "320px" }}>
-            {groupByStage(filtered).map((col) => (
-              <section key={col.stage} aria-label={`${col.label} · ${col.leads.length}`} data-stage={col.stage} style={{ background: "var(--color-bg)", display: "flex", flexDirection: "column", gap: "8px", padding: "12px 10px 16px" }}>
+            {groupByStage(leads).map((col) => {
+              const exact = truncated && stageCounts?.key === stageKey ? stageCounts.counts[col.stage] : undefined;
+              const countText = stageCountLabel({ loaded: col.leads.length, truncated, exact });
+              return (
+              <section key={col.stage} aria-label={`${col.label} · ${countText}`} data-stage={col.stage} style={{ background: "var(--color-bg)", display: "flex", flexDirection: "column", gap: "8px", padding: "12px 10px 16px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "0 2px 6px" }}>
                   <h2 style={{ margin: 0, fontSize: "12px", fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase" }}>{col.label}</h2>
-                  <span style={{ fontSize: "13px", color: "var(--color-neutral-700)", fontWeight: 600 }}>{col.leads.length}</span>
+                  <span style={{ fontSize: "13px", color: "var(--color-neutral-700)", fontWeight: 600 }}>{countText}</span>
                 </div>
                 {col.leads.map((l) => {
                   const summary = qualificationSummary(l.answers, state.packFields);
@@ -241,9 +329,10 @@ export function LeadsBoard({ tenantId, timeZone }: { tenantId: string; timeZone:
                     </Link>
                   );
                 })}
-                {col.leads.length === 0 ? <div style={{ fontSize: "12px", color: "var(--color-neutral-700)", padding: "8px 2px" }}>Nothing here</div> : null}
+                {col.leads.length === 0 ? <div style={{ fontSize: "12px", color: "var(--color-neutral-700)", padding: "8px 2px" }}>{truncated && exact !== undefined && exact > 0 ? "None loaded yet" : "Nothing here"}</div> : null}
               </section>
-            ))}
+              );
+            })}
           </div>
         </div>
       ) : null}

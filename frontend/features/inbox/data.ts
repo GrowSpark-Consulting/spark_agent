@@ -10,7 +10,7 @@ import { z } from "zod";
 //   * No unread tracking exists (no column or table), so there are no unread counts.
 //   * No staff names (messages has no user column, there is no profile table): staff bubbles say "Staff".
 //   * No persona name yet (tenants.agent_settings has no agreed shape): AI bubbles say "AI".
-//   * No conversation → lead link, so no score and no lead card.
+//   * No conversation → lead link, so no score chip in the list (the lead card finds the lead through the contact).
 //   * The list loads the newest CONVERSATION_LIMIT conversations by creation time and is sorted by
 //     each one's newest loaded message. Migration 0010 adds conversations.last_message_at; once it is
 //     applied everywhere, order and page by that column in the query instead.
@@ -567,6 +567,29 @@ export async function fetchConversations(client: SupabaseClient, tenantId: strin
   const parsed = z.array(ConversationListRow).safeParse(data ?? []);
   if (!parsed.success) throw new InboxDataError("conversation");
   return sortConversations(parsed.data.filter((r) => r.tenant_id === tenantId).map(toConversationSummary));
+}
+
+/**
+ * One conversation of the member's business by id, shaped like a list row, or null when there is none (an unknown id, or
+ * another business's: never returned). The list only holds the newest CONVERSATION_LIMIT chats, so a link to an older chat
+ * (a staff alert, a takeover link) reads it here instead of opening nothing.
+ */
+export async function fetchConversation(client: SupabaseClient, tenantId: string, conversationId: string): Promise<ConversationSummary | null> {
+  const { data, error } = await client
+    .from("conversations")
+    .select(CONVERSATION_COLUMNS)
+    .eq("tenant_id", tenantId)
+    .eq("id", conversationId)
+    .is("handoffs.resolved_at", null)
+    .neq("messages.sender", "system")
+    .order("created_at", { ascending: false, referencedTable: "messages" })
+    .limit(1, { referencedTable: "messages" })
+    .limit(1);
+  if (error) throw error;
+  const parsed = z.array(ConversationListRow).safeParse(data ?? []);
+  if (!parsed.success) throw new InboxDataError("conversation");
+  const row = parsed.data.find((r) => r.tenant_id === tenantId && r.id === conversationId);
+  return row ? toConversationSummary(row) : null;
 }
 
 /** The newest MESSAGE_LIMIT messages of one conversation, oldest first. */

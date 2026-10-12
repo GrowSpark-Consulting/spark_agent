@@ -1,12 +1,15 @@
 "use client";
 
+import type { Role } from "@pakka/types";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { RefreshControl } from "@/components/shared/refresh-control";
 import { EmptyState, ErrorState, LoadingState } from "@/components/shared/states";
+import { FlashStatus, useFlash } from "@/features/knowledge/flash";
 import { formatError, type FormattedError } from "@/lib/errors";
 import { useTableRefresh } from "@/lib/realtime/use-table-refresh";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { BookingActionsPanel, type ActionDone } from "./booking-actions-panel";
 import { bookingTitle, kindLabel, STATUS_LABEL, STATUS_STYLE, type Booking } from "./bookings";
 import {
   agendaOrder,
@@ -26,10 +29,11 @@ import {
 } from "./data";
 import { addDays, formatDate, formatSpan, formatTime, formatWhen, isDateString, localParts } from "./time";
 
-// The real Calendar (Day 3, read-only): the /dashboard/preview Calendar's layout (features/calendar/
-// pakka-calendar.tsx: Day/Week switch, staff chips, legend, hour grid with booking blocks, a side panel;
-// an agenda list on phones) on bookings and resources read under RLS. Times are in the business's time
-// zone. Nothing here creates, moves or cancels a booking.
+// The real Calendar: the /dashboard/preview Calendar's layout (features/calendar/pakka-calendar.tsx:
+// Day/Week switch, staff chips, legend, hour grid with booking blocks, a side panel; an agenda list on
+// phones) on bookings and resources read under RLS. Times are in the business's time zone. Reading is
+// direct; changing a booking (move, cancel, mark visited, no-show: Day 5) goes only through Dev 2's booking
+// routes (booking-actions-panel.tsx), after which the range is read again. Creating a booking is not here.
 
 /** `key` names the range the answer is for: an answer for another range shows as loading. */
 type Data =
@@ -74,12 +78,17 @@ function timeRange(b: Booking, timeZone: string): string {
 
 export function CalendarScreen({
   tenantId,
+  role,
+  userId,
   timeZone,
   initialView,
   initialDate,
   initialResource,
 }: {
   tenantId: string;
+  role: Role;
+  /** The signed-in member: staff may change only bookings whose resource is theirs. */
+  userId: string;
   timeZone: string;
   initialView: CalendarView;
   /** "YYYY-MM-DD" in the business's zone; null = today there. */
@@ -94,6 +103,7 @@ export function CalendarScreen({
   const [showInactive, setShowInactive] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<Data>({ status: "loading" });
+  const [toast, flash] = useFlash();
   const latest = useRef(0);
 
   // The "now" line and lapsing holds follow the clock.
@@ -175,6 +185,21 @@ export function CalendarScreen({
   const hours = gridHours(shown, range.days, timeZone);
   const counts = summarize(shown);
   const selected = shown.find((b) => b.id === selectedId) ?? null;
+
+  // Stable on purpose: the actions panel looks up free times in an effect that depends on this. An inline arrow made it a new function on
+  // every render of this screen, so any refresh (a Realtime change, a toast) reloaded the offered times and cleared the one picked.
+  const readAgain = useCallback(() => void refresh(), [refresh]);
+
+  // A booking action succeeded: read the range again (what is on screen is what the database says now), keep the panel on
+  // the booking it names when it is still shown, and say what happened. A failed re-read says so (the Refresh button stays).
+  const actionDone = useCallback(
+    ({ message, selectId }: ActionDone) => {
+      setSelectedId(selectId);
+      flash(message);
+      void refresh();
+    },
+    [flash, refresh],
+  );
 
   const step = (n: number) => {
     setDate(addDays(date, view === "day" ? n : 7 * n));
@@ -263,7 +288,7 @@ export function CalendarScreen({
             Show cancelled, moved and expired
           </label>
           <span className="app-hint" style={{ margin: 0 }}>
-            Read-only: bookings can’t be changed from the dashboard yet.
+            Select a booking to move it, cancel it or mark the visit.
           </span>
         </div>
 
@@ -423,7 +448,29 @@ export function CalendarScreen({
         ) : null}
       </div>
 
-      {selected ? <BookingPanel booking={selected} timeZone={timeZone} onClose={() => setSelectedId(null)} /> : null}
+      {selected ? (
+        <BookingPanel
+          booking={selected}
+          timeZone={timeZone}
+          onClose={() => setSelectedId(null)}
+          actions={
+            <BookingActionsPanel
+              // Another booking, or one whose status just changed, starts from a clean panel.
+              key={`${selected.id}:${selected.shown}`}
+              booking={selected}
+              tenantId={tenantId}
+              role={role}
+              userId={userId}
+              resourceUserId={resources.find((r) => r.id === selected.resourceId)?.userId ?? null}
+              now={now}
+              timeZone={timeZone}
+              onDone={actionDone}
+              onStale={readAgain}
+            />
+          }
+        />
+      ) : null}
+      <FlashStatus toast={toast} />
     </div>
   );
 }
@@ -447,7 +494,7 @@ function Legend() {
   );
 }
 
-function BookingPanel({ booking: b, timeZone, onClose }: { booking: ShownBooking; timeZone: string; onClose: () => void }) {
+function BookingPanel({ booking: b, timeZone, onClose, actions }: { booking: ShownBooking; timeZone: string; onClose: () => void; actions: ReactNode }) {
   const s = STATUS_STYLE[b.shown];
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -490,12 +537,10 @@ function BookingPanel({ booking: b, timeZone, onClose }: { booking: ShownBooking
           ))}
         </dl>
         {b.shown === "held" ? <p style={{ margin: 0, fontSize: "14px", color: "var(--color-neutral-700)" }}>Not confirmed yet: the customer is still choosing. It isn’t an appointment until it’s confirmed.</p> : null}
+        {actions}
         <Link className="btn btn-secondary" href={`/dashboard/leads/${b.leadId}`} style={{ alignSelf: "flex-start" }}>
           Open lead
         </Link>
-        <p className="app-hint" style={{ margin: 0 }}>
-          Rescheduling, cancelling and marking visits aren’t available from the dashboard yet.
-        </p>
       </aside>
     </>
   );

@@ -12,7 +12,7 @@ export const metadata: Metadata = { title: "Calendar · Spark Agent" };
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 // /dashboard/calendar[?view=week&date=YYYY-MM-DD&resource=<id>|none]. The tenant and its time zone come
-// from the session; the query only picks the view. Read-only for Day 3.
+// from the session; the query only picks the view. Bookings are read here and changed through the API (Day 5).
 export default async function CalendarPage({ searchParams }: PageProps<"/dashboard/calendar">) {
   const view = await requireDashboardView();
   if (view.kind === "no_business") {
@@ -21,7 +21,7 @@ export default async function CalendarPage({ searchParams }: PageProps<"/dashboa
   const query = await searchParams;
   const date = first(query.date);
   const resource = first(query.resource);
-  const { tenant } = view.context;
+  const { tenant, role, user } = view.context;
   if (!isValidTimeZone(tenant.timezone)) {
     return <ErrorState title="Your business's time zone isn't recognised" description={`Bookings can't be placed on the calendar until it's fixed (it is set to “${tenant.timezone}”).`} />;
   }
@@ -29,6 +29,8 @@ export default async function CalendarPage({ searchParams }: PageProps<"/dashboa
     <CalendarScreen
       key={tenant.id}
       tenantId={tenant.id}
+      role={role}
+      userId={user.id}
       timeZone={tenant.timezone}
       initialView={first(query.view) === "week" ? "week" : "day"}
       initialDate={date && isDateString(date) ? date : null}

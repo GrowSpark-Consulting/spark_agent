@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { NoBusinessNotice } from "@/components/dashboard/no-business";
 import { WhatsAppConnectionPanel } from "@/components/dashboard/whatsapp-connection-panel";
 import { LoadingState } from "@/components/shared/states";
+import { HomeOverview } from "@/features/home/home-overview";
 import { calendarReturn } from "@/features/settings/google-calendar";
 import { requireDashboardView } from "@/lib/auth/session";
 import { packLabel } from "@/lib/format";
@@ -37,6 +38,8 @@ export default async function HomePage({ searchParams }: PageProps<"/dashboard">
         <h1 className="app-h1">{tenant.name}</h1>
         <p className="app-lede">Signed in as {user.email ?? "a team member"}.</p>
       </div>
+
+      <HomeOverview key={tenant.id} tenantId={tenant.id} />
 
       <section aria-labelledby="biz-heading" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <h2 id="biz-heading" className="app-section-title">Your business</h2>

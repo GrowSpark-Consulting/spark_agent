@@ -6,6 +6,7 @@ import { useState, type FormEvent } from "react";
 import { ErrorState, LoadingState } from "@/components/shared/states";
 import { postJson } from "@/lib/api/client";
 import { formatError, type FormattedError } from "@/lib/errors";
+import { readTestMessageResult, ResultDataError, unconfirmedFailure } from "@/lib/whatsapp/results";
 import { useTenant } from "./tenant-context";
 
 export type ConnectionHint = "connected" | "not_connected" | "unknown";
@@ -43,10 +44,11 @@ export function SendTestMessageForm({ connection, businessName }: { connection: 
     setFields({});
     setStatus({ kind: "sending" });
     try {
-      const result = await postJson<SendTestMessageResult>("/api/messages/test", parsed.data, { tenantId: tenant.id });
+      // Checked, not just cast: a 2xx with another body must not read as "WhatsApp accepted the message".
+      const result = readTestMessageResult(await postJson<unknown>("/api/messages/test", parsed.data, { tenantId: tenant.id }));
       setStatus({ kind: "sent", result, to: parsed.data.to });
     } catch (err) {
-      const error = formatError(err);
+      const error = err instanceof ResultDataError ? unconfirmedFailure(err) : formatError(err);
       setFields(error.fields ?? {});
       setStatus({ kind: "failed", error });
       focusFirstInvalid(error.fields ?? {});

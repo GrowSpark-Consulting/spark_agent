@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import { EmptyState, ErrorState, LoadingState } from "@/components/shared/states";
 import type { FormattedError } from "@/lib/errors";
 import {
+  CONVERSATION_LIMIT,
   conversationTag,
   formatListTime,
   matchesFilter,
@@ -45,7 +46,8 @@ const chip = (active: boolean): CSSProperties => ({
 export type ListState =
   | { status: "loading" }
   | { status: "error"; error: FormattedError }
-  | { status: "ready"; items: ConversationSummary[] };
+  /** `truncated`: the newest page was full, so older chats exist that this list doesn't hold. */
+  | { status: "ready"; items: ConversationSummary[]; truncated?: boolean };
 
 export function ConversationList({
   list,
@@ -116,6 +118,12 @@ export function ConversationList({
             Refresh
           </button>
         </div>
+      ) : null}
+
+      {list.status === "ready" && list.truncated ? (
+        <p role="status" data-testid="inbox-list-truncated" className="app-hint" style={{ margin: 0, padding: "8px 16px", borderBottom: "1px solid var(--color-divider)", flex: "none" }}>
+          Showing your newest {CONVERSATION_LIMIT} chats. Older chats aren&apos;t listed here.
+        </p>
       ) : null}
 
       <div style={{ flex: "1", minHeight: "0", overflow: "auto" }}>
