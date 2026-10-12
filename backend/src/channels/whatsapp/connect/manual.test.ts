@@ -38,7 +38,7 @@ const SIXTH_OK: Check = { key: "test_message_delivered", status: "pass", message
 
 type Existing = { id: string; tenantId: string; channelId: string; method: string; status: string };
 
-function setup(probe: MetaProbe = GOOD, existing: Existing | null = null, over: { graph?: Graph; webhookSeen?: boolean; sixth?: Check } = {}) {
+function setup(probe: MetaProbe = GOOD, existing: Existing | null = null, over: { graph?: Graph; webhookSeen?: boolean; webhookSeenLater?: boolean; sixth?: Check } = {}) {
   const saved: { record: ConnectionRecord; replace: boolean }[] = [];
   const updates: { id: string; tenantId: string; lastCheck: unknown }[] = [];
   const db: ManualConnectDb = {
@@ -63,6 +63,7 @@ function setup(probe: MetaProbe = GOOD, existing: Existing | null = null, over: 
       updates.push({ id, tenantId, lastCheck });
     },
   };
+  let seenCalls = 0;
   const probeFn = vi.fn(async () => probe);
   const audit = vi.fn(async () => {});
   const testMessage = vi.fn(async () => over.sixth ?? SIXTH_OK);
@@ -74,7 +75,7 @@ function setup(probe: MetaProbe = GOOD, existing: Existing | null = null, over: 
     now: () => new Date("2026-10-09T00:00:00Z"),
     newId: () => NEW_ID,
     graph: over.graph ?? healthyGraph,
-    webhookSeen: async () => over.webhookSeen ?? true,
+    webhookSeen: async () => (++seenCalls === 1 ? (over.webhookSeen ?? true) : (over.webhookSeenLater ?? over.webhookSeen ?? true)),
     testMessage,
   };
   return { saved, updates, testMessage, probeFn, audit, run: (input: unknown = INPUT, actor = "user-1") => connectManual(input, actor, deps) };
@@ -277,6 +278,23 @@ describe("the six checks when a number is connected", () => {
     const everything = JSON.stringify([result, s.updates, s.audit.mock.calls]);
     expect(everything).not.toContain(TOKEN);
     expect(everything).not.toContain(APP_SECRET);
+  });
+});
+
+describe("connectManual: a webhook that arrives while the test message is sent", () => {
+  const statusesOf = (last: unknown) => (last as { checks: { status: string }[] }).checks.map((c) => c.status);
+
+  it("is not lost: the saved result shows the webhook check as passed, and overall is worked out from it", async () => {
+    const s = setup(GOOD, null, { webhookSeen: false, webhookSeenLater: true });
+    const result = await s.run();
+    expect(s.saved[0].record.lastCheck.checks[2].status).toBe("not_verified"); // as first saved
+    expect(statusesOf(result.last_check)).toEqual(["pass", "pass", "pass", "pass", "pass", "pass"]);
+    expect(s.updates).toEqual([{ id: NEW_ID, tenantId: A, lastCheck: expect.objectContaining({ overall: "pass" }) }]);
+  });
+
+  it("when none arrives, the webhook check is still waiting after the test message", async () => {
+    const s = setup(GOOD, null, { webhookSeen: false });
+    expect(statusesOf((await s.run()).last_check)[2]).toBe("not_verified");
   });
 });
 

@@ -178,10 +178,24 @@ export function overallOf(checks: readonly Check[]): LastCheck["overall"] {
 /** The sixth check as it stands before the test message is tried. */
 export const testMessageNotYet = (now: Date): Check => make("test_message_delivered", "not_verified", SAFE.later, now);
 
+/** Puts a new check in place of the one with its key and works out `overall` again. `ran_at` is left as it was. */
+export function withCheck(last: LastCheck, check: Check): LastCheck {
+  const checks = last.checks.map((c) => (c.key === check.key ? check : c));
+  return { ...last, checks, overall: overallOf(checks) };
+}
+
 /** Puts a new sixth check into a result and works out `overall` again. */
 export function withTestMessage(last: LastCheck, check: Check): LastCheck {
-  const checks = last.checks.map((c) => (c.key === "test_message_delivered" ? check : c));
-  return { ...last, checks, overall: overallOf(checks) };
+  return withCheck(last, check);
+}
+
+/**
+ * A signed webhook from the business's own app has arrived: a webhook check that was only waiting for it (`not_verified`) becomes a pass. Anything else, including a
+ * warning that Meta lists no subscription, is left as it is, and the same object comes back when nothing changes.
+ */
+export function withWebhookConfirmed(last: LastCheck, now: Date): LastCheck {
+  const waiting = last.checks.find((c) => c.key === "webhook_subscribed" && c.status === "not_verified");
+  return waiting ? withCheck(last, make("webhook_subscribed", "pass", SAFE.webhookPass, now)) : last;
 }
 
 export interface GraphChecksInput {

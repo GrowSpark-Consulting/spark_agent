@@ -6,7 +6,7 @@ import { serverEnv } from "../../../lib/env";
 import { writeAudit, type AuditEntry } from "../../../lib/audit";
 import { AppError, zodFieldErrors } from "../../../lib/errors";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
-import { graph as realGraph, isExpiredTokenAnswer, runGraphChecks, withTestMessage, type Check, type Graph, type LastCheck, type NumberFacts } from "./checks";
+import { graph as realGraph, isExpiredTokenAnswer, runGraphChecks, withTestMessage, withWebhookConfirmed, type Check, type Graph, type LastCheck, type NumberFacts } from "./checks";
 import { checkTestMessage } from "./test-message-check";
 import { webhookWasSeen } from "./webhook-seen";
 
@@ -174,6 +174,7 @@ export async function connectManual(
   const info = probe.state === "ok" ? probe.info : { displayPhone: null, verifiedName: null, qualityRating: null };
   // Whether an app ends up subscribed to the account's webhooks (null: not asked). The webhook check subscribes ours when none is, best effort.
   let subscribed: boolean | null = null;
+  let seenBefore: boolean | undefined; // what the proof read said while the checks ran
   // The five checks that need only Meta's answers. The sixth (a test message) waits until the number is saved as active.
   const lastCheck = await runGraphChecks(
     {
@@ -187,7 +188,7 @@ export async function connectManual(
       },
       inAccount: probe.state === "ok" && probe.numberInAccount,
       facts: { nameStatus: info.facts?.nameStatus ?? null, platformType: info.facts?.platformType ?? null },
-      webhookSeen: () => deps.webhookSeen(input.tenantId, id),
+      webhookSeen: async () => (seenBefore = await deps.webhookSeen(input.tenantId, id)),
     },
     deps.graph,
     deps.now(),
@@ -231,7 +232,9 @@ export async function connectManual(
   // The sixth check, only for a number that is active (notify.send refuses any other). It never changes the status; a failure here keeps the connection as saved.
   if (saved.data.status !== "active") return saved.data;
   try {
-    const withSixth = withTestMessage(lastCheck, await deps.testMessage(saved.data.tenant_id, actor));
+    const sixth = withTestMessage(lastCheck, await deps.testMessage(saved.data.tenant_id, actor));
+    // The test message can bring the first signed webhook of the business's own app; read the proof again so the result saved now does not undo what it cleared.
+    const withSixth = seenBefore !== true && (await deps.webhookSeen(saved.data.tenant_id, saved.data.id)) ? withWebhookConfirmed(sixth, deps.now()) : sixth;
     await deps.db.updateLastCheck(saved.data.id, saved.data.tenant_id, withSixth);
     return { ...saved.data, last_check: withSixth };
   } catch {

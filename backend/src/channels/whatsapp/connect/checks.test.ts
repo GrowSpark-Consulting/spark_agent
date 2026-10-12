@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { subscribeApp, checkDisplayName, checkNumber, checkPayment, checkToken, checkWebhook, isExpiredTokenAnswer, overallOf, runGraphChecks, SAFE, withTestMessage, type Check, type Graph, type GraphAnswer } from "./checks";
+import { subscribeApp, withCheck, withWebhookConfirmed, checkDisplayName, checkNumber, checkPayment, checkToken, checkWebhook, isExpiredTokenAnswer, overallOf, runGraphChecks, SAFE, withTestMessage, type Check, type Graph, type GraphAnswer } from "./checks";
 
 // The six validation checks (Day 5): what each one answers for each thing Meta can say, in fixed words. Nothing Meta says and no token is ever in a message.
 
@@ -260,6 +260,36 @@ describe("all of them together", () => {
   it("no message in any result holds the token", async () => {
     const last = await runGraphChecks(input, healthy, NOW);
     expect(JSON.stringify(last)).not.toContain(TOKEN);
+  });
+});
+
+describe("swapping one check in a stored result", () => {
+  const stored = (webhook: Check["status"], payment: Check["status"] = "pass") => {
+    const checks: Check[] = [
+      { key: "token_permissions", status: "pass", message: "m", checked_at: NOW.toISOString() },
+      { key: "webhook_subscribed", status: webhook, message: SAFE.webhookWaiting, checked_at: NOW.toISOString() },
+      { key: "payment_method", status: payment, message: "m", checked_at: NOW.toISOString() },
+    ];
+    return { ran_at: NOW.toISOString(), overall: overallOf(checks), checks };
+  };
+  it("withCheck replaces the check with that key and works overall out again", () => {
+    const next = withCheck(stored("not_verified"), { key: "webhook_subscribed", status: "pass", message: "ok", checked_at: NOW.toISOString() });
+    expect(next.checks[1]).toMatchObject({ status: "pass", message: "ok" });
+    expect(next.overall).toBe("pass");
+    expect(next.ran_at).toBe(NOW.toISOString());
+  });
+  it("withWebhookConfirmed turns a waiting webhook check into a pass and nothing else", () => {
+    const later = new Date("2026-10-12T09:05:00.000Z");
+    const next = withWebhookConfirmed(stored("not_verified", "warn"), later);
+    expect(next.checks[1]).toMatchObject({ key: "webhook_subscribed", status: "pass", message: SAFE.webhookPass, checked_at: later.toISOString() });
+    expect(next.overall).toBe("warn");
+    expect(next.checks[0]).toEqual(stored("not_verified").checks[0]);
+  });
+  it("withWebhookConfirmed leaves every other state as it is, and returns the same object when there is nothing to change", () => {
+    for (const status of ["pass", "warn", "fail", "skipped"] as const) {
+      const last = stored(status);
+      expect(withWebhookConfirmed(last, NOW)).toBe(last);
+    }
   });
 });
 
