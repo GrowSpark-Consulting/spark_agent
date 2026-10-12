@@ -75,7 +75,7 @@ A STOP chat's later turns show the gate's opted-out outcome.
 
 ## The files
 
-- `01`-`11`: the first chats: price questions (English, Tanglish), off-topic, "are you a bot?", prompt injection, STOP, no
+- `01`-`11`: the first chats: price questions (English, Tanglish), off-topic, "are you a bot?", prompt injection (05: no invented price, the chat goes to a person as a discount request, and the lead stays `engaged` with score 0 and nothing booked), STOP, no
   privacy notice by default, the notice switched on, and stray characters ("x", "?", "ok", an emoji) that must not start the exit question, and the exit question as two buttons (Talk to the team, Continue).
 - `20`-`45`: Raja's phrase list (`docs/reference/opt-out-handoff-phrases.md`), one opt-out and one handover per language.
   The six languages Raja marked (Telugu, Kannada, Bengali, Marathi, Gujarati, Punjabi) have `needsNativeCheck: true`: a
