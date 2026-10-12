@@ -44,6 +44,13 @@ export async function apiFetch(path: ApiPath, { method, body, tenantId, signal }
 
 type CallOptions = { tenantId?: string; signal?: AbortSignal };
 
+/** GETs JSON from the API; throws ApiError on an error response. */
+export async function getJson<T>(path: ApiPath, options: CallOptions = {}): Promise<T> {
+  const res = await apiFetch(path, { method: "GET", ...options });
+  if (!res.ok) throw await apiErrorFrom(res);
+  return (await res.json()) as T;
+}
+
 /** POSTs JSON to the API; throws ApiError on an error response. */
 export async function postJson<T>(path: ApiPath, body: unknown, options: CallOptions = {}): Promise<T> {
   const res = await apiFetch(path, { method: "POST", body, ...options });
