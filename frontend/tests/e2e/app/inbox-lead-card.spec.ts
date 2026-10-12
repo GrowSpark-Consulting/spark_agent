@@ -1,6 +1,7 @@
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
 import { expect, expectNoHorizontalOverflow, MOCK_SUPABASE_URL, SIGNED_OUT, signIn, test } from "../support/app";
 import { newDay3Account, type Day3Account } from "../support/day3";
+import { CARD_HANDED_OVER, CARD_UNSCORED, failure, mockLeadCardApi, ok, type LeadCardAnswer, type LeadCardApi } from "../support/lead-card-api";
 
 // The lead card beside an Inbox chat (Day 4): the chat's customer's lead as stored, read under RLS from
 // mock-supabase.mjs (a Day 3 business with `inbox: true`: Karthik's chat has a scored lead with bookings,
@@ -10,6 +11,8 @@ import { newDay3Account, type Day3Account } from "../support/day3";
 // 12 Oct 2026, and the card picks the next one still to come, so the browser's clock is fixed before
 // them: the tests give the same answer whenever they run. (A time already past, so the mock's session
 // tokens, issued on the real clock, never look expired to the browser.)
+// The AI-written rows come from GET /api/conversations/:id/lead-card, which needs the model and the service-role
+// database, so it is stood in for with page.route (support/lead-card-api.ts); its answers are contract-shaped samples.
 
 const NOW = new Date("2026-10-09T12:00:00+05:30");
 const inboxAt = (chatId: string) => `/dashboard/inbox?chat=${chatId}`;
@@ -20,11 +23,33 @@ async function holdRealtime(page: Page) {
   await page.routeWebSocket(/\/realtime\/v1\/websocket/, () => {});
 }
 
-async function openChat(page: Page, account: Day3Account, chatId: string, name: string | RegExp) {
+async function openChat(
+  page: Page,
+  account: Day3Account,
+  chatId: string,
+  name: string | RegExp,
+  cards: Record<string, LeadCardAnswer | "abort"> = {},
+  /** Runs before the page opens, to hold or change an answer. */
+  before: (api: LeadCardApi) => void = () => {},
+) {
   await page.clock.setFixedTime(NOW);
   await holdRealtime(page);
+  // Karthik's lead is scored and handed over; the unnamed customer's is not scored. Any other chat has no card (not_found).
+  const api = await mockLeadCardApi(page, { [account.ids.karthikChat]: ok(CARD_HANDED_OVER), [account.ids.unnamedChat]: ok(CARD_UNSCORED), ...cards });
+  before(api);
   await signIn(page, account.email, inboxAt(chatId));
   await expect(page.getByRole("log", { name: typeof name === "string" ? `Messages with ${name}` : name })).toBeVisible();
+  return api;
+}
+
+/** The AI rows of a card by name: label → text. */
+async function aiRows(card: Locator): Promise<Record<string, string>> {
+  const rows = card.getByTestId("lead-card-ai-row");
+  const out: Record<string, string> = {};
+  for (let i = 0; i < (await rows.count()); i++) {
+    out[(await rows.nth(i).getByRole("term").innerText()).trim()] = (await rows.nth(i).getByRole("definition").innerText()).trim();
+  }
+  return out;
 }
 
 /** The lead card as this viewport shows it: pinned beside the chat, or opened from the Lead button. */
@@ -70,9 +95,26 @@ test.describe("Inbox · lead card", () => {
     ]);
     await expect(card).toContainText("Consultation with Asha");
     await expect(card).toContainText("Mon 12 Oct, 10:00 am · Confirmed");
-    await expect(card).toContainText("AI summaries of the chat aren’t available yet.");
-    // Nothing the database doesn't hold.
-    await expect(card).not.toContainText(/Need|Summary|Next step|Sentiment/);
+    // The AI-written rows, from the lead-card route.
+    await expect(card.getByTestId("lead-card-flags")).toHaveText("Hot lead · High priority");
+    await expect(card.getByTestId("lead-card-ai-row").first()).toBeVisible();
+    expect(await aiRows(card)).toEqual({
+      Need: "2BHK near Velachery, ready in 3 months",
+      Summary: "Wants a 2BHK in Velachery within three months.\nAsked for ₹70 lakh instead of ₹78 lakh.",
+      "Suggested next step": "Decide whether any discount is possible, then reply with a clear answer.",
+      "Discount request": "Asked for ₹70 lakh instead of ₹78 lakh",
+      Sentiment: "Positive",
+      Language: "Writes in Tanglish (Tamil in English letters)",
+      Source: "WhatsApp",
+      "Suggested reply": "Thanks for waiting! Let me check what is possible on the price and come back to you today.",
+    });
+    await expect(card).toContainText("Summary written by the AI from this chat.");
+    // The score, answers and booking are the stored ones, drawn once; the route's own copies and the full number never show.
+    await expect(card).not.toContainText("Budget: ₹80 lakh");
+    await expect(card).not.toContainText("Consultation, Mon 12 Oct");
+    await expect(page.locator("body")).not.toContainText("919812345621");
+    // No Try again: nothing failed (the sheet's own Close button is not counted).
+    await expect(card.getByRole("button", { name: "Try again" })).toHaveCount(0);
     await expect(card.getByRole("link", { name: "Open lead" })).toHaveAttribute("href", `/dashboard/leads/${account.ids.karthik}`);
     await expectNoHorizontalOverflow(page);
 
@@ -92,17 +134,25 @@ test.describe("Inbox · lead card", () => {
     await expect(card).toContainText("Callback");
     await expect(card).toContainText("Mon 12 Oct, 4:00 pm · Confirmed");
     await expect(card).not.toContainText("Handed over");
+    // The route's score is null: nothing is drawn for it, and the AI rows still show what it does hold.
+    expect(await aiRows(card)).toMatchObject({ Need: "Looking for a callback", Summary: "Looking for a callback.\nNo budget or area yet." });
+    expect(Object.keys(await aiRows(card))).not.toEqual(expect.arrayContaining(["Discount request", "Suggested reply", "Owner"]));
+    await expect(card.getByTestId("lead-card-flags")).toHaveCount(0);
+    await expect(card).toContainText("The AI couldn’t write the summary this time");
     await expectNoHorizontalOverflow(page);
   });
 
   test("a customer who isn't a lead shows No lead yet", async ({ page, request }) => {
     const account = await newDay3Account(request, { seed: true, inbox: true });
-    await openChat(page, account, account.ids.meenaChat, "Meena K");
+    const api = await openChat(page, account, account.ids.meenaChat, "Meena K");
     const card = await leadCard(page);
     await expect(card).toContainText("No lead yet");
     await expect(card).toContainText("Meena K isn’t on the Leads board.");
     await expect(card.getByRole("link", { name: "Open lead" })).toHaveCount(0);
     await expect(card.getByTestId("score-badge")).toHaveCount(0);
+    // No lead, no card to write about: the route isn't even asked.
+    expect(api.calls).toEqual([]);
+    await expect(card.getByTestId("lead-card-ai-row")).toHaveCount(0);
   });
 
   test("a failed read shows Try again inside the card, and the chat keeps working", async ({ page, request }) => {
@@ -158,6 +208,92 @@ test.describe("Inbox · lead card", () => {
     const reads = await leadReads(request, account.email);
     expect(reads.length).toBeGreaterThan(0);
     for (const r of reads) expect(new URLSearchParams(r.query).get("tenant_id")).toBe(`eq.${account.tenantId}`);
+  });
+
+  test("the AI rows load apart from the stored lead, and the request names this business and this chat", async ({ page, request }) => {
+    const account = await newDay3Account(request, { seed: true, inbox: true });
+    let release!: () => void;
+    const api = await openChat(page, account, account.ids.karthikChat, "Karthik R", {}, (a) => {
+      release = a.hold(account.ids.karthikChat);
+    });
+    const card = await leadCard(page);
+    // The stored lead is there while the AI part is still loading, and says so.
+    await expect(card.getByTestId("score-badge")).toHaveText(/82\s*Hot/);
+    await expect(card).toContainText("Loading the AI summary…");
+    await expect(card.getByTestId("lead-card-ai-row")).toHaveCount(0);
+    release();
+    await expect(card.getByTestId("lead-card-ai-row").first()).toBeVisible();
+    await expect(card).not.toContainText("Loading the AI summary…");
+
+    expect(api.calls).toHaveLength(1);
+    expect(api.calls[0]).toMatchObject({ path: `/api/conversations/${account.ids.karthikChat}/lead-card`, tenant: account.tenantId });
+    expect(api.calls[0].authorization).toMatch(/^Bearer /);
+  });
+
+  test("a failed AI read shows Try again inside the card, keeps the stored lead, and recovers", async ({ page, request }) => {
+    const account = await newDay3Account(request, { seed: true, inbox: true });
+    const api = await openChat(page, account, account.ids.karthikChat, "Karthik R", { [account.ids.karthikChat]: failure(502, "upstream_failed", "We couldn't build the lead card just now. Try again in a moment.") });
+    const card = await leadCard(page);
+    await expect(card.getByTestId("lead-card-ai-unavailable")).toContainText("The AI summary isn’t available right now. We couldn't build the lead card just now.");
+    await expect(card.getByTestId("lead-card-ai-unavailable")).not.toContainText(/upstream_failed|502/);
+    // The stored lead, the chat and the page are untouched.
+    await expect(card.getByTestId("score-badge")).toHaveText(/82\s*Hot/);
+    await expect(card).toContainText("Preferred area: Velachery");
+    await expect(card.getByTestId("lead-card-ai-row")).toHaveCount(0);
+    await expect(page.getByRole("log", { name: "Messages with Karthik R" })).toContainText("60 to 80 L");
+
+    api.set(account.ids.karthikChat, ok(CARD_HANDED_OVER));
+    await card.getByRole("button", { name: "Try again" }).click();
+    await expect(card.getByTestId("lead-card-ai-row").first()).toBeVisible();
+    await expect(card.getByTestId("lead-card-ai-unavailable")).toHaveCount(0);
+    expect(api.calls).toHaveLength(2);
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test("an answer that doesn't fit the contract is not half shown", async ({ page, request }) => {
+    const account = await newDay3Account(request, { seed: true, inbox: true });
+    await openChat(page, account, account.ids.karthikChat, "Karthik R", { [account.ids.karthikChat]: ok({ ...CARD_HANDED_OVER, score: "high" }) });
+    const card = await leadCard(page);
+    await expect(card.getByTestId("lead-card-ai-unavailable")).toContainText("came back in a form we couldn't read");
+    await expect(card.getByTestId("lead-card-ai-row")).toHaveCount(0);
+    await expect(card.getByTestId("lead-card-flags")).toHaveCount(0);
+    await expect(card.getByTestId("score-badge")).toHaveText(/82\s*Hot/);
+  });
+
+  test("a card the API doesn't find says so in its own words, and the API's error codes never show", async ({ page, request }) => {
+    const account = await newDay3Account(request, { seed: true, inbox: true });
+    await openChat(page, account, account.ids.karthikChat, "Karthik R", { [account.ids.karthikChat]: failure(404, "not_found", "That conversation was not found.") });
+    const card = await leadCard(page);
+    await expect(card.getByTestId("lead-card-ai-unavailable")).toContainText("That conversation was not found.");
+    await expect(card).not.toContainText("not_found");
+  });
+
+  test("a request that gets no answer fails inside the card with a safe message", async ({ page, request }) => {
+    const account = await newDay3Account(request, { seed: true, inbox: true });
+    await openChat(page, account, account.ids.karthikChat, "Karthik R", { [account.ids.karthikChat]: "abort" });
+    const card = await leadCard(page);
+    await expect(card.getByTestId("lead-card-ai-unavailable")).toBeVisible();
+    await expect(card.getByTestId("lead-card-ai-unavailable")).not.toContainText(/Failed to fetch|TypeError|ERR_/);
+    await expect(card.getByTestId("score-badge")).toHaveText(/82\s*Hot/);
+  });
+
+  test("one chat's AI rows never show beside another chat while it loads", async ({ page, request }) => {
+    const account = await newDay3Account(request, { seed: true, inbox: true });
+    await openChat(page, account, account.ids.karthikChat, "Karthik R");
+    let card = await leadCard(page);
+    await expect(card).toContainText("Decide whether any discount is possible");
+
+    const release = (await mockLeadCardApi(page, { [account.ids.unnamedChat]: ok(CARD_UNSCORED) })).hold(account.ids.unnamedChat);
+    if (!isWide(page)) await page.getByRole("dialog", { name: "Lead card" }).getByRole("button", { name: "Close" }).click();
+    if ((page.viewportSize()?.width ?? 1440) < 720) await page.getByRole("button", { name: "Back" }).click();
+    await page.getByTestId("inbox").getByRole("button", { name: /xxx xxx52/ }).click();
+    await expect(page.getByRole("log", { name: /Messages with/ })).toBeVisible();
+    card = await leadCard(page);
+    await expect(card).toContainText("Not scored yet");
+    await expect(card).not.toContainText("Decide whether any discount is possible");
+    await expect(card).not.toContainText("Velachery");
+    release();
+    await expect(card).toContainText("Looking for a callback");
   });
 
   test("the sheet below 1180px closes with Close or Escape and gives focus back to Lead", async ({ page, request }) => {
