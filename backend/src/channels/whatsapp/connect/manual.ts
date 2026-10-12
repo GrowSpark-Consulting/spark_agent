@@ -1,6 +1,7 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { ManualConnectInput, WhatsAppConnectionPublic } from "@pakka/types";
 import { z } from "zod";
+import { assertNumberAvailable, planLimitError } from "../../../billing/plan-limits";
 import { connectionSecretContext, encryptSecret } from "../../../lib/crypto";
 import { serverEnv } from "../../../lib/env";
 import { writeAudit, type AuditEntry } from "../../../lib/audit";
@@ -78,6 +79,12 @@ export type ManualConnectDeps = {
   webhookSeen: (tenantId: string, connectionId: string) => Promise<boolean>;
   /** The sixth check: a test message to the owner's number, through notify.send (test-message-check.ts). */
   testMessage: (tenantId: string, actor: string) => Promise<Check>;
+  /**
+   * The plan's WhatsApp numbers (Dev 2's billing/plan-limits.ts): throws plan_required when this number would go past
+   * them. `keepConnectionId` is the row being connected again in place. Asked before Meta is; the database (0027) has
+   * the last word.
+   */
+  numberLimit?: (tenantId: string, keepConnectionId: string | null) => Promise<void>;
 };
 
 const PLATFORM_APP_SECRET_MESSAGE = "This is Spark Agent's own Meta app, which our team connects, not this form. Enter the app secret of the business's own Meta app.";
@@ -148,6 +155,7 @@ export async function connectManual(
     graph: realGraph,
     webhookSeen: (tenantId, connectionId) => webhookWasSeen(supabaseAdmin(), tenantId, connectionId),
     testMessage: (tenantId, actor) => checkTestMessage(tenantId, actor),
+    numberLimit: (tenantId, keepConnectionId) => assertNumberAvailable(tenantId, keepConnectionId),
   },
 ): Promise<WhatsAppConnectionPublic> {
   const parsed = StrictInput.safeParse(rawInput);
@@ -166,6 +174,7 @@ export async function connectManual(
   if (existing !== null && !retry) {
     throw new AppError("conflict", "This phone number is already connected.", { phoneNumberId: "This Phone number ID is already connected." });
   }
+  await deps.numberLimit?.(input.tenantId, retry ? existing.id : null);
 
   const probe = await deps.probe({ wabaId: input.wabaId, phoneNumberId: input.phoneNumberId, token: input.token });
   if (probe.state === "unreachable") throw new AppError("upstream_failed", "We couldn't reach Meta to check these details. Try again in a moment.");
@@ -289,7 +298,8 @@ function realDb(): ManualConnectDb {
       if (error) {
         // The number was connected by someone else between our check and this write.
         if (error.code === "23505") throw new AppError("conflict", "This phone number is already connected.");
-        throw fail("save the connection");
+        // Another number of this business was connected between the plan check and this write (0027).
+        throw planLimitError(error) ?? fail("save the connection");
       }
       const row = await db.from("whatsapp_connections").select(PUBLIC_COLUMNS).eq("id", r.id).eq("tenant_id", r.tenantId).single();
       if (row.error) throw fail("read the connection");
