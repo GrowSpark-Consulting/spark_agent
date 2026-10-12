@@ -2,16 +2,17 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { TURN_TARGET_MS } from "../../agent/pipeline/turn-deadline";
 import { supabaseAdmin } from "../../lib/supabase-admin";
-import { markRead } from "./adapter";
-import { loadSendConnection } from "./message-sender";
+import { markRead, type SendConnection } from "./adapter";
 
 // The blue ticks. When the assistant is going to handle a customer's message (the pipeline's gate is open), the message is marked read through the Cloud
 // API, so the customer sees it was received while the reply is worked out. It runs in the pipeline, not in the webhook: the webhook cannot know whether the
-// assistant will answer, and its answer to Meta is never held up by anything here.
+// assistant will answer, and its answer to Meta is never held up by anything here. It runs alongside the understanding step (not before it), after the STOP
+// check (a customer who stops is not engaged any further), and is skipped when the turn is late, so at most it costs a few hundred milliseconds of the
+// step round trip; it is gated by the same `ai_auto_reply` feature as the answer itself, because it only runs when the assistant will handle the message.
 //
 // Best effort in every way: a database failure, no connection, Meta refusing or not answering all end as a "skipped" status with a fixed reason, never an
 // error, and nothing the customer said, no phone number and no id is ever logged. It uses the connection the reply goes out on (the conversation's channel,
-// the business's oldest active connection, as notify_target does) and only ever reads. Marking a message read marks every earlier one too, so the newest of
+// the business's oldest active connection, as notify_target does) and only ever reads. A read receipt is not a message, so it does not go through notify.send. Marking a message read marks every earlier one too, so the newest of
 // the turn's messages is enough; a repeat does nothing new.
 
 /** The longest the call to Meta may take. The adapter's own default is 10 seconds, far too long to hold a reply for. */
@@ -31,15 +32,16 @@ const defaults = (): MarkReadDeps => ({ db: supabaseAdmin(), markRead, now: Date
 
 const Wamid = z.array(z.object({ provider_msg_id: z.string().nullable() })).max(1);
 const Channel = z.array(z.object({ channel_id: z.string() })).max(1);
-const Connection = z.array(z.object({ id: z.string() })).max(1);
+const Connection = z.array(z.object({ id: z.string(), phone_number_id: z.string(), token_enc: z.string() })).max(1);
 
 export async function markCustomerMessageRead(
   turn: { tenantId: string; conversationId: string; messageIds: string[] },
-  deps: MarkReadDeps = defaults(),
+  deps?: MarkReadDeps,
 ): Promise<MarkReadResult> {
   try {
     if (turn.messageIds.length === 0) return { status: "skipped", reason: "no_message" };
-    const { db } = deps;
+    const d = deps ?? defaults();
+    const { db } = d;
 
     const messages = await db
       .from("messages")
@@ -49,6 +51,7 @@ export async function markCustomerMessageRead(
       .eq("direction", "in")
       .eq("sender", "customer")
       .in("id", turn.messageIds)
+      .not("provider_msg_id", "is", null)
       .order("created_at", { ascending: false })
       .limit(1);
     if (messages.error) return { status: "skipped", reason: "error" };
@@ -62,7 +65,7 @@ export async function markCustomerMessageRead(
 
     const connections = await db
       .from("whatsapp_connections")
-      .select("id")
+      .select("id, phone_number_id, token_enc")
       .eq("tenant_id", turn.tenantId)
       .eq("channel_id", channel.channel_id)
       .eq("status", "active")
@@ -72,8 +75,9 @@ export async function markCustomerMessageRead(
     const [connection] = Connection.parse(connections.data ?? []);
     if (!connection) return { status: "skipped", reason: "no_connection" };
 
-    const loaded = await loadSendConnection(db, { tenantId: turn.tenantId, connectionId: connection.id });
-    const result = await deps.markRead(loaded, message.provider_msg_id, { timeoutMs: MARK_READ_TIMEOUT_MS });
+    // The token stays encrypted here; the adapter decrypts it for the call.
+    const loaded: SendConnection = { tenantId: turn.tenantId, connectionId: connection.id, phoneNumberId: connection.phone_number_id, tokenEnc: connection.token_enc };
+    const result = await d.markRead(loaded, message.provider_msg_id, { timeoutMs: MARK_READ_TIMEOUT_MS });
     return result.ok ? { status: "marked" } : { status: "skipped", reason: "refused" };
   } catch {
     return { status: "skipped", reason: "error" };

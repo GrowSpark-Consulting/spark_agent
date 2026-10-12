@@ -51,7 +51,7 @@ describe("markCustomerMessageRead", () => {
   it("every query names the business", async () => {
     const s = setup();
     await markCustomerMessageRead(TURN, s.deps);
-    expect(s.t.calls.length).toBeGreaterThanOrEqual(4);
+    expect(s.t.calls.length).toBe(3);
     for (const call of s.t.calls) expect(call.filters).toEqual(expect.arrayContaining([{ column: "tenant_id", op: "eq", value: A }]));
   });
 
@@ -169,6 +169,10 @@ describe("markReadStep", () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     expect(await markReadStep(st, TURN, STARTED, { ...s.deps, now: () => STARTED + 60_000 })).toEqual({ status: "marked" });
     vi.restoreAllMocks();
+  });
+
+  it("markCustomerMessageRead without its dependencies is a skip when the client cannot be made, not a thrown error", async () => {
+    await expect(markCustomerMessageRead(TURN)).resolves.toEqual({ status: "skipped", reason: "error" });
   });
 
   it("is a skip, not an error, when even the database client cannot be made", async () => {

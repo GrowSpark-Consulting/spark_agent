@@ -22,7 +22,7 @@ import { inngest } from "./client";
 //   to start looking: the run collects the customer's unanswered messages itself and answers them together.
 // - Every stage is a step: a failure retries that stage (3 retries) and never repeats what finished.
 //
-// The pipeline: resolve, batch, lead and gate (steps 2 and 3), the message marked read, the STOP check, understand the message and search the knowledge base
+// The pipeline: resolve, batch, lead and gate (steps 2 and 3), the STOP check, the message marked read alongside understand the message and search the knowledge base
 // (step 4), then reply and send (step 7 and the send): ONE reply per turn, through notify.send, recorded as answered
 // in the same step. The decide step (Day 3) will sit between 4 and 7; until then the action is fixed: answer from the
 // knowledge base's facts, or a safe line. Every way the run can end has an answer for the customer (plan.ts).
@@ -73,16 +73,15 @@ export const processMessage = inngest.createFunction(
       }
       return turn;
     }
-    // The assistant will handle this message: mark it read (the customer's blue ticks). Best effort and skipped when the turn is already late, so it never
-    // holds a reply up (channels/whatsapp/mark-read.ts); it is a step of its own, so a replay does not decide twice.
-    await markReadStep(steps, turn.turn, startedAt);
     // STOP first: a customer who asks to stop is opted out and is not read, answered or updated any further.
     const stop = await stopCheck(steps, turn.turn, replyDeps(store));
     if (stop.status === "opted_out") {
       console.log(`[pipeline] opted out (confirmation ${stop.confirmation})`);
       return { status: "opted_out" };
     }
-    const understood = await understandTurn(steps, turn.turn, understandDeps(store, turnClock(startedAt).signal));
+    // The assistant will handle this message: mark it read (the customer's blue ticks) while it is understood. Best effort, skipped when the turn is already late,
+    // and a step of its own, so a replay does not decide twice (channels/whatsapp/mark-read.ts).
+    const [understood] = await Promise.all([understandTurn(steps, turn.turn, understandDeps(store, turnClock(startedAt).signal)), markReadStep(steps, turn.turn, startedAt)]);
     console.log(
       `[pipeline] ${understood.status}${understood.status === "fallback" ? ` (${understood.reason})` : ""}` +
         (understood.status === "understood" ? ` (${understood.summary.intent}; search ${understood.retrieval.outcome})` : ""),

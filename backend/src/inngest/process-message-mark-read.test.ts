@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Where the blue ticks sit in the pipeline: right after the gate lets the message through, before anything else is done with it, and never when
+// Where the blue ticks sit in the pipeline: after the gate lets the message through and STOP has passed, alongside understanding, and never when
 // the assistant stays out of the chat. What the step itself does is tested in channels/whatsapp/mark-read.test.ts.
 
 const calls = vi.hoisted(() => [] as string[]);
-const turn = { tenantId: "e0000000-0000-4000-8000-00000000000a", conversationId: "c0000000-0000-4000-8000-0000000000c1", messageIds: ["a0000000-0000-4000-8000-0000000000a1"], leadId: "l", contactId: "k", leadCreated: false, language: null, vertical: "real-estate", verticalVersion: 1 };
+const turn = { tenantId: "e0000000-0000-4000-8000-00000000000a", conversationId: "c0000000-0000-4000-8000-0000000000c1", messageIds: ["a0000000-0000-4000-8000-0000000000a1"], leadId: "l", contactId: "k", leadCreated: false, language: null, vertical: "pack-a", verticalVersion: 1 };
 const runTurn = vi.hoisted(() => vi.fn());
+const stopResult = vi.hoisted(() => ({ status: "continue" } as Record<string, unknown>));
 const markReadStep = vi.hoisted(() => vi.fn(async () => ({ status: "marked" })));
 
 vi.mock("../agent/pipeline/process-message", () => ({ runTurn }));
@@ -16,7 +17,7 @@ vi.mock("../channels/whatsapp/mark-read", () => ({
   },
 }));
 vi.mock("../agent/pipeline/stop", () => ({
-  stopCheck: async () => (calls.push("stop"), { status: "continue" }),
+  stopCheck: async () => (calls.push("stop"), { ...stopResult }),
   stopCheckAfterGate: async () => (calls.push("stop-after-gate"), { status: "continue" }),
 }));
 vi.mock("../agent/pipeline/understand", () => ({ understandTurn: async () => (calls.push("understand"), { status: "fallback", reason: "model_unavailable" }) }));
@@ -38,14 +39,22 @@ beforeEach(() => {
 });
 
 describe("process-message and the blue ticks", () => {
-  it("marks the message read as soon as the gate is open, before STOP, understanding and the reply", async () => {
+  it("marks the message read once the gate is open and STOP has passed, alongside understanding, and before the reply", async () => {
     runTurn.mockResolvedValue({ status: "ready", turn });
     await run();
-    expect(calls).toEqual(["mark-read", "stop", "understand", "reply"]);
+    expect(calls).toEqual(["stop", "understand", "mark-read", "reply"]);
     expect(markReadStep).toHaveBeenCalledOnce();
     const [, passedTurn, startedAt] = markReadStep.mock.calls[0] as unknown as [unknown, typeof turn, number];
     expect(passedTurn).toMatchObject({ tenantId: turn.tenantId, conversationId: turn.conversationId, messageIds: turn.messageIds });
     expect(typeof startedAt).toBe("number");
+  });
+
+  it("does not mark a message whose sender asked to stop", async () => {
+    runTurn.mockResolvedValue({ status: "ready", turn });
+    stopResult.status = "opted_out";
+    await run();
+    stopResult.status = "continue";
+    expect(calls).not.toContain("mark-read");
   });
 
   it("does not mark anything when the assistant stays out of the chat (a person has it, the AI is off, an opt-out)", async () => {
