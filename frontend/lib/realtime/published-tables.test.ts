@@ -30,25 +30,26 @@ describe("the tables the database publishes to Realtime", () => {
     expect([...PUBLISHED_TABLES].sort()).toEqual(fromMigrations);
   });
 
-  it("does not yet include leads or bookings, so those screens refresh by hand until a migration publishes them", () => {
-    // If this fails because a migration now publishes them, that is the news: update the list, then verify on staging.
-    expect(fromMigrations).not.toContain("leads");
-    expect(fromMigrations).not.toContain("bookings");
+  it("includes leads and bookings since 0026, so the leads board and the calendar update by themselves", () => {
+    // Published by 0026_booking_actions. Still to confirm on staging that changes really arrive.
+    expect(fromMigrations).toContain("leads");
+    expect(fromMigrations).toContain("bookings");
   });
 });
 
 describe("watchableTables", () => {
   it("keeps only published tables, once each, in the order asked", () => {
-    expect(watchableTables(["leads", "messages", "bookings", "messages", "handoffs"])).toEqual(["messages", "handoffs"]);
+    expect(watchableTables(["contacts", "messages", "bookings", "messages", "handoffs"])).toEqual(["messages", "bookings", "handoffs"]);
   });
 
   it("is empty for tables that are not published", () => {
-    expect(watchableTables(["leads", "bookings"])).toEqual([]);
+    expect(watchableTables(["contacts", "quotes"])).toEqual([]);
     expect(watchableTables([])).toEqual([]);
   });
 
   it("recognises the published ones", () => {
     expect(isPublishedTable("kb_documents")).toBe(true);
-    expect(isPublishedTable("leads")).toBe(false);
+    expect(isPublishedTable("leads")).toBe(true);
+    expect(isPublishedTable("contacts")).toBe(false);
   });
 });

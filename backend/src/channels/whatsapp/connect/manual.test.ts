@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { connectionSecretContext, decryptSecret, encryptSecret } from "../../../lib/crypto";
+import { AppError } from "../../../lib/errors";
 import type { Check, Graph, GraphAnswer } from "./checks";
 import { connectManual, probeMeta, type ConnectionRecord, type ManualConnectDb, type MetaProbe } from "./manual";
 
@@ -38,7 +39,11 @@ const SIXTH_OK: Check = { key: "test_message_delivered", status: "pass", message
 
 type Existing = { id: string; tenantId: string; channelId: string; method: string; status: string };
 
-function setup(probe: MetaProbe = GOOD, existing: Existing | null = null, over: { graph?: Graph; webhookSeen?: boolean; webhookSeenLater?: boolean; sixth?: Check } = {}) {
+function setup(
+  probe: MetaProbe = GOOD,
+  existing: Existing | null = null,
+  over: { graph?: Graph; webhookSeen?: boolean; webhookSeenLater?: boolean; sixth?: Check; numberLimit?: (tenantId: string, keepConnectionId: string | null) => Promise<void> } = {},
+) {
   const saved: { record: ConnectionRecord; replace: boolean }[] = [];
   const updates: { id: string; tenantId: string; lastCheck: unknown }[] = [];
   const db: ManualConnectDb = {
@@ -77,6 +82,7 @@ function setup(probe: MetaProbe = GOOD, existing: Existing | null = null, over: 
     graph: over.graph ?? healthyGraph,
     webhookSeen: async () => (++seenCalls === 1 ? (over.webhookSeen ?? true) : (over.webhookSeenLater ?? over.webhookSeen ?? true)),
     testMessage,
+    numberLimit: over.numberLimit,
   };
   return { saved, updates, testMessage, probeFn, audit, run: (input: unknown = INPUT, actor = "user-1") => connectManual(input, actor, deps) };
 }
@@ -125,6 +131,24 @@ describe("connectManual", () => {
   it("fails the connection when the number isn't in that account", async () => {
     const s = setup({ ...GOOD, numberInAccount: false } as MetaProbe);
     expect((await s.run()).status).toBe("failed");
+  });
+
+  it("asks the plan's WhatsApp numbers before Meta, and saves nothing past them (Dev 2's plan limits)", async () => {
+    const numberLimit = vi.fn(async () => {
+      throw new AppError("plan_required", "Your Starter plan includes 1 WhatsApp number. Disconnect one, or upgrade to add another.");
+    });
+    const s = setup(GOOD, null, { numberLimit });
+    await expect(s.run()).rejects.toMatchObject({ code: "plan_required" });
+    expect(numberLimit).toHaveBeenCalledWith(A, null);
+    expect(s.probeFn).not.toHaveBeenCalled();
+    expect(s.saved).toEqual([]);
+  });
+
+  it("does not count a number connected again in place against itself", async () => {
+    const numberLimit = vi.fn(async () => {});
+    const existing = { id: "e1000000-0000-4000-8000-0000000000e1", tenantId: A, channelId: "c0000000-0000-4000-8000-0000000000c1", method: "manual_byo", status: "failed" };
+    await setup(GOOD, existing, { numberLimit }).run();
+    expect(numberLimit).toHaveBeenCalledWith(A, existing.id);
   });
 
   it("answers upstream_failed and saves nothing when Meta can't be reached", async () => {

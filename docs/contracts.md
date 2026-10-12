@@ -41,6 +41,9 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0022_consent_model_intent` | `record_opt_out` also accepts the source `model_intent` (a clear request to stop read by the model; Dev 1, #69) |
 | `0023_booking_resource_lock` | `hold_slot` and `reschedule_booking` take a per-resource advisory lock, so racing holds for one person queue and the losers get `slot_taken` (23P01) instead of a deadlock error (40P01) |
 | `0024_api_roles_no_truncate` | `anon` and `authenticated` lose TRUNCATE on every table, now and (default privileges) later: row-level security does not cover TRUNCATE. Checked by `supabase/tests/isolation.test.sql` |
+| `0025_set_tenant_feature` | `set_tenant_feature(tenant, key, enabled, settings, actor)`: plan check (PA403), `tenant_features` write and audit row in one transaction (service_role only; section 6, feature toggles) |
+| `0026_booking_actions` | `bookings.status_changed_at` (kept by a trigger); `complete_booking`, `mark_booking_no_show`, `staff_cancel_booking`, `staff_reschedule_booking`, each with its audit row (service_role only, section 4); `bookings` and `leads` in the Realtime publication |
+| `0027_plan_limits` | Triggers keep a business within its plan's seats (`memberships`, PA413) and WhatsApp numbers (`whatsapp_connections` not disconnected and not `platform`, PA403); each locks the business's row (FOR NO KEY UPDATE) before counting, so racing additions take turns (section 6, plan limits) |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -355,6 +358,26 @@ localWindow(timeZone, { day: 'today' | 'tomorrow' | 'YYYY-MM-DD', part?: 'mornin
   slot at the same moment; exactly one wins and the other 19 get `slot_taken`. Holds and moves for one person take
   turns (0023): without that, Postgres could report a racing loser as a deadlock (a server error) instead.
 
+**The calendar's actions (built, Day 5; `backend/src/booking/actions.ts`, migration 0026).** For the dashboard, by a
+member: owners and admins on any booking of the business, staff only on bookings whose resource is theirs
+(`resources.user_id`), else `forbidden`. Each is one SQL function that changes the booking and writes its audit row
+together, keeping who did it in `details.<action>_by`; then the API sends `booking.changed` (section 5).
+
+| Route | Body | Does | Answer |
+|---|---|---|---|
+| `POST /api/bookings/:id/reschedule` | `{ start, end, resourceId? }` (ISO 8601 with offset) | `staff_reschedule_booking`: a confirmed booking moves (`reschedule_booking`, 0015/0023); staff only within their own calendar; also sends `booking.confirmed` for the new booking | the new `Booking` |
+| `POST /api/bookings/:id/cancel` | `{ reason? }` or none | `staff_cancel_booking`: a held or confirmed booking is cancelled; again is harmless | `Booking` |
+| `POST /api/bookings/:id/complete` | none | `complete_booking`: a confirmed booking that has started; its lead moves to `visited` (never back from won or lost); again is harmless | `Booking` |
+| `POST /api/bookings/:id/no-show` | none | `mark_booking_no_show`: a confirmed booking that has started; the no-show offer follows; again is harmless | `Booking` |
+| `GET /api/bookings/:id/slots?from=&to=` | none | up to 3 free times for a confirmed booking's service (`findSlots`), a week from now by default | `{ slots: Slot[] }` |
+
+Errors: `slot_taken` (409), `conflict` for the wrong state ("This booking has not started yet."), `not_found`,
+`validation_failed`. Audit rows: `booking.rescheduled` (on the old booking, with the new one's id and times),
+`booking.cancelled` (with the reason), `booking.completed`, `booking.no_show`. `bookings.status_changed_at` (a trigger)
+says when the status last changed, and `bookings` and `leads` are in the Realtime publication (0026), so the calendar
+and the leads board can follow changes without reloading. A customer is not messaged about a cancel or a move made
+from the dashboard: there is no such message in the handover (question for Raja).
+
 **`notify.send` behaviour (Proposed, test message Agreed):**
 
 1. `isEnabled` for the kind's feature, if it has one (`staff_reply`, `consent_notice`, `lead_card` and
@@ -394,7 +417,7 @@ sent twice carries a fixed `id` so Inngest drops the duplicate (`tenant.trial_st
 | `kb/document.uploaded` | `{ tenantId, documentId }`; sent by `POST /api/kb/documents` (id `kb_document_uploaded:<documentId>`), starts the `kb-ingest` job |
 | `whatsapp/connected` | `{ tenantId, connectionId }` |
 | `booking.confirmed` | `{ tenantId, bookingId }`; sent by `confirmBooking` and `rescheduleBooking` (id `booking.confirmed:<bookingId>`); starts `booking-reminders` and `post-visit`, and `google-calendar-sync` adds the booking to Google |
-| `booking.changed` | `{ tenantId, bookingId, change: 'rescheduled' \| 'cancelled' \| 'completed' \| 'no_show' }`; sent by `rescheduleBooking` and `cancelBooking` (id `booking.changed:<bookingId>:<change>`); cancels that booking's `booking-reminders` run, and its `post-visit` run unless the change is `completed`; `google-calendar-sync` removes its Google event when `cancelled` or `rescheduled`; `no_show` starts `noshow-rebooking` |
+| `booking.changed` | `{ tenantId, bookingId, change: 'rescheduled' \| 'cancelled' \| 'completed' \| 'no_show' }`; sent by `rescheduleBooking` and `cancelBooking` and by the calendar's actions, which also send `completed` and `no_show` (id `booking.changed:<bookingId>:<change>`); cancels that booking's `booking-reminders` run, and its `post-visit` run unless the change is `completed`; `google-calendar-sync` removes its Google event when `cancelled` or `rescheduled`; `no_show` starts `noshow-rebooking` |
 | `booking.rated` | `{ tenantId, bookingId, rating }` (1–5); sent by `recordVisitRating` when the customer taps a rating (id `booking.rated:<bookingId>`, so the first rating counts); the `post-visit` run waits for it |
 | `handoff.opened` | `{ tenantId, handoffId, conversationId }`; sent by Dev 1's reply step when it opens a handoff (id `handoff_opened:<handoffId>`); starts `handoff-alert`, which sends one `staff_alert` to each owner and admin with an alert number (section 2). A handoff already resolved by the time the job runs gets no alert. **The job is the only sender of handoff alerts:** the reply step does not alert staff itself. Also starts `handoff-sla`: after the SLA (section 3) it alerts the owners again (`handoff_waiting`) unless someone has the chat: the handoff was picked up, assigned or resolved, a staff member took the chat over, or it is no longer in `human` mode (back with the AI, or on the business's own number) |
 | `handoff.own_number` | `{ tenantId, handoffId }`; to be sent by Dev 1's own-number takeover; starts `own-number-outcome` |
@@ -643,12 +666,50 @@ other origins get no CORS headers.
   null when there is no working connection. Until a resource is connected, the bookings table stays the
   source of truth.
 
+**Feature toggles (built, Day 5; `backend/src/features/toggles.ts`, types in `@pakka/types` `features.ts`):**
+
+- `GET /api/features` → `FeatureList` (any member): the plan `{ key, name, monthlyCredits }`, the features in the
+  screen's groups, and `estimatedCreditsPerMonth`, the sum over the features that are on. Each `FeatureRow` has `state`
+  (`on`, `off`, `locked` when the plan does not include it, `disabled` when it cannot work yet), `enabled` (the business's
+  switch whatever the state), `requiredPlan` (the cheapest of starter, growth and pro that includes a locked one),
+  `disabledReason`, `creditsPerMonth` (its `<kind>.sent` audit rows in the last 30 days times its credit cost; null with a
+  `creditNote` for features that cost nothing extra), `settings` and `control`. Disabled, with the reason shown: features
+  with no code yet (`working_hours_mode`, `booking_confirmation`, `auto_topup`, `outbound_webhooks`, `quote_auto_send`,
+  `quote_followup`, `pretrip_info`: "Not available yet."), `review_request` without a review link, `staff_alerts` without an
+  owner or admin alert number, `daily_agenda` without an owner alert number, `booking` without an active service.
+- `PATCH /api/features/:key` `{ enabled?, settings? }` → the `FeatureRow` as it now stands (owner or admin). `settings` is
+  merged into the saved settings (a key sent as null is removed) and must be what the feature's job reads (section 3;
+  `backend/src/features/settings.ts` uses the jobs' own schemas), else `validation_failed` with `fields.settings` saying
+  what is expected. A feature the plan does not include cannot be switched on and its settings cannot change:
+  `plan_required` (403, "Follow-up nudges needs the Growth plan. Upgrade to switch it on."); switching it off is allowed.
+  A feature not available yet cannot be switched on (`not_available`). The write is `set_tenant_feature` (0025): the plan
+  check, the `tenant_features` row and the audit row (`feature.toggled` or `feature.settings_changed`, with who and both
+  values) in one transaction; nothing changes and nothing is audited when the values are the saved ones. This server
+  drops its cached feature states at once; other servers within 60 seconds (`isEnabled`'s cache).
+
+**Plan limits (built, Day 5; `backend/src/billing/plan-limits.ts`, migration 0027).** Seats (`plans.seats`: Trial and
+Starter 2, Growth 5, Pro 999 meaning unlimited) and WhatsApp numbers (`plans.whatsapp_numbers`: Trial, Starter and
+Growth 1, Pro 3). A number counts while it is not `disconnected`, a `failed` one included (disconnect it to make room);
+our own `platform` numbers never count. The API asks first, so the answer comes before an invite goes out or Meta is
+asked; the database triggers have the last word, also for two requests at the same moment
+(`scripts/db/plan-limit-concurrency.sh`, CI). A business over a limit after a downgrade keeps what it has; only
+additions are refused.
+
+- `assertSeatAvailable(tenantId)` → `seat_limit` (409), "Your Growth plan includes 5 team members. Upgrade to add more."
+  `seatUsage(tenantId)` → `{ used, limit: number | 'unlimited', planName }`. **For Dev 3:** `POST /api/team/invite` calls
+  `assertSeatAvailable` before inviting; a membership insert past the seats is refused by the database anyway (PA413;
+  `planLimitError(error)` turns it into `seat_limit`).
+- `assertNumberAvailable(tenantId, keepConnectionId)` → `plan_required` (403), "Your Starter plan includes 1 WhatsApp
+  number. Disconnect one, or upgrade to add another." The manual connect routes (`POST /api/whatsapp/manual`,
+  `POST /api/admin/whatsapp/manual`) ask it before Meta (`numberLimit` in `connectManual`'s deps, keeping the row being
+  connected again in place out of the count), and turn the database's refusal (PA403) into the same answer.
+
 **Read routes (Proposed, screen-contracts Q1).** Entitlements and balances are computed on the
 server, so these are routes, not SQL views:
 
 | Route | Returns | Owner |
 |---|---|---|
-| `GET /api/features` | Every feature with `available`, `enabled`, `creditCost` (`getFeatureStates(…, { fresh: true })`) | Dev 2 |
+| `GET /api/features` | Built (above) | Dev 2 |
 | `GET /api/billing/balance` | Balance plus renewal date and trial end | Dev 2 |
 | `GET /api/dashboard/summary` | Month counts: enquiries, qualified, booked, after-hours handled | Dev 2 |
 

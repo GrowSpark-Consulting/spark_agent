@@ -225,8 +225,8 @@ UI: day / week, filter by staff (resource), booking detail, reschedule (pick slo
     mark visited, mark no-show, undo
   ↓ data: Resource[], Booking[], Slot[]
   ↓ API: RLS READ bookings + resources + services (range query)
-        GET  /api/bookings/:id/slots                              PROPOSED · Dev 2 (findSlots)
-        POST /api/bookings/:id/(reschedule|cancel|complete|no-show) HANDOVER · Dev 2
+        GET  /api/bookings/:id/slots                              BUILT · Dev 2 (findSlots; → { slots })
+        POST /api/bookings/:id/(reschedule|cancel|complete|no-show) BUILT · Dev 2 (docs/contracts.md, section 4)
   ↓ loading: grid skeleton · empty: empty day columns · error: slot_taken → refresh slots
   ↓ permission: all; staff act on their own resource
   ↓ plan: none
@@ -253,8 +253,8 @@ Replaces: `DAYS`, `TODAY`, `STAFF`, `INIT`, `RE_CAL`, `industries.*.cal`.
 UI: grouped toggles, credits/month per toggle, total estimate vs plan credits,
     reminder timing (48/24/12/6 h), working-hours mode (24×7 / after hours), Upgrade on locked rows
   ↓ data: FeatureList
-  ↓ API: GET   /api/features          PROPOSED · Dev 2
-        PATCH /api/features/:key     HANDOVER · Dev 2 (plan check + audit log)
+  ↓ API: GET   /api/features          BUILT · Dev 2 (docs/contracts.md, section 6)
+        PATCH /api/features/:key     BUILT · Dev 2 (plan check + audit log; { enabled?, settings? } → FeatureRow)
   ↓ loading: row skeletons; switch shows pending while PATCH is in flight
   ↓ error: revert switch + toast; 403 plan_required → Upgrade dialog
   ↓ permission: owner, admin toggle; staff read-only
@@ -273,14 +273,18 @@ interface FeatureRow {
   state: 'on' | 'off' | 'locked' | 'disabled';
   // locked   = plan doesn't include it → show Upgrade with requiredPlan
   // disabled = available but can't be used right now (e.g. needs a calendar or a connected number)
+  enabled: boolean;                          // the business's own switch, whatever the state (built: added)
   requiredPlan: 'starter' | 'growth' | 'pro' | null;
   disabledReason: string | null;
   creditsPerMonth: number | null;            // last-30-day estimate; null = "No extra credits"
   creditNote: string | null;                 // "Part of replies", "Only when used"
-  settings: Record<string, unknown>;         // e.g. { offsetHours: 24 } from tenant_features.settings
+  settings: Record<string, unknown>;         // e.g. { offset_minutes: 1440 } from tenant_features.settings
   control: 'switch' | 'segmented' | 'timing';
 }
 ```
+
+Built (12 Oct): `FeatureList`, `FeatureRow` and `UpdateFeatureInput` are in `@pakka/types`. Settings keys are the jobs'
+own (`offset_minutes`, `review_url`, `sla_minutes`, …; docs/contracts.md, section 3), not `offsetHours`.
 
 Mapping from prototype keys to `features.key`: `autoReply`→`ai_auto_reply`, `hours`→`working_hours_mode`,
 `qualify`→`lead_qualification`, `booking`→`booking`, `confirm`→`booking_confirmation`,

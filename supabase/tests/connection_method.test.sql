@@ -5,8 +5,12 @@ create extension if not exists pgtap with schema extensions;
 select plan(9);
 
 insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000005a0', 'method-a@test.local');
-insert into public.tenants (id, name, vertical) values
-  ('d5000000-0000-0000-0000-00000000000a', 'Method Test', 'test-pack');
+-- Several numbers of one business, so it is on Pro (3 numbers; 0027 refuses more than the plan's).
+insert into public.plans (key, name, price_inr, monthly_credits, seats, whatsapp_numbers, feature_keys)
+  values ('pro', 'Pro', 12999, 15000, 999, 3, array['ai_auto_reply'])
+  on conflict (key) do nothing;  -- the seed may already have it
+insert into public.tenants (id, name, vertical, plan_key) values
+  ('d5000000-0000-0000-0000-00000000000a', 'Method Test', 'test-pack', 'pro');
 insert into public.memberships (tenant_id, user_id, role) values
   ('d5000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-0000000005a0', 'owner');
 insert into public.channels (id, tenant_id, type) values
