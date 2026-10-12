@@ -59,6 +59,17 @@ describe("runChat", () => {
     expect(report.failures.join("\n")).toMatch(/should contain "site visit"/);
   });
 
+  it("records what the extraction read for each turn (language, sentiment, fields), for the triage harness", async () => {
+    const report = await runChat(chat({ mock: { extraction: { intent: "question", question: "price?", language: "ta-en", sentiment: "neutral", fields: { location: "Velachery" } }, reply: "A 2BHK starts at ₹78 lakh. Shall we visit?" }, expect: { aiReplies: 1 } }), { mode: "mock" });
+    expect(report.transcript[0].extraction).toEqual({ language: "ta-en", sentiment: "neutral", fields: { location: "Velachery" } });
+  });
+
+  it("tells the caller which turn it is on before each turn starts (onTurn)", async () => {
+    const seen: number[] = [];
+    await runChat(chat({ expect: { aiReplies: 1 } }), { mode: "mock", onTurn: (index) => seen.push(index) });
+    expect(seen).toEqual([0]);
+  });
+
   it("does not check mockOnly in live mode, and refuses live mode without a client", async () => {
     await expect(runChat(chat({ expect: { aiReplies: 1 } }), { mode: "live" })).rejects.toThrow(/live mode needs/);
   });
