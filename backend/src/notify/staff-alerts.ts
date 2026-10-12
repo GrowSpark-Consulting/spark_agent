@@ -98,7 +98,7 @@ export async function staffAlertContent(
     return { headline: `${name} is out of credits, so the assistant has stopped replying.`, link: `${app}/dashboard/billing` };
   }
   const who = await customerLabel(tenantId, alert.conversationId, deps.db);
-  const link = alert.conversationId ? `${app}/dashboard/inbox?conversation=${alert.conversationId}` : `${app}/dashboard/inbox`;
+  const link = alert.conversationId ? `${app}/dashboard/inbox?chat=${alert.conversationId}` : `${app}/dashboard/inbox`;
   const what = oneLine(alert.what ?? "visit", 40);
   if (alert.kind === "own_number_outcome") {
     return { headline: `How did your WhatsApp chat with ${who} go? Update the lead.`, link };

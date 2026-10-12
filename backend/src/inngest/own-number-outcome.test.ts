@@ -9,7 +9,7 @@ const CONVERSATION = "3f2a1b4c-5d6e-4f70-8a91-b2c3d4e5f601";
 const STAFF = "16fd2706-8baf-433b-82eb-8c7fada847da";
 const event = { data: { tenantId: TENANT, handoffId: HANDOFF } };
 const QUESTION = "How did your WhatsApp chat with Asha go? Update the lead.";
-const LINK = `https://app.test/dashboard/inbox?conversation=${CONVERSATION}`;
+const LINK = `https://app.test/dashboard/inbox?chat=${CONVERSATION}`;
 const sent: SendOutcome = { status: "sent", messageId: "m", providerMsgId: "wamid", creditsCharged: 0, usedTemplate: false };
 
 let handoff: OwnNumberHandoff | null;
