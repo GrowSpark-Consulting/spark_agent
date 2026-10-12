@@ -13,6 +13,7 @@ import {
 import { switchMode, switchNote, type StaffMode } from "./conversation-mode";
 import { MessageBubble } from "./message-bubble";
 import { ReplyComposer } from "./reply-composer";
+import { TemplateReplyPanel } from "./template-reply-panel";
 
 // The open chat, ported from the /dashboard/preview Inbox (components/dashboard/pakka-app.tsx):
 // header with the AI / Human control, the status strip, the WhatsApp-style message area with day
@@ -20,9 +21,8 @@ import { ReplyComposer } from "./reply-composer";
 //
 // One responder per chat. The AI / Human switch takes a chat over and hands it back (POST
 // /api/conversations/:id/mode); while the AI has the chat staff can't reply, and in a person's chat they reply
-// in free text while the 24-hour window is open (reply-composer.tsx). Sending a template after the window
-// closes needs a notify change, so the closed-window strip stays.
-// Left out on purpose until its data exists: the suggested reply. The lead card is lead-card-panel.tsx,
+// in free text while the 24-hour window is open (reply-composer.tsx, which also holds "Suggest reply"). After it closes the
+// template picker sits inside the strip (template-reply-panel.tsx: the same route with `{ template }`). The lead card is lead-card-panel.tsx,
 // pinned beside the chat on wide screens and opened from the header's Lead button below that.
 
 /** Shown instead of the reply box while the AI has the chat; the API refuses a staff reply then too. */
@@ -239,6 +239,9 @@ export function ChatView({
                 ? `${conversation.firstName} last wrote ${lastWrotePhrase(conversation.lastCustomerMsgAt, now, timeZone)}, so WhatsApp only allows an approved template.`
                 : `${conversation.firstName} hasn’t written yet, so WhatsApp only allows an approved template.`}
             </span>
+            <div style={{ flexBasis: "100%", minWidth: 0 }}>
+              <TemplateReplyPanel key={conversation.id} tenantId={tenantId} conversationId={conversation.id} firstName={conversation.firstName} />
+            </div>
           </div>
         )}
       </div>
