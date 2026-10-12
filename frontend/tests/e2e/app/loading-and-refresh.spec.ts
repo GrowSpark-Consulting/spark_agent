@@ -5,7 +5,8 @@ import { DAY, newDay3Account, open, type Day3Account } from "../support/day3";
 // Loading states on the screens a person waits on (the Inbox's is in inbox.spec.ts, beside its Realtime stub), and the Calendar's Refresh (mocked E2E: mock-supabase.mjs under RLS,
 // single requests held or broken with page.route). It shows each screen says it is loading, then shows its data, and that
 // a refresh never clears or replaces what is on screen with an error. It does NOT show real Supabase latency or that
-// bookings arrive live: `bookings` is not in the supabase_realtime publication yet, so the calendar says it isn't live.
+// bookings arrive live from a real Realtime server: `bookings` is published (0026) and the calendar subscribes, but here the socket is a
+// stand-in (support/realtime.ts); realtime-refresh.spec.ts covers what a pushed change does.
 
 /** Holds GETs of one table until `release()`; the rest of the traffic goes straight through. */
 async function hold(page: Page, table: string, matches: (url: URL) => boolean = () => true) {
@@ -80,12 +81,13 @@ test.describe("Loading states", () => {
 test.describe("Calendar · Refresh", () => {
   test.use({ storageState: SIGNED_OUT });
 
-  test("says the calendar isn't updating live, and reads the shown day again without clearing it", async ({ page, request }) => {
+  test("says the calendar is updating live, and Refresh still reads the shown day again without clearing it", async ({ page, request }) => {
     const account = await newDay3Account(request, { seed: true });
     await openDay(page, account);
     const karthik = page.getByRole("button", { name: /Karthik R/ });
     await expect(karthik).toBeVisible();
-    await expect(page.getByText("Not updating live. Use Refresh.")).toBeVisible();
+    await expect(page.getByText("Updating live.")).toBeVisible();
+    await page.waitForTimeout(900); // the join reads once to catch up; count only what Refresh does
 
     let reads = 0;
     page.on("request", (r) => {

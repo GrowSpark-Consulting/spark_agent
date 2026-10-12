@@ -1,4 +1,5 @@
 import { test as base, expect, type Page } from "@playwright/test";
+import { mockRealtime } from "./realtime";
 
 /** Password for every account in mock-supabase.mjs. */
 export const PASSWORD = "e2e-password-1";
@@ -11,7 +12,18 @@ export const SIGNED_OUT = { cookies: [], origins: [] };
  * the browser's own "Failed to load resource" line for our API routes, which tests trigger on
  * purpose to check error states (the response is asserted instead).
  */
-export const test = base.extend<{ consoleErrors: string[] }>({
+export const test = base.extend<{ consoleErrors: string[]; quietRealtime: void }>({
+  // Screens subscribe to Realtime for the tables the database publishes (lib/realtime/published-tables.ts: inbox, leads, calendar...).
+  // The mock Supabase has no socket, so without this every such page logs a failed WebSocket handshake and the console guard below
+  // fails the test. This answers joins and does nothing else; a test that needs to push a change (or refuse the join) calls
+  // mockRealtime itself, which is registered later and so wins.
+  quietRealtime: [
+    async ({ page }, use) => {
+      await mockRealtime(page);
+      await use();
+    },
+    { auto: true },
+  ],
   consoleErrors: [
     async ({ page }, use) => {
       const errors: string[] = [];

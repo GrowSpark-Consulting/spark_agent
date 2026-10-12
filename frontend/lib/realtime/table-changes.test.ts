@@ -275,4 +275,29 @@ describe("createCoalescer", () => {
     await tick(500);
     expect(run).toHaveBeenCalledTimes(1);
   });
+
+  it("calls the global timers unbound, as a browser requires (as a method they throw 'Illegal invocation')", async () => {
+    // A browser's setTimeout and clearTimeout throw when called with any `this` but the window. This stand-in does the same, so a
+    // timer kept as { set: setTimeout } and called as timers.set(...) fails here as it did on the leads board and the calendar.
+    const guarded = (real: (...args: never[]) => unknown) =>
+      function (this: unknown, ...args: never[]) {
+        if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+        return real(...args);
+      };
+    vi.stubGlobal("setTimeout", guarded(globalThis.setTimeout as never));
+    vi.stubGlobal("clearTimeout", guarded(globalThis.clearTimeout as never));
+    try {
+      const run = vi.fn();
+      const c = createCoalescer(run, 100);
+      c.notify();
+      await tick(101);
+      expect(run).toHaveBeenCalledTimes(1);
+      c.notify();
+      c.cancel();
+      await tick(500);
+      expect(run).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
