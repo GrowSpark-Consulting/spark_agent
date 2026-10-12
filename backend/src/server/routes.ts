@@ -14,6 +14,7 @@ import { getWebhookConfig } from "../channels/whatsapp/connect/webhook-token";
 import { handleWhatsAppHandshake } from "../channels/whatsapp/verify-challenge";
 import { setConversationMode } from "../conversations/mode";
 import { sendStaffReply } from "../conversations/staff-reply";
+import { listFeatures, updateFeature } from "../features/toggles";
 import { deleteDocument, KB_UPLOAD_MAX_BODY_BYTES, uploadDocument } from "../kb/documents";
 import { answerGap, createFaq, deleteFaq, dismissGap, listGaps, updateFaq } from "../kb/faqs";
 import { serverEnv } from "../lib/env";
@@ -103,6 +104,13 @@ const conversationSuggest: RouteHandler = async (request, deps, params) => {
   const { context } = await requireTenant(request, deps.userClient);
   return Response.json(await suggestReply(context, params.id));
 };
+// → FeatureList: every feature with what the plan includes, the business's switch and settings, and the credits it
+// spent in the last 30 days. Any member.
+const featureList = tenantRoute(({ context }) => listFeatures(context));
+// { enabled?, settings? } → FeatureRow. Owner or admin; a feature outside the plan cannot be switched on (plan_required),
+// and every change is in the audit log.
+const featureUpdate: RouteHandler = (request, deps, params) =>
+  tenantRoute(({ context, body, params: p }) => updateFeature(context, p.key, body))(request, deps.userClient, params);
 // ?resourceId= → { url }: the Google consent link for one staff member. Owner or admin.
 const googleConnect: RouteHandler = (request, deps, params) =>
   tenantRoute(({ context }) => googleConnectUrl(context, new URL(request.url).searchParams.get("resourceId")))(request, deps.userClient, params);
@@ -175,6 +183,8 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/conversations/:id/mode", browser: true, methods: { POST: conversationMode } },
   { path: "/api/conversations/:id/lead-card", browser: true, methods: { GET: conversationLeadCard } },
   { path: "/api/conversations/:id/suggest", browser: true, methods: { POST: conversationSuggest } },
+  { path: "/api/features", browser: true, methods: { GET: (request, deps) => featureList(request, deps.userClient) } },
+  { path: "/api/features/:key", browser: true, methods: { PATCH: featureUpdate } },
   { path: "/api/kb/documents", browser: true, maxBodyBytes: KB_UPLOAD_MAX_BODY_BYTES, methods: { POST: kbUpload } },
   { path: "/api/kb/documents/:id", browser: true, methods: { DELETE: kbDeleteDocument } },
   { path: "/api/kb/faqs", browser: true, methods: { POST: (request, deps) => kbCreateFaq(request, deps.userClient) } },

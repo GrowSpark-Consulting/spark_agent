@@ -12,7 +12,7 @@ export type HandoffOutcome = (typeof OUTCOMES)[number];
 const TITLES: Record<HandoffOutcome, string> = { booked: "Booked", follow_up: "Follow-up", lost: "Lost" };
 
 export const DEFAULT_OUTCOME_AFTER_MINUTES = 240;
-const DelaySettings = z.object({ outcome_after_minutes: z.number().int().min(1).max(7 * 24 * 60) });
+export const DelaySettings = z.object({ outcome_after_minutes: z.number().int().min(1).max(7 * 24 * 60) });
 
 /** Minutes after the takeover before asking (handoff_own_number's `outcome_after_minutes`), else 4 hours. */
 export async function outcomeDelay(tenantId: string, db: SupabaseClient): Promise<number> {
