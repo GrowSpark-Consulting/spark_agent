@@ -101,6 +101,8 @@ test("walks every step without overflow, and Back returns", async ({ page }) => 
   await next(page, "Looks good").click();
 
   await expect(page.getByRole("heading", { name: "Try your assistant now" })).toBeVisible();
+  // The one-trial-per-number refusal is the test chat's WhatsApp reply (Dev 1, PR 1b), not an answer the wizard gets, so the wizard only sets the expectation.
+  await expect(page.getByTestId("one-trial-note")).toContainText("one free trial for each WhatsApp number");
   await next(page, "Back").click();
   await expect(page.getByRole("heading", { name: "Teach your assistant" })).toBeVisible();
   await next(page, "Looks good").click();

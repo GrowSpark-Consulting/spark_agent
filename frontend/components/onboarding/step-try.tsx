@@ -50,6 +50,9 @@ export function StepTry({ s }: { s: OnboardingState }) {
             number until your own number is connected.
           </div>
           <div className="text-[13px] text-neutral-700">Try asking: {profile.tryAsk}</div>
+          <div data-testid="one-trial-note" className="text-[13px] text-neutral-700">
+            There is one free trial for each WhatsApp number. If the phone you use here has already started a trial, the test chat will tell you so.
+          </div>
         </div>
       </div>
     </>
