@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
 import type { Service } from "@/features/knowledge/data";
-import { chosenServiceId, describeBookingService, readBookingService, saveBookingService } from "./booking-service";
+import { chosenServiceId, describeBookingService, isSelectableChoice, readBookingService, saveBookingService } from "./booking-service";
 import { SetupError } from "./resources-data";
 
 const TENANT = "10000000-0000-4000-8000-000000000001";
@@ -150,5 +150,21 @@ describe("which service the assistant books (tenants.agent_settings.bookingServi
       const read = { data: { id: TENANT, agent_settings: {} }, error: null };
       await expect(saveBookingService(fakeClient([read, { data: null, error: pgError }]).client, TENANT, A)).rejects.toBe(pgError);
     });
+  });
+});
+
+describe("isSelectableChoice", () => {
+  const services = [service(A, "Site visit"), service(B, "Video call", false)];
+  it("always allows clearing the choice", () => {
+    expect(isSelectableChoice(services, null)).toBe(true);
+    expect(isSelectableChoice([], null)).toBe(true);
+  });
+  it("allows only an id that names an active service", () => {
+    expect(isSelectableChoice(services, A)).toBe(true);
+    expect(isSelectableChoice(services, B)).toBe(false);
+    expect(isSelectableChoice(services, GONE)).toBe(false);
+  });
+  it("refuses a value that is not a UUID even if a service carries it", () => {
+    expect(isSelectableChoice([service("Site visit", "Site visit")], "Site visit")).toBe(false);
   });
 });
