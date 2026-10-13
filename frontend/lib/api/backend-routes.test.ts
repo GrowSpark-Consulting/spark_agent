@@ -75,7 +75,10 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
  * stand the route in with page.route. These are checked the other way round from FRONTEND_CALLS: the moment the backend registers one, the
  * test below fails and the line moves to FRONTEND_CALLS, so the list can't go stale and the call can't silently stay a stub.
  */
-const AWAITING_BACKEND: { call: string; file: string; where: string }[] = [];
+const AWAITING_BACKEND: { call: string; file: string; where: string }[] = [
+  { call: "GET /api/connect-links/:token", file: "features/connect/connect-link.ts", where: "Dev 1, contract only (docs/whatsapp-connection-contract.md); not in routes.ts on main" },
+  { call: "POST /api/onboarding/whatsapp/embedded-signup", file: "features/connect/connect-link.ts", where: "Dev 1, contract only (docs/whatsapp-connection-contract.md); not in routes.ts on main" },
+];
 
 /** Backend routes the browser never calls, and why. Anything not here and not in FRONTEND_CALLS fails the test. */
 const NO_BROWSER_CALLER: Record<string, string> = {
