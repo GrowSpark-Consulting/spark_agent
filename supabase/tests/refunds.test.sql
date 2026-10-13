@@ -1,7 +1,7 @@
--- Credit refunds (0008). Run: pnpm db:test
+-- Credit refunds (0008, 0034). Run: pnpm db:test
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(8);
+select plan(14);
 
 insert into public.tenants (id, name, vertical) values
   ('c5000000-0000-0000-0000-000000000001', 'Refunds', 'test-pack');
@@ -32,6 +32,31 @@ select throws_ok($$select public.refund_credits('c5000000-0000-0000-0000-0000000
   'P0001', null, 'a refund needs the message id');
 select ok(not has_function_privilege('authenticated', 'public.refund_credits(uuid, uuid)', 'execute'),
   'members cannot refund credits');
+
+-- A keyed send keeps its message id (c51…03) on every attempt a job retries, so each one spends and refunds under it.
+select public.spend_credits('c5000000-0000-0000-0000-000000000001', 1, 'template_utility', 'c5100000-0000-0000-0000-000000000003');
+select public.refund_credits('c5000000-0000-0000-0000-000000000001', 'c5100000-0000-0000-0000-000000000003');
+select public.spend_credits('c5000000-0000-0000-0000-000000000001', 1, 'template_utility', 'c5100000-0000-0000-0000-000000000003');
+select is(public.refund_credits('c5000000-0000-0000-0000-000000000001', 'c5100000-0000-0000-0000-000000000003'),
+  1, 'a retry under the same message id gets its credit back too');
+select public.spend_credits('c5000000-0000-0000-0000-000000000001', 1, 'template_utility', 'c5100000-0000-0000-0000-000000000003');
+select is(public.refund_credits('c5000000-0000-0000-0000-000000000001', 'c5100000-0000-0000-0000-000000000003'),
+  1, 'and so does every later retry');
+select results_eq($$select * from public.credit_balance('c5000000-0000-0000-0000-000000000001')$$,
+  $$values (3, 9, 12)$$, 'three failed attempts cost nothing');
+select is(public.refund_credits('c5000000-0000-0000-0000-000000000001', 'c5100000-0000-0000-0000-000000000003'),
+  0, 'with nothing spent since, a repeat refund still gives nothing');
+
+-- A retry can draw from another bucket: message c51…04 first spends 4 (3 plan, 1 top-up) and is refunded; another
+-- message then uses the plan credits, so the retry's 4 come from the top-up alone.
+select public.spend_credits('c5000000-0000-0000-0000-000000000001', 4, 'ai_reply', 'c5100000-0000-0000-0000-000000000004');
+select public.refund_credits('c5000000-0000-0000-0000-000000000001', 'c5100000-0000-0000-0000-000000000004');
+select public.spend_credits('c5000000-0000-0000-0000-000000000001', 3, 'ai_reply', 'c5100000-0000-0000-0000-000000000005');
+select public.spend_credits('c5000000-0000-0000-0000-000000000001', 4, 'ai_reply', 'c5100000-0000-0000-0000-000000000004');
+select is(public.refund_credits('c5000000-0000-0000-0000-000000000001', 'c5100000-0000-0000-0000-000000000004'),
+  4, 'the retry gets its 4 credits back');
+select results_eq($$select * from public.credit_balance('c5000000-0000-0000-0000-000000000001')$$,
+  $$values (0, 9, 9)$$, 'into the top-up bucket it spent from, not the plan bucket');
 
 select * from finish();
 rollback;
