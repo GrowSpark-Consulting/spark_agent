@@ -1,6 +1,7 @@
 import { getWhatsAppConnections, type ConnectionsResult } from "@pakka/backend/channels/whatsapp/connections";
 import type { Role, WhatsAppConnectionPublic } from "@pakka/types";
 import { unstable_rethrow } from "next/navigation";
+import { WhatsAppAutoRefresh } from "@/components/dashboard/whatsapp-auto-refresh";
 import { WhatsAppConnectionActions } from "@/components/dashboard/whatsapp-connection-actions";
 import { WhatsAppConnectionChecks } from "@/components/dashboard/whatsapp-connection-checks";
 import { WhatsAppTemplateStatus } from "@/components/dashboard/whatsapp-template-status";
@@ -110,6 +111,8 @@ export async function WhatsAppConnectionPanel({ tenantId, role, compact }: { ten
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* No Realtime on connections: the full screen polls, so a number the daily check turned off shows without a reload. */}
+      {!compact ? <WhatsAppAutoRefresh statuses={result.connections.map((c) => c.status)} /> : null}
       <ul className="app-grid" style={{ listStyle: "none", margin: 0, padding: 0 }} aria-label="WhatsApp numbers">
         {result.connections.map((c) => {
           const last = parseLastCheck(c.last_check);
@@ -131,6 +134,11 @@ export async function WhatsAppConnectionPanel({ tenantId, role, compact }: { ten
               {!compact ? (
                 <>
                   <p className="app-card-text">{s.detail}</p>
+                  {c.status === "failed" && c.method === "manual_byo" ? (
+                    <p className="app-card-text" data-testid="daily-check-note">
+                      We check manually connected numbers every day. If Meta stops accepting this one, we switch it off and tell your owners and admins on WhatsApp where we can.
+                    </p>
+                  ) : null}
                   <dl className="app-facts" style={{ marginTop: 8 }}>
                     <div>
                       <dt>Quality rating</dt>

@@ -553,3 +553,50 @@ test.describe("WhatsApp connection panel · template approval", () => {
     await expect(templates(page)).not.toContainText("approved");
   });
 });
+
+// Connections are not on Realtime (docs/whatsapp-connection-contract.md, open decision 5), and Dev 1's daily health check can turn an active
+// number to `failed` with nobody on the page. The full screen therefore reads again on a timer and when the tab is shown again
+// (components/dashboard/whatsapp-auto-refresh.tsx). The mock database stands in for what the daily job would have written.
+test.describe("WhatsApp connection · changes made by the daily check", () => {
+  const showTab = (page: Page) => page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+
+  test("a number that fails while the page is open shows as needing attention when the tab is shown again, with no reload", async ({ page, request }) => {
+    const account = await newWhatsappAccount(request, { lastCheck: ALL_PASS });
+    await signIn(page, account.email, "/dashboard/whatsapp");
+    await expect(card(page).locator(".app-status").first()).toHaveText("Connected");
+    await expect(page.getByTestId("daily-check-note")).toHaveCount(0);
+
+    let rereads = 0;
+    page.on("request", (r) => { const u = new URL(r.url()); if (u.pathname === "/dashboard/whatsapp" && u.searchParams.has("_rsc")) rereads += 1; });
+    await request.post(`${MOCK_SUPABASE_URL}/__mock/whatsapp-connection`, { data: { email: account.email, status: "failed", last_check: TOKEN_FAILED } });
+    // A read right after the last one is skipped (5 s gap), so this waits it out rather than racing it.
+    await page.waitForTimeout(5300);
+    await showTab(page);
+    await expect(card(page)).toContainText("Needs attention");
+    await expect(page.getByRole("group", { name: "Connection checks" })).toContainText("At least one check failed");
+    await expect(page.getByTestId("daily-check-note")).toContainText("We check manually connected numbers every day");
+    await expect(recheck(page)).toBeEnabled();
+    expect(rereads).toBeGreaterThan(0);
+    await expectNoSecrets(page);
+  });
+
+  test("the daily-check note is only for manually connected numbers", async ({ page, request }) => {
+    const account = await newWhatsappAccount(request, { status: "failed", method: "embedded_signup", lastCheck: TOKEN_FAILED });
+    await signIn(page, account.email, "/dashboard/whatsapp");
+    await expect(card(page)).toContainText("Needs attention");
+    await expect(page.getByTestId("daily-check-note")).toHaveCount(0);
+  });
+
+  test("the compact card on Home does not poll", async ({ page, request }) => {
+    const account = await newWhatsappAccount(request, { lastCheck: ALL_PASS });
+    await signIn(page, account.email, "/dashboard");
+    await expect(page.getByRole("listitem").first()).toContainText("Connected");
+    // The page reads on the server, so a re-read shows up in the browser as a request for the page's data for the page itself (`_rsc` on its own path; links to other pages prefetch theirs), not as a database call.
+    let rereads = 0;
+    page.on("request", (r) => { const u = new URL(r.url()); if (u.pathname === "/dashboard" && u.searchParams.has("_rsc")) rereads += 1; });
+    await page.waitForTimeout(5300);
+    await showTab(page);
+    await page.waitForTimeout(800);
+    expect(rereads).toBe(0);
+  });
+});
