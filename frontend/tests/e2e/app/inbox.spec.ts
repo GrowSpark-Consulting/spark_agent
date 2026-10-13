@@ -893,12 +893,75 @@ test.describe("Inbox · opened from a link", () => {
     });
   }
 
-  test("a chat that isn't this business's opens nothing and shows no error", async ({ page }) => {
+  test("a chat that isn't this business's opens nothing, says so without an error, and Show my chats returns to the list", async ({ page }) => {
     // A well-formed id that matches none of the member's chats (another business's, or deleted).
-    await open(page, `?conversation=49999999-0000-0000-0000-000000000001`);
+    await open(page, `?chat=49999999-0000-0000-0000-000000000001`);
     await expect(page.locator(".app-inbox-row")).toHaveCount(4);
     await expect(page.getByRole("log")).toHaveCount(0);
     await expect(appAlert(page)).toHaveCount(0);
+    const problem = page.getByTestId("chat-link-problem");
+    await expect(problem).toHaveAttribute("data-problem", "not_found");
+    await expect(problem).toContainText("That chat isn't available.");
     await expectNoHorizontalOverflow(page);
+
+    await problem.getByRole("button", { name: "Show my chats" }).click();
+    await expect(problem).toHaveCount(0);
+    expect(new URL(page.url()).searchParams.has("chat")).toBe(false);
+    if (!isMobile(page)) await expect(page.getByRole("log", { name: "Messages with Karthik R" })).toBeVisible();
+  });
+
+  test("a plain visit and a link to a chat that is there show no link problem", async ({ page }) => {
+    await open(page, "");
+    await expect(page.getByTestId("chat-link-problem")).toHaveCount(0);
+    await page.goto(`/dashboard/inbox?chat=${cid(2)}`);
+    await expect(page.getByRole("log", { name: "Messages with Priya S" })).toBeVisible();
+    await expect(page.getByTestId("chat-link-problem")).toHaveCount(0);
+  });
+
+  test("a refresh keeps the chat that was open: from a link, and after picking another chat", async ({ page }) => {
+    await open(page, `?conversation=${cid(2)}`);
+    await expect(page.getByRole("log", { name: "Messages with Priya S" })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole("log", { name: "Messages with Priya S" })).toBeVisible();
+
+    // Picking a chat writes it into the URL as ?chat=, so a refresh lands on the same chat, not the newest.
+    if (isMobile(page)) await page.getByRole("button", { name: "Back" }).click();
+    await row(page, /Karthik R/).click();
+    await expect(page).toHaveURL(new RegExp(`chat=${cid(1)}`));
+    await page.reload();
+    await expect(page.getByRole("log", { name: "Messages with Karthik R" })).toBeVisible();
+    expect(new URL(page.url()).searchParams.get("chat")).toBe(cid(1));
+  });
+
+  test("the read of a linked chat failing says so and Try again reads it again", async ({ page, consoleErrors }) => {
+    await mockRealtime(page);
+    const linked = "49999999-0000-0000-0000-000000000002";
+    let failing = true;
+    let reads = 0;
+    // The list is read again when the live connection joins, so the by-id read happens more than once: it fails until the test lets it through.
+    // Only the by-id read for the linked chat fails; the list read goes through to the mock.
+    await page.route((url) => url.pathname === "/rest/v1/conversations" && url.searchParams.get("id") === `eq.${linked}`, (route) => {
+      if (route.request().method() === "OPTIONS") return route.fallback();
+      reads += 1;
+      return route.fulfill({
+        status: failing ? 500 : 200,
+        contentType: "application/json",
+        headers: { "access-control-allow-origin": route.request().headers()["origin"] ?? "*" },
+        body: JSON.stringify(failing ? { message: "boom" } : []),
+      });
+    });
+    await signIn(page, "inbox@test.local", `/dashboard/inbox?chat=${linked}`);
+    const problem = page.getByTestId("chat-link-problem");
+    await expect(problem).toHaveAttribute("data-problem", "failed");
+    await expect(page.locator(".app-inbox-row")).toHaveCount(4);
+    // The browser logs each refused read; those lines are expected here and nothing else is.
+    expect(consoleErrors.length).toBeGreaterThan(0);
+    expect(consoleErrors.every((e) => /Failed to load resource: .*500/.test(e))).toBe(true);
+    consoleErrors.length = 0;
+    const before = reads;
+    failing = false;
+    await problem.getByRole("button", { name: "Try again" }).click();
+    await expect(problem).toHaveAttribute("data-problem", "not_found");
+    expect(reads).toBeGreaterThan(before);
   });
 });
