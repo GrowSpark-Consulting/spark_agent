@@ -11,6 +11,8 @@ import { cancelFromCalendar, completeFromCalendar, noShowFromCalendar, reschedul
 import { googleConnectUrl, handleGoogleCallback } from "../booking/google-calendar";
 import { sendTestMessage } from "../channels/whatsapp/test-message";
 import { handleWhatsAppWebhook } from "../channels/whatsapp/inbound";
+import { assertConnectLinksAvailable, connectWithLink, createConnectLink, readConnectLink } from "../channels/whatsapp/connect/connect-link";
+import { clientKey } from "../channels/whatsapp/connect/connect-link-rate-limit";
 import { connectEmbeddedSignup } from "../channels/whatsapp/connect/embedded-signup";
 import { connectManual } from "../channels/whatsapp/connect/manual";
 import { disconnectConnection, recheckConnection } from "../channels/whatsapp/connect/recheck";
@@ -216,8 +218,23 @@ const whatsappManualConnect = tenantRoute(
   },
   { status: 201 },
 );
-// { code, wabaId, phoneNumberId, coexistence } → 201 connection. Owner or admin; off (not_available) until EMBEDDED_SIGNUP_ENABLED.
-const whatsappEmbeddedSignup = tenantRoute(({ context, body }) => connectEmbeddedSignup(context, body), { status: 201 });
+// { code, wabaId, phoneNumberId, coexistence } → 201 connection. Owner or admin; off (not_available) until EMBEDDED_SIGNUP_ENABLED. With a `connectToken` in the
+// body it is the assisted flow instead: public, no bearer token, the business comes from the link (connect/connect-link.ts).
+const signedInEmbeddedSignup = tenantRoute(({ context, body }) => connectEmbeddedSignup(context, body), { status: 201 });
+const whatsappEmbeddedSignup: RouteHandler = async (request, deps) => {
+  const peek: unknown = await request.clone().json().catch(() => null);
+  if (typeof peek === "object" && peek !== null && "connectToken" in peek) {
+    return Response.json(await connectWithLink(await readJson(request), clientKey(request)), { status: 201 });
+  }
+  return signedInEmbeddedSignup(request, deps.userClient);
+};
+// { tenantId } → 201 { url, expiresAt }. Platform admin; not_available while the flag is off, before anyone is looked up.
+const adminConnectLink: RouteHandler = async (request, deps) => {
+  assertConnectLinksAvailable();
+  return adminRoute(({ admin, body }) => createConnectLink({ actor: admin.actor, userId: admin.user.id }, body), { status: 201 })(request, deps.userClient);
+};
+// Public, no bearer token → { tenantName, expiresAt }; every link that cannot be used gets the same not_found.
+const connectLinkRead: RouteHandler = async (request, _deps, params) => Response.json(await readConnectLink(params.token ?? "", clientKey(request)));
 // no body → 200 connection. Owner or admin of the business that owns it. The browser sends a POST with no body, so (like the gap routes) these
 // authenticate themselves and let the app turn a thrown error into the envelope.
 const whatsappRecheck: RouteHandler = async (request, deps, params) => {
@@ -266,7 +283,9 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/kb/gaps/:id/dismiss", browser: true, methods: { POST: kbDismissGap } },
   { path: "/api/whatsapp/webhook-config", browser: true, methods: { GET: (request, deps) => whatsappWebhookConfig(request, deps.userClient) } },
   { path: "/api/whatsapp/manual", browser: true, methods: { POST: (request, deps) => whatsappManualConnect(request, deps.userClient) } },
-  { path: "/api/onboarding/whatsapp/embedded-signup", browser: true, methods: { POST: (request, deps) => whatsappEmbeddedSignup(request, deps.userClient) } },
+  { path: "/api/onboarding/whatsapp/embedded-signup", browser: true, methods: { POST: whatsappEmbeddedSignup } },
+  { path: "/api/connect-links/:token", browser: true, secretParams: ["token"], methods: { GET: connectLinkRead } },
+  { path: "/api/admin/whatsapp/connect-link", browser: true, methods: { POST: adminConnectLink } },
   { path: "/api/whatsapp/connections/:id/recheck", browser: true, methods: { POST: whatsappRecheck } },
   { path: "/api/whatsapp/connections/:id/disconnect", browser: true, methods: { POST: whatsappDisconnect } },
   { path: "/api/admin/whatsapp/manual", browser: true, methods: { POST: (request, deps) => adminManualConnect(request, deps.userClient) } },

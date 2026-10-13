@@ -49,7 +49,7 @@ export type ConnectionRecord = {
   qualityRating: string | null;
   connectedBy: string;
   /** Left out by a manual connection: `manual_byo`, and the columns keep their defaults. */
-  method?: "manual_byo" | "embedded_signup";
+  method?: "manual_byo" | "embedded_signup" | "assisted";
   coexistence?: boolean;
   messagingLimit?: string | null;
   tokenExpiresAt?: Date | null;

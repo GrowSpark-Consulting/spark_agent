@@ -54,8 +54,16 @@ export function bodyLimitFor(pathname: string, routes: readonly Route[] = ROUTES
 /** The path as the request log shows it: the route's secret params (a connect-link token) become `***`. */
 export function logPathFor(pathname: string, routes: readonly Route[] = ROUTES): string {
   const match = matchRoute(pathname, routes);
-  const secret = match?.route.secretParams;
-  if (!match || !secret?.length) return pathname;
+  if (!match) {
+    // A mangled address (a trailing slash, an extra segment) matches no route and is answered 404, but it is still logged: the segment where a secret would sit is masked too.
+    const prefix = routes.find((r) => r.secretParams?.length && r.path.includes("/:") && pathname.startsWith(r.path.slice(0, r.path.indexOf("/:") + 1)));
+    if (!prefix) return pathname;
+    const head = prefix.path.slice(0, prefix.path.indexOf("/:") + 1);
+    const rest = pathname.slice(head.length);
+    return rest === "" ? pathname : `${head}***${rest.includes("/") ? rest.slice(rest.indexOf("/")) : ""}`;
+  }
+  const secret = match.route.secretParams;
+  if (!secret?.length) return pathname;
   const pattern = match.route.path.split("/");
   return pathname
     .split("/")

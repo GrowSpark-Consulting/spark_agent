@@ -166,7 +166,6 @@ describe("who may connect, and what is accepted", () => {
     ["a null phone number id (the browser sends null when Meta's finish event had none)", { ...BODY, phoneNumberId: null }],
     ["a waba id with letters", { ...BODY, wabaId: "abc" }],
     ["coexistence that is not a boolean", { ...BODY, coexistence: "yes" }],
-    ["a connectToken (the assisted flow is not built yet)", { ...BODY, connectToken: "x".repeat(43) }],
     ["a body that is not an object", "code"],
   ])("refuses %s with validation_failed and asks nothing of Meta", async (_name, body) => {
     const s = setup();
@@ -178,6 +177,13 @@ describe("who may connect, and what is accepted", () => {
     const s = setup();
     const error = await s.run({ ...BODY, phoneNumberId: "nope" }).catch((e) => e);
     expect((error as AppError).fields).toHaveProperty("phoneNumberId");
+  });
+
+  it("drops a connectToken: the signed-in function never takes the assisted path (the route does, before it gets here)", async () => {
+    const s = setup();
+    const result = await s.run({ ...BODY, connectToken: "x".repeat(43) });
+    expect(result.status).toBe("active");
+    expect(s.saved[0].record.method).toBe("embedded_signup");
   });
 
   it("takes the business from the caller, never from the body", async () => {

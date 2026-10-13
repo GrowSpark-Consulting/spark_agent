@@ -76,6 +76,7 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
   { call: "GET /api/conversations/:id/templates", file: "features/inbox/template-reply.ts" },
   // Registered behind EMBEDDED_SIGNUP_ENABLED (not_available while off). It refuses connectToken (validation_failed) until the assisted-link PR.
   { call: "POST /api/onboarding/whatsapp/embedded-signup", file: "features/connect/connect-link.ts" },
+  { call: "GET /api/connect-links/:token", file: "features/connect/connect-link.ts" },
 ];
 
 /**
@@ -85,7 +86,6 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
  * test below fails and the line moves to FRONTEND_CALLS, so the list can't go stale and the call can't silently stay a stub.
  */
 const AWAITING_BACKEND: { call: string; file: string; where: string }[] = [
-  { call: "GET /api/connect-links/:token", file: "features/connect/connect-link.ts", where: "Dev 1, contract only (docs/whatsapp-connection-contract.md); not in routes.ts on main" },
 ];
 
 /** Backend routes the browser never calls, and why. Anything not here and not in FRONTEND_CALLS fails the test. */
@@ -101,6 +101,7 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   // PayU billing (Dev 2, decision 20): the routes PayU itself calls. The ones the Billing screen calls are in FRONTEND_CALLS.
   "POST /api/billing/payu/return": "PayU's checkout page posts the payer's browser here (a navigation); it redirects to /dashboard/billing",
   "POST /api/webhooks/payu": "PayU calls it: payment results (verified with PayU before anything changes)",
+  "POST /api/admin/whatsapp/connect-link": "the platform-admin generator UI is not built yet",
 };
 
 function sourceFiles(dir: string): string[] {
