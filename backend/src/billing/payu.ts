@@ -290,6 +290,31 @@ export async function preDebit(config: PayuConfig, input: PreDebitInput, fetchIm
   }
 }
 
+export interface RevokeInput {
+  mandateId: string;
+  /** subscriptions.mandate_method: UPI has its own command; cards and e-NACH share one. */
+  method: string | null;
+  /** Ours, unique per request. */
+  requestId: string;
+}
+
+/**
+ * Cancels a mandate at PayU (a plan replaced by an upgrade). "revoked", or "already" when PayU says it is not active any
+ * more; a revoked mandate can never charge again. e-NACH revocations finish at the bank a day or two later.
+ */
+export async function revokeMandate(config: PayuConfig, input: RevokeInput, fetchImpl: FetchLike = defaultFetch): Promise<"revoked" | "already"> {
+  const command = input.method === "upi" ? "upi_mandate_revoke" : "mandate_revoke";
+  const var1 = JSON.stringify({ authpayuid: input.mandateId, requestId: input.requestId });
+  const answer = z.object({ status: z.union([z.number(), z.string()]), message: z.string().optional(), msg: z.string().optional() }).safeParse(
+    await postService(config, command, var1, fetchImpl),
+  );
+  if (!answer.success) throw new PayuError("unexpected", `PayU ${command}: an answer we cannot read`, true);
+  if (String(answer.data.status) === "1") return "revoked";
+  const text = (answer.data.message ?? answer.data.msg ?? "refused").slice(0, 300);
+  if (/not active|not in appropriate state|already/i.test(text)) return "already";
+  throw new PayuError("rejected", `PayU ${command}: ${text}`, true);
+}
+
 export interface ChargeInput {
   mandateId: string;
   /** The renewal payment's txnid (payments.txnid). */

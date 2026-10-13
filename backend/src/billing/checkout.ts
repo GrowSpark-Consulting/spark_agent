@@ -1,9 +1,11 @@
 import {
+  ChangePlanInput,
   CheckoutInput,
   OneTimePaymentInput,
   SETUP_FEE_INR,
   TOPUP_PACK,
   redactSecrets,
+  type ChangePlanResult,
   type PaymentView,
   type PayuCheckout,
   type TenantContext,
@@ -14,7 +16,7 @@ import { invalidateFeatureCache } from "../features/is-enabled";
 import { serverEnv } from "../lib/env";
 import { AppError } from "../lib/errors";
 import { supabaseAdmin } from "../lib/supabase-admin";
-import { indiaDate, newTxnid, payuConfig, paymentRequest, PayuError, verifyPayment, withGst, type FetchLike, type PayuConfig } from "./payu";
+import { indiaDate, newTxnid, payuConfig, paymentRequest, PayuError, revokeMandate, verifyPayment, withGst, type FetchLike, type PayuConfig } from "./payu";
 
 // Paying Spark Agent through PayU (decision 20; migrations 0034 and 0035). The owner starts a payment here, the browser
 // POSTs the returned fields to PayU's hosted checkout, and PayU sends the payer back to our return URL. Whatever PayU
@@ -24,6 +26,8 @@ import { indiaDate, newTxnid, payuConfig, paymentRequest, PayuError, verifyPayme
 //   POST /api/billing/checkout   { planKey, cycle, phone? } → PayuCheckout: the plan, its first payment and the auto-debit
 //   POST /api/billing/topup      { phone? } → PayuCheckout: 1,000 credits (a business on a paid plan)
 //   POST /api/billing/setup-fee  { phone? } → PayuCheckout: the assisted-onboarding setup fee, once
+//   POST /api/billing/change-plan { planKey, cycle?, phone? } → ChangePlanResult: an upgrade now (prorated, new mandate),
+//                                a downgrade at the next renewal
 //   GET  /api/billing/payments/:id → PaymentView (any member; asks PayU again while it is not final)
 //   POST /api/billing/payu/return  PayU's surl and furl: verifies, then redirects to /dashboard/billing?payment=<id>
 //   POST /api/webhooks/payu        PayU's webhook: verifies, answers 200
@@ -181,6 +185,80 @@ export function startSetupFee(context: TenantContext, rawInput: unknown, deps: B
   });
 }
 
+/**
+ * Changing plan (0037). A dearer plan is an upgrade now: the owner pays the price difference for the rest of the period on
+ * PayU, which also approves a new auto-debit at the new price; the plan changes once PayU confirms it (settle_payment),
+ * and the old mandate is then revoked. A cheaper plan starts at the next renewal. Owner only. Switching between monthly
+ * and yearly needs a mandate with another cycle and isn't offered yet.
+ */
+export async function changePlan(context: TenantContext, rawInput: unknown, deps: BillingDeps = billingDeps()): Promise<ChangePlanResult> {
+  requireOwner(context, "change the plan");
+  const input = ChangePlanInput.parse(rawInput);
+  const current = await deps.db.from("subscriptions").select("billing_cycle").eq("tenant_id", context.tenant.id).in("status", ["active", "past_due"]).maybeSingle();
+  if (current.error) throw new Error(`billing: plan read failed: ${current.error.message}`);
+  if (!current.data) throw new AppError("conflict", "Your business has no plan to change yet. Choose a plan first.");
+  const cycle = z.object({ billing_cycle: z.enum(["monthly", "yearly"]) }).parse(current.data).billing_cycle;
+  if (input.cycle && input.cycle !== cycle) throw new AppError("not_available", "Switching between monthly and yearly billing isn't available yet.");
+  const planRead = await deps.db.from("plans").select("key, name, price_inr, monthly_credits").eq("key", input.planKey).maybeSingle();
+  if (planRead.error) throw new Error(`billing: plan read failed: ${planRead.error.message}`);
+  if (!planRead.data) throw new AppError("not_found", "That plan isn't available.");
+  const plan = Plan.parse(planRead.data);
+
+  const txnid = newTxnid("plan_change");
+  const { data, error } = await deps.db.rpc("begin_plan_change", { p_tenant_id: context.tenant.id, p_plan_key: plan.key, p_txnid: txnid, p_created_by: context.user.id });
+  if (error) {
+    if (error.code === "PA409") throw new AppError("conflict", "Your business has no plan to change yet. Choose a plan first.");
+    if (error.code === "PA428") throw new AppError("conflict", "Your last plan payment didn't go through. Pay it first, then change plan.");
+    throw new Error(`begin_plan_change failed: ${error.message}`);
+  }
+  const [change] = z
+    .array(z.object({ action: z.enum(["upgrade", "scheduled", "kept", "unchanged"]), payment_id: z.string().nullable(), amount_paise: z.number().int().nullable(), mandate_paise: z.number().int().nullable(), effective_at: z.string() }))
+    .length(1)
+    .parse(data);
+  if (change.action === "scheduled") return { action: "scheduled", planKey: input.planKey, effectiveAt: new Date(change.effective_at).toISOString() };
+  if (change.action !== "upgrade") return { action: change.action };
+
+  // The upgrade's payment is recorded; only now is PayU needed.
+  const { payu, returnUrl } = ready(deps);
+  if (!change.payment_id || change.amount_paise === null || change.mandate_paise === null) throw new Error("begin_plan_change: an upgrade without its payment");
+  const who = await payer(context, deps, input.phone);
+  const now = deps.now();
+  const until = new Date(now);
+  until.setFullYear(until.getFullYear() + MANDATE_YEARS);
+  return {
+    action: "upgrade",
+    paymentId: change.payment_id,
+    payu: paymentRequest(payu, {
+      txnid,
+      amountPaise: change.amount_paise,
+      productinfo: `Spark Agent upgrade to ${plan.name} (${cycle})`,
+      ...who,
+      surl: returnUrl,
+      furl: returnUrl,
+      mandate: { amountPaise: change.mandate_paise, cycle, startDate: indiaDate(now), endDate: indiaDate(until) },
+    }),
+  };
+}
+
+/** After a paid upgrade: the mandate of the plan it replaced is revoked at PayU, so it can never charge again. Logged, not thrown. */
+async function revokeReplacedMandate(paymentId: string, deps: BillingDeps): Promise<void> {
+  if (!deps.payu) return;
+  try {
+    const { data, error } = await deps.db.from("payments").select("subscriptions(replaces_subscription_id)").eq("id", paymentId).maybeSingle();
+    if (error) throw new Error(error.message);
+    const replaced = z.object({ subscriptions: z.object({ replaces_subscription_id: z.string().nullable() }).nullable() }).nullable().parse(data)?.subscriptions?.replaces_subscription_id;
+    if (!replaced) return;
+    const old = await deps.db.from("subscriptions").select("mandate_id, mandate_method").eq("id", replaced).maybeSingle();
+    if (old.error) throw new Error(old.error.message);
+    const mandate = z.object({ mandate_id: z.string().nullable(), mandate_method: z.string().nullable() }).nullable().parse(old.data);
+    if (!mandate?.mandate_id) return;
+    await revokeMandate(deps.payu, { mandateId: mandate.mandate_id, method: mandate.mandate_method, requestId: newTxnid("plan_change") }, deps.fetch);
+  } catch (e) {
+    // The old subscription is cancelled, so the renewal job never charges it; revoking at PayU can be done by hand.
+    console.error(`[billing] payment ${paymentId}: the replaced mandate was not revoked at PayU: ${redactSecrets(e instanceof Error ? e.message : String(e))}`);
+  }
+}
+
 const Settled = z.array(z.object({ payment_id: z.string(), tenant_id: z.string(), kind: z.string(), status: z.string(), applied: z.boolean() })).length(1);
 export type SyncResult = { paymentId: string; status: string } | null;
 
@@ -214,8 +292,9 @@ export async function syncPayment(txnid: string, deps: BillingDeps): Promise<Syn
     throw new Error(`settle_payment failed: ${error.message}`);
   }
   const [row] = Settled.parse(data);
-  // A new plan changes which features are on.
-  if (row.applied && row.status === "success" && row.kind === "subscribe") invalidateFeatureCache(row.tenant_id);
+  // A new plan changes which features are on; an upgrade also ends the old mandate at PayU.
+  if (row.applied && row.status === "success" && (row.kind === "subscribe" || row.kind === "plan_change")) invalidateFeatureCache(row.tenant_id);
+  if (row.applied && row.status === "success" && row.kind === "plan_change") await revokeReplacedMandate(row.payment_id, deps);
   return { paymentId: row.payment_id, status: row.status };
 }
 
