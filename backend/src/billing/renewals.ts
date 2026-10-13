@@ -57,11 +57,14 @@ export function invoiceNumber(subscriptionId: string, periodEnd: Date): string {
 const rupees = (paise: number) => `₹${(paise / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const billingLink = (appUrl: string) => `${appUrl.replace(/\/$/, "")}/dashboard/billing`;
 
-/** A renewal that did not go through: how much, and where to change how they pay. Placeholder wording until Raja's. */
+/**
+ * A renewal that did not go through: how much, and that it is retried automatically (there is no manual "pay now": the
+ * mandate is charged again in 2 days). Placeholder wording until Raja's.
+ */
 export function renewalFailedMessage(amountPaise: number, appUrl: string): AlertMessage {
   const headline = `Your Spark Agent plan payment of ${rupees(amountPaise)} didn't go through. We'll try again in 2 days.`;
   const link = billingLink(appUrl);
-  return { text: `${headline}\nTo pay another way, open Billing.\n${link}`, templateParams: [headline, link] };
+  return { text: `${headline}\nCheck that the account or card you pay with can cover it. Your plan and payments are in Billing.\n${link}`, templateParams: [headline, link] };
 }
 
 /** A plan that lapsed: the assistant is paused until a plan is chosen again. */

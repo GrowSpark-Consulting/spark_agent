@@ -36,6 +36,27 @@ export const PayuCheckout = z.object({
 });
 export type PayuCheckout = z.infer<typeof PayuCheckout>;
 
+/** POST /api/billing/change-plan. `cycle`, when sent, must be the current one: switching cycle isn't available yet. */
+export const ChangePlanInput = z.object({
+  planKey: z.enum(PAID_PLAN_KEYS, "Choose a plan"),
+  cycle: z.enum(BILLING_CYCLES).optional(),
+  phone: PayerPhone,
+});
+export type ChangePlanInput = z.infer<typeof ChangePlanInput>;
+
+/**
+ * What a plan change did. upgrade: pay the rest of the period's difference on PayU (POST payu.fields to payu.url), which
+ * also approves the new auto-debit; the plan changes once it is paid. scheduled: a downgrade from effectiveAt (the next
+ * renewal). kept: a scheduled downgrade was cancelled. unchanged: already on that plan.
+ */
+export const ChangePlanResult = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("upgrade"), paymentId: z.string(), payu: PayuCheckout.shape.payu }),
+  z.object({ action: z.literal("scheduled"), planKey: z.enum(PAID_PLAN_KEYS), effectiveAt: z.string() }),
+  z.object({ action: z.literal("kept") }),
+  z.object({ action: z.literal("unchanged") }),
+]);
+export type ChangePlanResult = z.infer<typeof ChangePlanResult>;
+
 export const PAYMENT_KINDS = ["subscribe", "renewal", "plan_change", "topup", "setup_fee"] as const;
 export const PAYMENT_STATUSES = ["created", "pending", "success", "failed"] as const;
 

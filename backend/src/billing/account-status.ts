@@ -45,7 +45,9 @@ export async function accountStatus(context: TenantContext, deps: AccountStatusD
     deps.db.from("plans").select("key, name, monthly_credits").eq("key", context.tenant.planKey).maybeSingle(),
     deps.db.rpc("credit_balance", { p_tenant_id: tenantId }),
     deps.db.from("credit_ledger").select("delta, expires_at").eq("tenant_id", tenantId).gt("delta", 0).in("reason", GRANT_REASONS),
-    deps.db.from("subscriptions").select("status, current_period_end").eq("tenant_id", tenantId).order("current_period_end", { ascending: false }).limit(1),
+    // The live plan only: a pending checkout or upgrade (no period yet) or a cancelled one says nothing about renewal, and
+    // a descending sort would put a pending row's empty period first.
+    deps.db.from("subscriptions").select("status, current_period_end").eq("tenant_id", tenantId).in("status", ["active", "past_due"]).order("current_period_end", { ascending: false }).limit(1),
     deps.aiAutoReply(tenantId),
     status === "active"
       ? deps.db.from("whatsapp_connections").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("status", "active")
