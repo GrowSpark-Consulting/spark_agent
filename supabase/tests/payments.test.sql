@@ -83,7 +83,7 @@ select results_eq($$select applied from public.settle_payment('Sfirst', 'success
   'an abandoned checkout that is paid after all is still recorded');
 select results_eq($$select count(*)::int, count(*) filter (where status = 'active')::int from public.subscriptions where tenant_id = '0c100000-0000-0000-0000-000000000003'$$,
   $$values (2, 1)$$, 'only one plan is live when a business pays twice');
-select is((select count(*)::int from public.audit_logs where tenant_id = '0c100000-0000-0000-0000-000000000003' and action = 'payment.duplicate_subscription'), 1,
+select is((select count(*)::int from public.audit_logs where tenant_id = '0c100000-0000-0000-0000-000000000003' and action = 'payment.needs_refund'), 1,
   'the second payment is flagged for a refund');
 
 select is(
