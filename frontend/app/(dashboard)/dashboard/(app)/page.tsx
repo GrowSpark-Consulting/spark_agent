@@ -39,7 +39,7 @@ export default async function HomePage({ searchParams }: PageProps<"/dashboard">
         <p className="app-lede">Signed in as {user.email ?? "a team member"}.</p>
       </div>
 
-      <HomeOverview key={tenant.id} tenantId={tenant.id} />
+      <HomeOverview key={tenant.id} tenantId={tenant.id} timeZone={tenant.timezone} />
 
       <section aria-labelledby="biz-heading" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <h2 id="biz-heading" className="app-section-title">Your business</h2>

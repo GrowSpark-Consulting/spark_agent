@@ -1,20 +1,21 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { languageName } from "@/lib/whatsapp/templates";
 import { replyFailure, sendStaffTemplate, type ReplyFailure } from "./staff-reply";
-import { fetchSendableTemplates, paramProblem, renderPreview, type SendableTemplate } from "./template-reply";
+import { fetchConversationTemplates, paramProblem, renderPreview, type SendableTemplate } from "./template-reply";
 
 // The closed-window reply (chat-view.tsx shows it under the closed-window strip). Staff pick one of the business's approved templates, fill
 // its values and send; the route is POST /api/conversations/:id/messages with `{ template }` (staff-reply.ts). Nothing is shown as sent
 // until the API says so, the message then reaches the chat through realtime, and the choice and values are kept on any failure.
-// Mounted with key={conversation.id}, so a choice never moves to another chat.
+// Mounted with key={conversation.id}, so a choice never moves to another chat. The list is GET /api/conversations/:id/templates: the server
+// picks the chat's WhatsApp number and returns only what that number can send, so nothing is filtered by connection here.
 
-type Load = { state: "loading" } | { state: "error" } | { state: "ready"; templates: SendableTemplate[] };
+type Load = { state: "loading" } | { state: "error" } | { state: "ready"; connectionId: string | null; templates: SendableTemplate[] };
 
 export function TemplateReplyPanel({ tenantId, conversationId, firstName }: { tenantId: string; conversationId: string; firstName: string }) {
   const [load, setLoad] = useState<Load>({ state: "loading" });
+  const [attempt, setAttempt] = useState(0);
   const [choice, setChoice] = useState("");
   const [values, setValues] = useState<string[]>([]);
   const [touched, setTouched] = useState(false);
@@ -35,15 +36,18 @@ export function TemplateReplyPanel({ tenantId, conversationId, firstName }: { te
   }, []);
 
   useEffect(() => {
-    let current = true;
-    fetchSendableTemplates(getSupabaseBrowserClient(), tenantId).then(
-      (templates) => current && setLoad({ state: "ready", templates }),
-      () => current && setLoad({ state: "error" }),
+    const controller = new AbortController();
+    fetchConversationTemplates(tenantId, conversationId, controller.signal).then(
+      (list) => !controller.signal.aborted && setLoad({ state: "ready", connectionId: list.connectionId, templates: list.templates }),
+      () => !controller.signal.aborted && setLoad({ state: "error" }),
     );
-    return () => {
-      current = false;
-    };
-  }, [tenantId]);
+    return () => controller.abort();
+  }, [tenantId, conversationId, attempt]);
+
+  function retryLoad() {
+    setLoad({ state: "loading" });
+    setAttempt((n) => n + 1);
+  }
 
   const templates = load.state === "ready" ? load.templates : [];
   const chosen = templates.find((t) => t.id === choice) ?? null;
@@ -93,8 +97,18 @@ export function TemplateReplyPanel({ tenantId, conversationId, firstName }: { te
   }
   if (load.state === "error") {
     return (
-      <p role="alert" className="app-hint" style={{ margin: 0 }}>
-        Couldn’t load your message templates, so nothing can be sent to {firstName} yet. Reload the page to try again.
+      <div role="alert" className="app-hint" style={{ margin: 0, display: "flex", flexDirection: "column", gap: "8px", alignItems: "flex-start" }}>
+        <span>Couldn’t load your message templates, so nothing can be sent to {firstName} yet.</span>
+        <button type="button" className="btn btn-secondary" onClick={retryLoad} style={{ minHeight: "44px" }}>
+          Try again
+        </button>
+      </div>
+    );
+  }
+  if (load.connectionId === null) {
+    return (
+      <p role="status" className="app-hint" data-testid="number-not-connected" style={{ margin: 0 }}>
+        The WhatsApp number this chat is on isn’t connected, so no template can be sent to {firstName}. Reconnect it under WhatsApp, then come back.
       </p>
     );
   }
@@ -136,6 +150,9 @@ export function TemplateReplyPanel({ tenantId, conversationId, firstName }: { te
               />
             </label>
           ))}
+          <div data-testid="template-meta" className="app-hint" style={{ margin: 0 }}>
+            {chosen.category.toLowerCase()} · {languageName(chosen.language)}
+          </div>
           <div data-testid="template-preview" style={{ fontSize: "14px", whiteSpace: "pre-wrap", overflowWrap: "anywhere", padding: "10px", background: "var(--color-surface)" }}>
             {renderPreview(chosen, values)}
           </div>

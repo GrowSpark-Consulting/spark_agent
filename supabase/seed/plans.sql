@@ -1,5 +1,5 @@
 -- Plans (docs/handover.md, module 8). Prices in INR per month, GST extra.
--- Seats 999 = unlimited in the UI. Billing is PayU (0034): annual billing is 10x price_inr, computed by the server,
+-- Seats 999 = unlimited in the UI. Billing is PayU (0035): annual billing is 10x price_inr, computed by the server,
 -- not a row here.
 
 insert into public.plans (key, name, price_inr, monthly_credits, seats, whatsapp_numbers, feature_keys) values
