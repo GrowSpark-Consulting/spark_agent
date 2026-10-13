@@ -6,7 +6,7 @@ reminds and hands off to staff. Billing in credits. Full specs: docs/handover.md
 ## Stack
 Frontend: Next.js 16 (App Router, TS strict) on Vercel · API: one Node service (node:http + tsx,
 backend/) on Railway · Supabase (Postgres, Auth, Realtime, pgvector) · Inngest jobs · Anthropic API ·
-Meta WhatsApp Cloud API (direct, no BSP) · Razorpay · Tailwind + shadcn/ui · Zod · Vitest
+Meta WhatsApp Cloud API (direct, no BSP) · PayU (billing) · Tailwind + shadcn/ui · Zod · Vitest
 
 ## Non-negotiable rules
 - Every table has tenant_id and RLS. Every server query filters by tenant_id.

@@ -54,6 +54,8 @@ describe("GET /api/billing/balance", () => {
     expect(calls.find((c) => c.table === "rpc:credit_balance")?.args[0]).toEqual({ p_tenant_id: TENANT });
     expect(calls.filter((c) => c.table === "credit_ledger").map((c) => [c.method, ...c.args])).toContainEqual(["in", "reason", ["plan_grant", "trial_grant", "topup", "admin"]]);
     expect(calls).toContainEqual({ table: "subscriptions", method: "eq", args: ["tenant_id", TENANT] });
+    // Only the live plan: a pending checkout or upgrade has no period yet, and a descending sort puts its empty one first.
+    expect(calls).toContainEqual({ table: "subscriptions", method: "in", args: ["status", ["active", "past_due"]] });
   });
 
   it("says credits are low at a fifth of the month's credits, and paused at none", async () => {

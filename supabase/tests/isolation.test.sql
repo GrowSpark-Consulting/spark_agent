@@ -101,6 +101,7 @@ begin
     insert into public.quotes (tenant_id, lead_id, line_items, total_inr) values (t, ld, '[]', 100);
     insert into public.tenant_features (tenant_id, feature_key, enabled) values (t, 'reminder_24h', true);
     insert into public.subscriptions (tenant_id, plan_key, status) values (t, 'trial', 'active');
+    insert into public.payments (tenant_id, kind, txnid, base_paise, gst_paise, amount_paise) values (t, 'topup', 'isotopup' || s, 119900, 21582, 141482);
     insert into public.credit_ledger (tenant_id, delta, reason) values (t, 300, 'trial_grant');
     insert into public.handoffs (tenant_id, conversation_id, trigger, priority) values (t, cv, 'asked_human', 'normal');
     insert into public.route_codes (code, kind, tenant_id) values ('ISO-' || upper(s), 'trial', t);

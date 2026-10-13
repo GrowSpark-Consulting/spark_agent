@@ -1,6 +1,7 @@
 // Shared types and Zod schemas used by more than one workspace (owned by all three developers).
 // A contract change is a pull request that the owner and reviewer both see.
 export * from "./agent";
+export * from "./billing";
 export * from "./connection";
 export * from "./conversation";
 export * from "./dashboard";

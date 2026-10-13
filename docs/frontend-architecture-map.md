@@ -351,9 +351,9 @@ encrypted, and never returned or kept in client state.
 | Owner | Onboarding | Dashboard |
 |---|---|---|
 | **Dev 1** | import-site; demo-number routing; Embedded Signup exchange (module 10, see open decision); manual connect; connection status | lead card; suggested reply; KB documents, FAQs, gaps; agent settings; pack definitions; WhatsApp recheck/disconnect |
-| **Dev 2** | trial grant + route code; Google Calendar OAuth; `PATCH /api/features/:key` | balance; dashboard summary; feature list; booking actions + slots; Razorpay; ledger/usage; template status; RLS and migrations for reads |
+| **Dev 2** | trial grant + route code; Google Calendar OAuth; `PATCH /api/features/:key` | balance; dashboard summary; feature list; booking actions + slots; PayU billing; ledger/usage; template status; RLS and migrations for reads |
 | **Dev 3** | OTP login; tenant creation route; team invite | `/api/me`; conversation send + mode; team invite/update; lead update; realtime inbox; all UI states |
-| **External** | Meta (Tech Provider, App Review, Embedded Signup config, FB JS SDK); OTP delivery; Supabase Auth | Razorpay; Google OAuth; Meta template review |
+| **External** | Meta (Tech Provider, App Review, Embedded Signup config, FB JS SDK); OTP delivery; Supabase Auth | PayU; Google OAuth; Meta template review |
 
 Full per-screen list with status (EXISTS / HANDOVER / PROPOSED / RLS READ):
 [dashboard-screen-inventory.md](dashboard-screen-inventory.md).

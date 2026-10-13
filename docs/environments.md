@@ -29,7 +29,7 @@ Auth, and membership of the business named in `X-Pakka-Tenant` (`backend/src/ser
 | Deploys from | your machine | every push to `main` | a tagged release (M6) |
 | Supabase | Docker via `pnpm db:start` | project `pakka-agent-staging`, Mumbai, Free | project `pakka-agent-prod`, Mumbai, Pro |
 | Inngest | `pnpm inngest:dev` | Inngest environment for staging | Inngest Production |
-| Razorpay | test keys | test keys | live keys |
+| PayU | test merchant key + salt | test merchant key + salt | live merchant key + salt (`PAYU_MODE=live`) |
 | Secrets | `frontend/.env.local`, `backend/.env.local` (never committed) | Vercel *Preview* (branch `main`) + Railway `staging` | Vercel *Production* + Railway `production` |
 
 Nobody points local code at staging or production data.
@@ -246,8 +246,8 @@ Business). Every credential lives there; nothing is pasted into chat.
 
 | Folder | Who | Holds |
 |---|---|---|
-| `accounts` | Raja + all devs | Logins: Meta Business, Meta developer app, Razorpay, Google Cloud, Supabase, Vercel, Railway, Inngest, Sentry, Langfuse, Resend, domain registrar, GitHub org |
-| `local` | All devs | Shared test-only values: Meta test number, Anthropic dev key, embeddings key, Razorpay test keys |
+| `accounts` | Raja + all devs | Logins: Meta Business, Meta developer app, PayU, Google Cloud, Supabase, Vercel, Railway, Inngest, Sentry, Langfuse, Resend, domain registrar, GitHub org |
+| `local` | All devs | Shared test-only values: Meta test number, Anthropic dev key, embeddings key, PayU test merchant key and salt |
 | `staging` | All devs | Every staging env var, Supabase DB password |
 | `production` | Raja + Dev 2 | Every production env var, Supabase DB password, `ENCRYPTION_KEY` |
 
