@@ -82,6 +82,15 @@ describe("routing a message to the demo number", () => {
   it("a message with no text (a photo, a voice note) follows the route too", async () => {
     expect(await routeDemoMessage(msg(), fakes({ session: A }).deps)).toEqual({ action: "store", tenantId: A });
   });
+
+  it("a later message in a session on a trial business (no code in the text) is stored for it and never asks about the trial phone again: the claim was made on the message that carried the TRIAL code", async () => {
+    for (const text of ["what are your timings?", undefined]) {
+      const f = fakes({ session: B });
+      expect(await routeDemoMessage(msg(text), f.deps)).toEqual({ action: "store", tenantId: B });
+      expect(f.claimTrialPhone).not.toHaveBeenCalled();
+      expect(f.findRoute).not.toHaveBeenCalled();
+    }
+  });
 });
 
 describe("the daily limit", () => {
