@@ -12,7 +12,9 @@ const context = (tenant: Partial<TenantContext["tenant"]> = {}): TenantContext =
   tenant: { id: TENANT, name: "Skyline Homes", vertical: "real-estate", timezone: "Asia/Kolkata", status: "active", planKey: "starter", trialEndsAt: null, ...tenant },
 });
 
-function deps(over: { balance?: number; grants?: { delta: number; expires_at: string | null }[]; subscription?: unknown[]; plan?: FakeDbResponse; aiAutoReply?: boolean } = {}) {
+function deps(
+  over: { balance?: number; grants?: { delta: number; expires_at: string | null }[]; subscription?: unknown[]; plan?: FakeDbResponse; aiAutoReply?: boolean; numbers?: FakeDbResponse } = {},
+) {
   const total = over.balance ?? 900;
   const db = fakeDb({
     plans: over.plan ?? { data: { key: "starter", name: "Starter", monthly_credits: 1500 }, error: null },
@@ -26,6 +28,8 @@ function deps(over: { balance?: number; grants?: { delta: number; expires_at: st
       error: null,
     },
     subscriptions: { data: over.subscription ?? [{ status: "active", current_period_end: "2026-10-31T18:30:00+00:00" }], error: null },
+    // Active WhatsApp numbers, counted.
+    whatsapp_connections: over.numbers ?? { data: null, error: null, count: 1 },
   });
   return { d: { db: db.client, now: () => NOW, aiAutoReply: async () => over.aiAutoReply ?? true }, calls: db.calls };
 }
@@ -69,6 +73,32 @@ describe("GET /api/billing/balance", () => {
     expect(await accountStatus(context({ status: "cancelled" }), deps().d)).toMatchObject({ aiPausedReason: "cancelled" });
     // Switching AI replies off is the business's choice, not a pause.
     expect(await accountStatus(context(), deps({ aiAutoReply: false }).d)).toMatchObject({ aiAutoReply: false, aiPaused: false });
+  });
+
+  it("says a paying business with no active WhatsApp number is not replying, before credits", async () => {
+    const { d, calls } = deps({ numbers: { data: null, error: null, count: 0 }, balance: 0 });
+    expect(await accountStatus(context(), d)).toMatchObject({ aiPaused: true, aiPausedReason: "whatsapp_not_connected" });
+    expect(calls.filter((c) => c.table === "whatsapp_connections" && c.method === "eq").map((c) => c.args)).toEqual([
+      ["tenant_id", TENANT],
+      ["status", "active"],
+    ]);
+  });
+
+  it("does not ask a trial, or a paused business, for its own number", async () => {
+    // A live trial replies through the shared demo number its TRIAL code routes to.
+    const trial = deps({ subscription: [], numbers: { data: null, error: null, count: 0 } });
+    expect(await accountStatus(context({ status: "trial", planKey: "trial", trialEndsAt: "2026-10-15T06:00:00+00:00" }), trial.d)).toMatchObject({
+      aiPaused: false,
+      aiPausedReason: null,
+    });
+    expect(trial.calls.some((c) => c.table === "whatsapp_connections")).toBe(false);
+    const paused = deps({ numbers: { data: null, error: null, count: 0 } });
+    expect(await accountStatus(context({ status: "paused" }), paused.d)).toMatchObject({ aiPausedReason: "paused" });
+    expect(paused.calls.some((c) => c.table === "whatsapp_connections")).toBe(false);
+  });
+
+  it("fails loudly when the connection count cannot be read", async () => {
+    await expect(accountStatus(context(), deps({ numbers: { data: null, error: { message: "timeout" } } }).d)).rejects.toThrow("WhatsApp connection read failed");
   });
 
   it("fails loudly when the plan is missing from the catalogue", async () => {

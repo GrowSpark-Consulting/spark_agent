@@ -85,7 +85,7 @@ interface AccountStatus {
   aiPaused: boolean;                 // server decides (zero credits, trial ended, disconnected)
   lowCredits: boolean;               // server decides the 80 % / 20 %-left threshold
   aiAutoReply: boolean;              // isEnabled('ai_auto_reply')
-  aiPausedReason: 'paused' | 'cancelled' | 'trial_ended' | 'no_credits' | null;   // built: added
+  aiPausedReason: 'paused' | 'cancelled' | 'trial_ended' | 'whatsapp_not_connected' | 'no_credits' | null;   // built: added; whatsapp_not_connected 13 Oct (paying business, no active number)
 }
 ```
 
