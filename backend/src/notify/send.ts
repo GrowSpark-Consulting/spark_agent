@@ -245,11 +245,12 @@ export async function send(tenantId: string, kind: NotificationKind, payload: No
   // The quick-reply payloads to send with the kind's template, once it is known to have exactly that many buttons.
   let buttonIds: string[] | undefined;
   if (chosen) {
-    // Only an approved template of this business's connected number, with exactly the values its body asks for.
+    // Only an approved template of the number this message goes out on, with exactly the values its body asks for. By
+    // connection alone: notify_target picked it for this business, and a platform number's templates belong to the
+    // platform business (0032).
     const found = await db
       .from("whatsapp_templates")
       .select("name, language, category, components")
-      .eq("tenant_id", tenantId)
       .eq("connection_id", target.connection_id)
       .eq("name", chosen.name)
       .eq("language", chosen.language)
@@ -277,7 +278,6 @@ export async function send(tenantId: string, kind: NotificationKind, payload: No
       const found = await db
         .from("whatsapp_templates")
         .select("components")
-        .eq("tenant_id", tenantId)
         .eq("connection_id", target.connection_id)
         .eq("name", template.name)
         .eq("language", template.language)
