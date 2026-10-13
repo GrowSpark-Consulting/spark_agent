@@ -276,7 +276,7 @@ describe("POST /api/billing/change-plan", () => {
     await expect(changePlan(context(), { planKey: "pro" }, deps(tables({ subscriptions: { data: null, error: null } })).d)).rejects.toMatchObject({ code: "conflict" });
     await expect(changePlan(context(), { planKey: "pro", cycle: "yearly" }, deps(tables()).d)).rejects.toMatchObject({ code: "not_available" });
     const behind = deps(tables({ "rpc:begin_plan_change": { data: null, error: { code: "PA428", message: "a renewal is past due" } } }));
-    await expect(changePlan(context(), { planKey: "pro" }, behind.d)).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("Pay it first") });
+    await expect(changePlan(context(), { planKey: "pro" }, behind.d)).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("try it again automatically") });
   });
 
   it("revokes the replaced mandate at PayU once the upgrade is paid", async () => {

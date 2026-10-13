@@ -208,7 +208,7 @@ export async function changePlan(context: TenantContext, rawInput: unknown, deps
   const { data, error } = await deps.db.rpc("begin_plan_change", { p_tenant_id: context.tenant.id, p_plan_key: plan.key, p_txnid: txnid, p_created_by: context.user.id });
   if (error) {
     if (error.code === "PA409") throw new AppError("conflict", "Your business has no plan to change yet. Choose a plan first.");
-    if (error.code === "PA428") throw new AppError("conflict", "Your last plan payment didn't go through. Pay it first, then change plan.");
+    if (error.code === "PA428") throw new AppError("conflict", "Your last plan payment didn't go through. We'll try it again automatically; you can change plan once it's paid.");
     throw new Error(`begin_plan_change failed: ${error.message}`);
   }
   const [change] = z
