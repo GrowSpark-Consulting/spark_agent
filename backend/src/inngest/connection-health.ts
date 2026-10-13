@@ -6,7 +6,7 @@ import { send } from "../notify/send";
 import { staffAlertRecipients } from "../notify/staff-alerts";
 import { inngest } from "./client";
 
-// connection-health (docs/handover.md, module 10, "Jobs"): once a day, at 01:30 UTC (7:00 in India), every active manual connection that has not been
+// connection-health (docs/handover.md, module 10, "Jobs"): once a day, at 01:30 UTC (7:00 in India), every active manual, Embedded Signup or assisted connection that has not been
 // checked for 20 hours is checked again (channels/whatsapp/connect/health.ts): its token, quality rating and messaging limit. The sweep only lists
 // them and starts one check each as an event, named by the connection and the India day, so a repeat sweep starts nothing twice; the checks run five
 // at a time. A connection that has just failed is reported to the business's owners and admins (a staff_alert through notify.send) in a step of its

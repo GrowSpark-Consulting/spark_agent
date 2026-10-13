@@ -43,6 +43,7 @@ export const SAFE = {
   numberPass: "The number belongs to this WhatsApp Business Account and is set up for the Cloud API.",
   numberNotInAccount: "This number isn't in that WhatsApp Business Account. Check the Account ID and the Phone number ID.",
   numberNotCloud: "This number is not registered for the WhatsApp Cloud API yet. Register it in Meta's WhatsApp Manager, then check again.",
+  numberCoexistence: "This number also runs in the WhatsApp Business app, so we can't confirm its Cloud API setup from here. It is in the right account.",
   webhookNone: "Your Meta app is not subscribed to this account's webhooks yet. Subscribe it in your app's WhatsApp settings, then check again.",
   webhookCouldNotSubscribe: "We couldn't subscribe your Meta app to this account's webhooks automatically. Subscribe it in your app's WhatsApp settings, then check again.",
   webhookWaiting: "Your app is subscribed. This is confirmed when a webhook from your app arrives: send a message to this number from a phone, or use Test in Meta's webhook settings, then check again.",
@@ -102,11 +103,17 @@ export async function checkToken(
   return REQUIRED_SCOPES.every((s) => scopes.has(s)) ? make("token_permissions", "pass", SAFE.tokenPass, now) : make("token_permissions", "fail", SAFE.tokenScopes, now);
 }
 
-/** 2. The number is in the account and is registered for the Cloud API (`platform_type` of the number, when Meta says it). */
-export function checkNumber(args: { accepted: boolean; inAccount: boolean; facts: NumberFacts }, now: Date): Check {
+/**
+ * 2. The number is in the account and is registered for the Cloud API (`platform_type` of the number, when Meta says it). A coexistence number also runs in the
+ * WhatsApp Business app and what Meta labels it with is not known (UNVERIFIED), so for it the label can only pass or be not_verified, never fail; the in-account
+ * test still applies.
+ */
+export function checkNumber(args: { accepted: boolean; inAccount: boolean; facts: NumberFacts; coexistence?: boolean }, now: Date): Check {
   if (!args.accepted) return make("number_registered", "skipped", SAFE.later, now);
   if (!args.inAccount) return make("number_registered", "fail", SAFE.numberNotInAccount, now);
-  if (args.facts.platformType !== null && args.facts.platformType !== "CLOUD_API") return make("number_registered", "fail", SAFE.numberNotCloud, now);
+  if (args.facts.platformType !== null && args.facts.platformType !== "CLOUD_API") {
+    return args.coexistence === true ? make("number_registered", "not_verified", SAFE.numberCoexistence, now) : make("number_registered", "fail", SAFE.numberNotCloud, now);
+  }
   return make("number_registered", "pass", SAFE.numberPass, now);
 }
 
@@ -226,6 +233,8 @@ export interface GraphChecksInput {
   onTokenExpiry?: (expiresAt: Date | null) => void;
   inAccount: boolean;
   facts: NumberFacts;
+  /** The connection is a coexistence number (checkNumber). */
+  coexistence?: boolean;
   webhookSeen: () => Promise<boolean>;
 }
 
@@ -239,7 +248,7 @@ export async function runGraphChecks(input: GraphChecksInput, call: Graph, now: 
   ]);
   const checks: Check[] = [
     token,
-    checkNumber({ accepted: input.accepted, inAccount: input.inAccount, facts: input.facts }, now),
+    checkNumber({ accepted: input.accepted, inAccount: input.inAccount, facts: input.facts, ...(input.coexistence === true ? { coexistence: true } : {}) }, now),
     webhook,
     input.accepted ? checkDisplayName(input.facts, now) : make("display_name_approved", "skipped", SAFE.later, now),
     payment,

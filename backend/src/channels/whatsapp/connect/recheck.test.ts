@@ -264,3 +264,30 @@ describe("disconnect", () => {
     expect(result.status).not.toBe("active");
   });
 });
+
+describe("recheck of a coexistence number", () => {
+  const odd: MetaProbe = { ...GOOD, info: { ...GOOD.info, facts: { nameStatus: "APPROVED", platformType: "NOT_APPLICABLE" } } } as MetaProbe;
+  const numberCheck = (r: Row) => (r.last_check as { checks: { key: string; status: string; message: string }[] }).checks.find((c) => c.key === "number_registered");
+
+  it("is not failed on an odd platform_type: not_verified, and the connection stays active", async () => {
+    const w = world([row({ method: "embedded_signup", coexistence: true })], { probe: odd });
+    const result = await recheckConnection(context("owner"), CONN, w.deps);
+    expect(result.status).toBe("active");
+    expect(numberCheck(w.conn())?.status).toBe("not_verified");
+  });
+
+  it("reads the connection WITH its coexistence value (the fake database returns whole rows, so the select itself is checked)", async () => {
+    const w = world([row({ method: "embedded_signup", coexistence: true })], { probe: odd });
+    await recheckConnection(context("owner"), CONN, w.deps);
+    const withToken = w.calls.filter((c) => c.op === "select" && c.select.includes("token_enc"));
+    expect(withToken.length).toBeGreaterThan(0);
+    expect(withToken.every((c) => c.select.split(",").map((x) => x.trim()).includes("coexistence"))).toBe(true);
+  });
+
+  it("a number that is not coexistence still fails on it", async () => {
+    const w = world([row({ method: "embedded_signup", coexistence: false })], { probe: odd });
+    const result = await recheckConnection(context("owner"), CONN, w.deps);
+    expect(result.status).toBe("failed");
+    expect(numberCheck(w.conn())?.status).toBe("fail");
+  });
+});

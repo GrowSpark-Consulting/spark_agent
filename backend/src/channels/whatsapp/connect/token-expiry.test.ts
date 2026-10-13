@@ -33,9 +33,18 @@ describe("which tokens are about to run out", () => {
     expect(await listed([row({ token_expires_at: null })])).toEqual([]);
   });
 
-  it("only active manual connections: not a failed, disconnected, validating or pending one, nor our own platform numbers", async () => {
-    const rows = ["failed", "disconnected", "validating", "pending"].map((status, i) => row({ id: `c${i}`, status }));
-    expect(await listed([...rows, row({ id: "cp", method: "platform" }), row({ id: "ce", method: "embedded_signup" })])).toEqual([]);
+  it.each(["manual_byo", "embedded_signup", "assisted"])("an active %s connection is warned about", async (method) => {
+    const result = await listed([row({ id: "c1", method })]);
+    expect(result.map((c) => c.connectionId)).toEqual(["c1"]);
+  });
+
+  it.each(["manual_byo", "embedded_signup", "assisted"])("not a failed, disconnected, validating or pending %s connection", async (method) => {
+    const rows = ["failed", "disconnected", "validating", "pending"].map((status, i) => row({ id: `c${i}`, status, method }));
+    expect(await listed(rows)).toEqual([]);
+  });
+
+  it("not our own platform numbers (even with a date), nor a method that is not listed", async () => {
+    expect(await listed([row({ id: "cp", method: "platform" }), row({ id: "cf", method: "some_future_method" })])).toEqual([]);
   });
 
   it("not a row whose date is not a date", async () => {

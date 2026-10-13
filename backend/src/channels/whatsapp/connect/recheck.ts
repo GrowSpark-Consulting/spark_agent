@@ -24,7 +24,7 @@ import { webhookWasSeen } from "./webhook-seen";
 
 const COLUMNS = "id, tenant_id, method, waba_id, phone_number_id, display_phone, verified_name, coexistence, status, last_check, quality_rating, messaging_limit, created_at";
 
-const Row = z.object({ id: z.string(), method: z.string(), waba_id: z.string(), phone_number_id: z.string(), status: z.string(), token_enc: z.string() });
+const Row = z.object({ id: z.string(), method: z.string(), waba_id: z.string(), phone_number_id: z.string(), status: z.string(), token_enc: z.string(), coexistence: z.boolean().nullish() });
 
 export interface RecheckDeps {
   db: SupabaseClient;
@@ -56,7 +56,7 @@ const trouble = (what: string) => new AppError("upstream_failed", `We couldn't $
 async function load(context: TenantContext, connectionId: string, deps: RecheckDeps) {
   const { data, error } = await deps.db
     .from("whatsapp_connections")
-    .select("id, method, waba_id, phone_number_id, status, token_enc")
+    .select("id, method, waba_id, phone_number_id, status, token_enc, coexistence")
     .eq("tenant_id", context.tenant.id)
     .eq("id", connectionId)
     .limit(1);
@@ -117,7 +117,7 @@ export async function recheckConnection(context: TenantContext, connectionId: st
     }
 
     const run = await runConnectionChecks(
-      { tenantId, connectionId, method: row.method, wabaId: row.waba_id, phoneNumberId: row.phone_number_id, token },
+      { tenantId, connectionId, method: row.method, wabaId: row.waba_id, phoneNumberId: row.phone_number_id, token, coexistence: row.coexistence === true },
       { probe: deps.probe, graph: deps.graph, webhookSeen: deps.webhookSeen, now: deps.now },
     );
     if (run.state === "unreachable") throw new AppError("upstream_failed", "We couldn't reach Meta to check this number. Try again in a moment.");
