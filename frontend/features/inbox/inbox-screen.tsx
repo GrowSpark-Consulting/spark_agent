@@ -62,6 +62,8 @@ export function InboxScreen({
   /** The AI-written part of each lead card (the lead-card route), read apart from the stored lead so each fails on its own. */
   const [leadAi, setLeadAi] = useState<Record<string, LeadCardAiState>>({});
   const [leadSheetOpen, setLeadSheetOpen] = useState(false);
+  /** The chat a link named could not be opened: not one of this business's chats (`not_found`), or the read failed (`failed`). */
+  const [linkProblem, setLinkProblem] = useState<"not_found" | "failed" | null>(null);
   /** The newest lead read per conversation: an older one finishing late is ignored. */
   const leadReads = useRef(new Map<string, number>());
   const leadAiReads = useRef(new Map<string, number>());
@@ -83,11 +85,22 @@ export function InboxScreen({
       const client = getSupabaseBrowserClient();
       const newest = await fetchConversations(client, tenantId);
       // A link can name a chat older than the newest page (a staff alert, a takeover link); read it by id so it still opens.
-      // Best effort: if that read fails the list still shows, and the chat simply isn't selected.
-      const linked =
-        initialChatId && !newest.some((c) => c.id === initialChatId) ? await fetchConversation(client, tenantId, initialChatId).catch(() => null) : null;
+      // If that read finds nothing (another business's chat, or deleted) or fails, the list still shows and the screen says which.
+      let linked: ConversationSummary | null = null;
+      let problem: "not_found" | "failed" | null = null;
+      if (initialChatId && !newest.some((c) => c.id === initialChatId)) {
+        try {
+          linked = await fetchConversation(client, tenantId, initialChatId);
+          if (!linked) problem = "not_found";
+        } catch {
+          problem = "failed";
+        }
+      }
       const items = reads.finish(seq, linked ? sortConversations([...newest, linked]) : newest);
-      if (items) setList({ status: "ready", items, truncated: newest.length >= CONVERSATION_LIMIT });
+      if (items) {
+        setList({ status: "ready", items, truncated: newest.length >= CONVERSATION_LIMIT });
+        setLinkProblem(problem);
+      }
     } catch (err) {
       // A failed refresh keeps what's on screen; only a failed first load shows the error.
       if (reads.fail(seq)) setList((prev) => (prev.status === "ready" ? prev : { status: "error", error: formatError(err) }));
@@ -218,10 +231,19 @@ export function InboxScreen({
   }
 
   function openChat(id: string) {
+    setLinkProblem(null);
     setSelectedId(id);
     setView("chat");
     setChatParam(id);
     setLeadSheetOpen(false);
+  }
+
+  /** Drops a link that named a chat that could not be opened, so the inbox opens as on a plain visit. */
+  function dismissLinkProblem() {
+    setLinkProblem(null);
+    setSelectedId(null);
+    setView("list");
+    setChatParam(null);
   }
 
   function backToList() {
@@ -261,6 +283,18 @@ export function InboxScreen({
         realtime={realtime}
         now={now}
         timeZone={timeZone}
+        notice={
+          linkProblem ? (
+            <div role="status" data-testid="chat-link-problem" data-problem={linkProblem} className="app-notice" style={{ margin: 0, flex: "none" }}>
+              {linkProblem === "not_found"
+                ? "That chat isn't available. It may belong to another business, or it was deleted."
+                : "Couldn't open the chat from that link. Check your connection and try again."}{" "}
+              <button type="button" className="btn btn-ghost" onClick={linkProblem === "failed" ? () => void loadList() : dismissLinkProblem} style={{ padding: "4px 8px" }}>
+                {linkProblem === "failed" ? "Try again" : "Show my chats"}
+              </button>
+            </div>
+          ) : null
+        }
       />
       <div className="app-inbox-chat">
         {selected ? (
