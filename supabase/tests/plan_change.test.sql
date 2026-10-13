@@ -1,4 +1,4 @@
--- Changing plan (0037): upgrades now with a prorated payment, a new mandate and extra credits; downgrades at the next
+-- Changing plan (0038): upgrades now with a prorated payment, a new mandate and extra credits; downgrades at the next
 -- cycle. Run: pnpm db:test
 begin;
 create extension if not exists pgtap with schema extensions;

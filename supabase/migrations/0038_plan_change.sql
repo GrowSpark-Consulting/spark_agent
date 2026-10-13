@@ -1,4 +1,4 @@
--- 0037_plan_change: changing plan (decision 20; docs/handover.md, module 8: "upgrades apply at once with prorated
+-- 0038_plan_change: changing plan (decision 20; docs/handover.md, module 8: "upgrades apply at once with prorated
 -- credits, downgrades next cycle"). POST /api/billing/change-plan, backend/src/billing/checkout.ts.
 --
 -- begin_plan_change(tenant, plan, txnid) decides, for a business with an active plan (PA409 without one; PA428 while
@@ -10,7 +10,7 @@
 --     (at least ₹1, PayU's minimum; GST added) and approves a new mandate at the new full price in the same PayU step.
 --     A pending subscription records it (replaces_subscription_id = the current one), and the payment carries the
 --     extra credits: the rest of the current credit month at the new plan's monthly credits, less the old plan's.
--- settle_payment (replacing 0036's) applies a paid upgrade: the old subscription is cancelled (the server then revokes
+-- settle_payment (replacing 0037's) applies a paid upgrade: the old subscription is cancelled (the server then revokes
 -- its mandate at PayU), the new one is active over the same period with the new mandate, the business moves to the new
 -- plan, and the extra credits join the current month's credits (same expiry, so the same rollover). An upgrade paid
 -- after its plan was replaced or lapsed is kept cancelled and audited for a refund. Server only.

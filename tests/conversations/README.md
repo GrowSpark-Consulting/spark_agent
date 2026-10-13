@@ -94,3 +94,7 @@ A STOP chat's later turns show the gate's opted-out outcome.
 - `65`: an area the business has no homes in (Day 5, out-of-area): the pack has an area rule worth 20 points and no area hard fail, so the customer scores 55 (warm) instead of
   75, is not turned away, and is still offered times because warm passes the offer threshold. This is what the code does today, recorded for Raja to confirm.
 - Wording a real model varies: `matches` is a list of regular expressions (any letter case) the reply must each match. Use it under `expect` for wording a real model varies ("10 am" and "10:00 am"), and keep the exact words under `mockOnly` as `contains`, so mock mode stays strict. Chat 51 does this.
+
+## Latency (Day 6, local only)
+
+`pnpm --filter @pakka/backend latency:chats [--live] [--max-calls N] [--rounds N]` times the steps and calls of these same chats and prints a table per stage, every number labelled mocked, live, configured or not measured. Mocked is the pipeline's own code time. `--live` runs the first turn of seven chats with the real models, at most 15 requests (hard limit 20), with a fake sender, knowledge base and store. Never in CI. The reading of the numbers is in `docs/task-notes/2026-10-13-day6-dev1-step8-audit.md`.

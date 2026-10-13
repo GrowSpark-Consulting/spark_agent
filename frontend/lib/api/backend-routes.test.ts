@@ -67,6 +67,8 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
   { call: "GET /api/bookings/:id/slots", file: "features/calendar/booking-actions.ts" },
   { call: "GET /api/dashboard/summary", file: "features/home/home-api.ts" },
   { call: "GET /api/billing/balance", file: "features/home/home-api.ts" },
+  { call: "GET /api/billing/balance", file: "features/billing/billing-data.ts" },
+  { call: "GET /api/conversations/:id/templates", file: "features/inbox/template-reply.ts" },
 ];
 
 /**
@@ -75,7 +77,10 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
  * stand the route in with page.route. These are checked the other way round from FRONTEND_CALLS: the moment the backend registers one, the
  * test below fails and the line moves to FRONTEND_CALLS, so the list can't go stale and the call can't silently stay a stub.
  */
-const AWAITING_BACKEND: { call: string; file: string; where: string }[] = [];
+const AWAITING_BACKEND: { call: string; file: string; where: string }[] = [
+  { call: "GET /api/connect-links/:token", file: "features/connect/connect-link.ts", where: "Dev 1, contract only (docs/whatsapp-connection-contract.md); not in routes.ts on main" },
+  { call: "POST /api/onboarding/whatsapp/embedded-signup", file: "features/connect/connect-link.ts", where: "Dev 1, contract only (docs/whatsapp-connection-contract.md); not in routes.ts on main" },
+];
 
 /** Backend routes the browser never calls, and why. Anything not here and not in FRONTEND_CALLS fails the test. */
 const NO_BROWSER_CALLER: Record<string, string> = {
@@ -87,9 +92,6 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   "PUT /api/inngest": "Inngest calls it: syncs the function list",
   "GET /h/:token": "a staff member's browser follows the link in a WhatsApp alert; it redirects to /dashboard/inbox?chat=<id>",
   "GET /api/calendar/google/callback": "Google redirects the browser here after consent; it redirects back to Booking setup with the outcome",
-  // Not wired yet: built for the inbox's template picker (Dev 3), which still reads whatsapp_templates under RLS and cannot tell a chat's number.
-  // When the picker calls it, this line moves to FRONTEND_CALLS.
-  "GET /api/conversations/:id/templates": "not called yet: the inbox template picker's list of templates this chat's number can send (Dev 2, #141)",
   // PayU billing (Dev 2, decision 20). The Billing screen's buttons move these to FRONTEND_CALLS when they call them.
   "POST /api/billing/checkout": "not called yet: the Billing screen's Choose plan button (PayU checkout with auto-debit)",
   "POST /api/billing/topup": "not called yet: the Billing screen's top-up button (PayU one-time payment)",

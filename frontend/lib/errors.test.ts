@@ -59,7 +59,8 @@ describe("formatError", () => {
   it("never shows PostgREST error details", () => {
     const pg = { code: "42501", message: 'permission denied for table "tenants"', details: "secret detail", hint: null };
     const f = formatError(pg);
-    expect(f).toMatchObject({ code: "upstream_failed", retryable: true });
+    // 42501 (insufficient privilege / RLS) is a permission answer, not an outage: not retryable. The database text still never shows.
+    expect(f).toMatchObject({ code: "forbidden", retryable: false });
     expect(JSON.stringify(f)).not.toMatch(/permission denied|tenants|secret detail/);
   });
 
@@ -95,5 +96,13 @@ describe("apiErrorFrom", () => {
   it("falls back to a generic error for non-envelope bodies", async () => {
     const err = await apiErrorFrom(new Response("<html>Bad gateway</html>", { status: 502 }));
     expect(err.body.error).toEqual({ code: "internal", message: "Something went wrong. Try again in a moment." });
+  });
+
+  it("words a row-level-security refusal as a permission message, without the database's text", () => {
+    const refused = { code: "42501", message: 'new row violates row-level security policy for table "services"', details: null, hint: null };
+    const formatted = formatError(refused);
+    expect(formatted).toMatchObject({ code: "forbidden", title: "You don't have access to this", retryable: false });
+    expect(formatted.message).toBe("Only an owner or admin can change this. Nothing was changed.");
+    expect(formatted.message).not.toMatch(/row-level|services/);
   });
 });

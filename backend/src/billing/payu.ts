@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { serverEnv, type ServerEnv } from "../lib/env";
 
-// PayU India (billing; migration 0034). Server-only: the salt signs every request and never leaves the server.
+// PayU India (billing; migration 0035). Server-only: the salt signs every request and never leaves the server.
 //
 //   * Checkout is PayU's hosted page: the browser POSTs the fields paymentRequest() builds to PayU, and PayU sends the
 //     payer back to surl or furl. With a mandate (si=4, "Pay and Subscribe"), that one payment also approves the

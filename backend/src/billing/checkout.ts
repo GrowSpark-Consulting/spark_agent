@@ -18,7 +18,7 @@ import { AppError } from "../lib/errors";
 import { supabaseAdmin } from "../lib/supabase-admin";
 import { indiaDate, newTxnid, payuConfig, paymentRequest, PayuError, revokeMandate, verifyPayment, withGst, type FetchLike, type PayuConfig } from "./payu";
 
-// Paying Spark Agent through PayU (decision 20; migrations 0034 and 0035). The owner starts a payment here, the browser
+// Paying Spark Agent through PayU (decision 20; migrations 0035 and 0036). The owner starts a payment here, the browser
 // POSTs the returned fields to PayU's hosted checkout, and PayU sends the payer back to our return URL. Whatever PayU
 // or the browser says about the outcome, the server asks PayU (verifyPayment) and applies only that, through
 // settle_payment, which applies each payment once however many of the return URL, the webhook and polling ask.
@@ -186,7 +186,7 @@ export function startSetupFee(context: TenantContext, rawInput: unknown, deps: B
 }
 
 /**
- * Changing plan (0037). A dearer plan is an upgrade now: the owner pays the price difference for the rest of the period on
+ * Changing plan (0038). A dearer plan is an upgrade now: the owner pays the price difference for the rest of the period on
  * PayU, which also approves a new auto-debit at the new price; the plan changes once PayU confirms it (settle_payment),
  * and the old mandate is then revoked. A cheaper plan starts at the next renewal. Owner only. Switching between monthly
  * and yearly needs a mandate with another cycle and isn't offered yet.

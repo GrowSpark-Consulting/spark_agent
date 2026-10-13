@@ -288,7 +288,10 @@ describe("errors after a failed save or delete", () => {
     const pg = { code: "42501", message: "new row violates row-level security policy", details: null, hint: null };
     const e = describeWriteError(pg, "Couldn't save the service");
     expect(e.title).toBe("Couldn't save the service");
-    expect(e.message).toBe("Nothing was changed. Try again in a moment.");
+    // Since migration 0028 a row-level-security refusal on a write means the member's role may not change this: say so, don't suggest retrying.
+    expect(e.code).toBe("forbidden");
+    expect(e.retryable).toBe(false);
+    expect(e.message).toBe("Only an owner or admin can change this. Nothing was changed.");
     expect(e.message).not.toMatch(/load|row-level/);
   });
 
