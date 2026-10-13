@@ -48,6 +48,10 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0032_platform_number_fallback` | `notify_target` answers a chat through the active connection on its channel, the business's own or one of our platform numbers (a trial routed through the shared demo number); `notify_staff_target` falls back to the platform number the business's latest chat is on. A test message still needs the business's own number; another business's own number is never used. (after Dev 1's 0029 `demo_visitors` and 0031, which stores a routed chat on the platform number's channel) |
 | `0033_trial_phones` | One free trial per WhatsApp number: `trial_phones` (server-only; a SHA-256 of the number, at most one per trial, kept after an unpaid trial is deleted) and `claim_trial_phone(tenant, phone)` → `claimed` / `other_sender` / `taken` (service_role only; section 4) |
 | `0034_credit_refund_retries` | `refund_credits` refunds what is still owed for the ref_id, bucket by bucket (spent less already refunded), so every failed attempt of a keyed send retried under the same message id gets its credits back, not only the first |
+| `0035_payu_billing` | Billing moves to PayU (decision 20): `plans.razorpay_plan_id` and `subscriptions.razorpay_subscription_id` go; `subscriptions` holds one PayU auto-debit mandate (`billing_cycle`, `amount_paise` with GST, `mandate_id` = PayU authpayuid, `mandate_method`, `next_plan_key`, `pre_debit_for`, `charge_attempts`; status `pending` / `active` / `past_due` / `cancelled`, one live per business); `payments` (one row per PayU transaction, `txnid` unique, base + GST paise; members read, the server writes; its id is the credit grant's ref_id); `tenants.setup_call_paid_at` |
+| `0036_payment_settlement` | `begin_payment` (records a subscribe, top-up or setup-fee payment before PayU; PA409 for a second plan, a top-up without a paid plan, or a setup fee already paid) and `settle_payment(txnid, state, ...)` (applies the result the server verified with PayU, once: a subscribe activates the mandate and the plan and grants the month's credits; a top-up grants its pack; a setup fee flags the business; a failure cancels a pending mandate; PA422 when PayU's amount is not ours; a second plan paid at once is kept cancelled and audited for a refund); `payments.credits`. Service role only |
+| `0037_renewals` | Plan renewals by PayU auto-debit: `payments.for_period_end` (one open renewal per subscription and period), `subscriptions.pre_debit_at` (the debit time the notice announced); `begin_renewal`, `renewals_to_notify`, `renewals_to_charge` (period ended, announced time come, none pending or paid, under 3 failed attempts, none in 2 days), `grant_annual_credit_months`, `lapse_overdue_subscriptions` (past due 7 days → cancelled, business paused); `settle_payment` now settles renewals (success moves the period on and grants the month to the end of the next month; failure → `past_due`) and audits a payment that needs a refund as `payment.needs_refund`. Service role only |
+| `0038_plan_change` | `begin_plan_change(tenant, plan, txnid)`: the same plan cancels a scheduled downgrade (`kept`) or does nothing (`unchanged`); a cheaper plan is scheduled for the next renewal (`next_plan_key`; `scheduled`); a dearer one is an upgrade now (`upgrade`): the price difference for the rest of the period (at least ₹1, GST added) and a new mandate at the new full price, as a pending subscription that `replaces_subscription_id` the current one, with the rest of the month's extra credits. PA409 without a plan, PA428 while a renewal is past due. `settle_payment` applies a paid upgrade: old plan cancelled (the server revokes its mandate at PayU), new one active over the same period, extra credits joining the current month's. Service role only |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -350,6 +354,16 @@ writeAudit({ tenantId, actor, action, entity?, entityId?, diff? }): Promise<void
   writing to a trial with no phone yet, gets `taken`: don't route it; tell them this number has already had a free
   trial. Only this verified sender is recorded. The phone typed during onboarding is not verified, so it is never
   claimed, or anyone could block someone else's number.
+- **PayU client (`backend/src/billing/payu.ts`, decision 20; server only, the salt never leaves it).**
+  `paymentRequest(config, { txnid, amountPaise, productinfo, firstname, email, phone, surl, furl, mandate? })` →
+  `{ url, fields }` for the browser to POST to PayU's hosted checkout. With `mandate` it is Pay and Subscribe (`si=4`,
+  `api_version=7`, `si_details`), so the first payment also approves the auto-debit. Over ₹15,000 a mandate offers
+  cards and net banking only (UPI Autopay is capped there). `verifyPayment(config, txnid)` → `{ state: success |
+  pending | failed | not_found, providerPaymentId, method, amountPaise, reason }` is the only answer the server acts on:
+  what PayU posts to the return URLs or the webhook is never trusted. Renewals: `preDebit(...)` 48 hours to 30 days
+  before the charge, then `chargeMandate(...)` (pending is normal; verify later). `withGst(basePaise)` adds 18%;
+  amounts are paise. Off (null config) without `PAYU_MERCHANT_KEY` and `PAYU_MERCHANT_SALT`; `PAYU_MODE=live` only in
+  production.
 
 **Fixed (handover), to be built:**
 
@@ -540,7 +554,21 @@ the newest grant. At or below a fifth of the monthly credits (80% used) each own
 replying." with the billing link); at none, `credits_exhausted`. Free, behind `staff_alerts`. Keys
 `credit_alert:<low|used_up>:<newest grant id>:<owner>`, so each alert goes once per grant: a new month, a top-up or an
 admin grant starts again. Credits that expire with no spend wake nothing; the next refused reply raises the
-`credits_exhausted` handoff alert as before. Auto top-up ("if on", the handover) waits for Razorpay (Day 6).
+`credits_exhausted` handoff alert as before. Auto top-up ("if on", the handover) waits for PayU billing (Day 6).
+
+**Plan renewals (`billing-renewals`, built 13 Oct; `backend/src/billing/renewals.ts`, decision 20).** Once a day at
+06:00 in India (outside NPCI's busy hours for UPI debits), five steps, each safe to repeat:
+1. **Notices:** each mandate whose period ends within 4 days gets its renewal payment and PayU's pre-debit notice (cards
+   and UPI; e-NACH needs none), announcing the job's first run at least 48 hours away and not before the period ends.
+2. **Charges:** at that run the mandate is charged. The payment is marked pending before PayU is asked, so a crash or
+   timeout never charges twice. A failure sends the owners and admins a `staff_alert` ("Your Spark Agent plan payment of
+   ₹2,948.82 didn't go through. We'll try again in 2 days." with the billing link; key `renewal_failed:<payment id>`).
+   Up to 3 attempts a period, 2 days apart; the subscription is `past_due` meanwhile and the business keeps working.
+3. **Pending:** charges pending over 10 minutes are verified with PayU; one PayU has no record of after an hour is failed.
+4. **Annual months:** an annual plan's credits still come month by month.
+5. **Lapse:** a plan unpaid 7 days after its period ended is cancelled and the business paused; the owners are told
+   (key `subscription_lapsed:<subscription id>`). Choosing a plan in Billing starts again.
+UNVERIFIED until the PayU test account: whether a retry needs a fresh pre-debit notice (UPI's sequence numbers).
 
 **Event alerts (`event-alerts`, built 12 Oct; `backend/src/inngest/event-alerts.ts`).** Dev 1's events that tell staff
 something become staff alerts (section 2): `lead.hot` → `hot_lead` (with the lead card) and `voice_note.received` →
@@ -780,6 +808,25 @@ Plain lists (leads, conversations, bookings, services) are read directly under R
 
 **Home and shell (built, 12 Oct; types `AccountStatus` and `DashboardSummary` in `@pakka/types` `dashboard.ts`).** Any member.
 
+- **PayU billing (`backend/src/billing/checkout.ts`, decision 20).** Each start route is owner only and answers
+  `PayuCheckout` `{ paymentId, payu: { url, fields } }`, which the browser POSTs to PayU (an auto-submitting form). PayU
+  needs a phone: `phone` (E.164) in the body, else the owner's alert number, else `validation_failed` with `fields.phone`.
+  `not_available` until `PAYU_MERCHANT_KEY`, `PAYU_MERCHANT_SALT` and `API_PUBLIC_URL` are set.
+  - `POST /api/billing/checkout` `{ planKey: starter | growth | pro, cycle: monthly | yearly, phone? }`: the first payment
+    (yearly = 10 months' price) with the auto-debit approval. `conflict` when the business already has a plan.
+  - `POST /api/billing/topup` `{ phone? }` or no body: 1,000 credits for ₹1,199 + GST. `conflict` without a paid plan.
+  - `POST /api/billing/setup-fee` `{ phone? }` or no body: ₹4,999 + GST, once. `conflict` when already paid.
+  - `POST /api/billing/change-plan` `{ planKey, cycle?, phone? }` → `ChangePlanResult`: `upgrade` `{ paymentId, payu }` (the
+    rest of the period's difference on PayU, which also approves the new auto-debit; the plan changes once it is paid and
+    the old mandate is revoked), `scheduled` `{ planKey, effectiveAt }` (a downgrade from the next renewal), `kept` (a
+    scheduled downgrade cancelled) or `unchanged`. `conflict` without a plan or while a renewal is past due;
+    `not_available` for a different `cycle` (switching monthly and yearly isn't offered yet).
+  - `GET /api/billing/payments/:id` → `PaymentView` `{ id, kind, status: created | pending | success | failed, amountInr,
+    failureReason, createdAt }`. Any member. While not final it asks PayU again (at most every 5 seconds).
+  - `POST /api/billing/payu/return`: PayU's surl and furl (the payer's browser, from PayU's page). Verifies with PayU, then
+    303 to `/dashboard/billing?payment=<id>` (`unknown` when the txnid isn't ours). The Billing screen polls that payment.
+  - `POST /api/webhooks/payu`: PayU's webhook (form or JSON with `txnid`). Verifies with PayU; 200 when handled or not
+    ours, 503 while PayU can't be asked (so PayU retries). Nothing posted to either URL is trusted, only `verify_payment`.
 - `GET /api/billing/balance` → `AccountStatus` (`backend/src/billing/account-status.ts`): `status`, `plan { key, name, monthlyCredits }`,
   `credits { plan, topup, total }` (`credit_balance`), `creditsGranted` (the meter's denominator: grants of plan, trial,
   top-up and admin credits whose bucket is still live), `renewsAt` (the subscription's period end, active businesses only),
@@ -832,6 +879,7 @@ Plain lists (leads, conversations, bookings, services) are read directly under R
 | 17 | Handoff SLA (`handoff-sla`) | **Proposed by Dev 2 (9 Oct):** 15 minutes by default, each business can change it (`sla_minutes`, section 3); counted from the handoff at any time of day (business hours not yet considered); the escalation goes to owners only. The handover gives no number | Raja |
 | 18 | Lead nudges timing (`lead-nudges`) | **Proposed by Dev 2 (9 Oct):** the handover says "after 2 h and 24 h, then nurture". The second nudge goes at **23 h**, so it is still free text inside the customer's 24-hour window (at 24 h only an approved marketing template could go, and none is approved yet); a lead still quiet at **48 h** moves to nurture. Each business can change all three (section 3) | Raja |
 | 19 | A booking made in the chat gets no separate confirmation message | **Proposed by Dev 2 (12 Oct):** the assistant's own reply confirms the booking (Dev 1's Day 3 note), so `booking_confirmation` sends nothing on `booking.confirmed` and shows as "Not available yet" on the Features screen; a customer would otherwise get two. The `booking_confirmed_vN` template stays in the catalogue for bookings made outside the chat (by staff from the dashboard, when that exists) | Raja |
+| 20 | Billing provider: PayU instead of Razorpay | **Decided by Shaaz (13 Oct).** Plans renew by PayU auto-debit (card, UPI Autopay or net-banking e-NACH), approved with the first payment; top-ups and the setup fee are one-time payments. RBI caps UPI Autopay at ₹15,000 and asks the payer to approve each card debit above it. Our prices are GST-extra, so Pro (₹15,339 with GST) and every annual plan offer card and net banking only, and a card payer approves each renewal. Replaces the handover's module 8 Razorpay text. Needs from Raja: the PayU test merchant key and salt on Railway, and recurring payments (SI) enabled on the account | Dev 2 + Dev 3 + Raja |
 
 ## 9. Knowledge base (PROPOSED, not agreed)
 
