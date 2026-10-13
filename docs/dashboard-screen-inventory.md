@@ -289,18 +289,18 @@ top-up are simulated.
 - `GET /api/billing/balance`: **PROPOSED**, Dev 2 (see Home).
 - Credit history: **RLS READ** of `credit_ledger` (or a view with readable reasons).
 - Daily usage: **PROPOSED** view or route, Dev 2.
-- `POST /api/billing/checkout`, `/topup`, `/change-plan`: **HANDOVER**, Dev 2 (Razorpay).
-- Invoices: **PROPOSED**, Dev 2 (open question: Razorpay invoices or our own numbering).
+- `POST /api/billing/checkout`, `/topup`, `/change-plan`: **HANDOVER**, Dev 2 (PayU, decision 20).
+- Invoices: **PROPOSED**, Dev 2 (our own numbering: PayU has no invoices).
 **HTTP method:** GET, POST.
 **Request:** `{ planKey, cycle: 'monthly'|'yearly' }`, `{ pack }`.
-**Response:** `AccountStatus`, `LedgerEntry[]`, Razorpay order/subscription for the checkout widget.
-**Loading state:** Not built yet. Needs a payment-in-progress state while Razorpay is open.
+**Response:** `AccountStatus`, `LedgerEntry[]`, the PayU checkout form (`CheckoutResponse`).
+**Loading state:** Not built yet. Needs a waiting state when PayU sends the payer back, until the payment is verified.
 **Empty state:** not applicable.
 **Error state:** Not built yet. Needs payment failed or cancelled, with the balance left unchanged.
 **Feature flag:** `auto_topup`.
 **Plan restriction:** shows the current plan; downgrades apply from the next renewal.
 **Tenant scope:** session tenant.
-**Owner:** UI Dev 3 · Razorpay, ledger and plans Dev 2.
+**Owner:** UI Dev 3 · PayU, ledger and plans Dev 2.
 **Note:** prototype prices and credits (₹1,999 / 1,000 …) differ from the v1.0 specs
 (₹2,499 / 1,500 …). The specs win unless Raja decides otherwise; see `docs/dev2-roadmap.md`.
 

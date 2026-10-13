@@ -66,6 +66,28 @@ describe("parseServerEnv", () => {
     });
   });
 
+  describe("the PayU settings", () => {
+    it("leaves billing off without keys, and uses PayU's test hosts unless the mode is exactly live", () => {
+      const off = parseServerEnv(base);
+      expect([off.PAYU_MERCHANT_KEY, off.PAYU_MERCHANT_SALT, off.PAYU_MODE]).toEqual([undefined, undefined, "test"]);
+      expect(parseServerEnv({ ...base, PAYU_MODE: "live" }).PAYU_MODE).toBe("live");
+      expect(() => parseServerEnv({ ...base, PAYU_MODE: "production" })).toThrow(/PAYU_MODE/);
+    });
+
+    it("takes the key and salt together, and refuses one without the other, without echoing either", () => {
+      expect(parseServerEnv({ ...base, PAYU_MERCHANT_KEY: "gtKFFx", PAYU_MERCHANT_SALT: "salt-123" }).PAYU_MERCHANT_KEY).toBe("gtKFFx");
+      for (const only of [{ PAYU_MERCHANT_KEY: "gtKFFx" }, { PAYU_MERCHANT_SALT: "salt-123" }]) {
+        try {
+          parseServerEnv({ ...base, ...only });
+          expect.unreachable();
+        } catch (e) {
+          expect((e as EnvError).message).toContain("PAYU_MERCHANT_KEY and PAYU_MERCHANT_SALT must be set together");
+          expect((e as EnvError).message).not.toMatch(/gtKFFx|salt-123/);
+        }
+      }
+    });
+  });
+
   it("names the bad variable without echoing its value", () => {
     try {
       parseServerEnv({ ...base, WHATSAPP_REGISTER_PIN: "12ab-secret" });

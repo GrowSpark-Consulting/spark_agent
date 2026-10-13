@@ -11,7 +11,7 @@ Reviewer for this area: Dev 3.
 | 4. Booking and slot engine | `findSlots`, `holdSlot`, `confirmBooking`, `rescheduleBooking`, `cancelBooking`; Google Calendar sync | `backend/src/booking` |
 | 5. Notifications and jobs | `notify.send()` (the only way out), every Inngest function except `process-message` | `backend/src/notify`, `backend/src/inngest` |
 | 7. Feature flags and credits | `isEnabled`, `spendCredits` → `spend_credits()` SQL, `getBalance` | `backend/src/features`, `backend/src/billing` |
-| 8. Billing, trial, demo number | Razorpay subscriptions/orders/webhooks, trial grant and lifecycle, route codes | `backend/src/billing` |
+| 8. Billing, trial, demo number | PayU auto-debit mandates, one-time payments and webhooks (decision 20; was Razorpay), trial grant and lifecycle, route codes | `backend/src/billing` |
 | Shared | Repo, CI, environments, migrations tooling | `.github`, `supabase`, `docs/environments.md` |
 
 ## Milestones
@@ -24,7 +24,7 @@ Reviewer for this area: Dev 3.
 | M2 | Slot engine (hours, duration, buffer, lead time, free/busy, pincode); 10-minute holds; exclusion constraint; Google OAuth + sync; `release-holds` cron | Booking shows in Google Calendar and dashboard |
 | M3 | `booking-reminders`, `post-visit`, `lead-nudges`, `daily-agenda`, `handoff-sla`, `own-number-outcome`; templates submitted | 24 h / 2 h reminders with working buttons |
 | M4 | `PATCH /api/features/:key` with plan checks; outbound webhooks (signed, Pro); audit log everywhere | Business sets its own toggles and goes live |
-| M5 | Plans seed + Razorpay subscriptions, annual plans, top-ups, setup fee; renewal grants and rollover; `trial-lifecycle`; `credit-alerts`; zero-credit fallback | Stranger → demo → trial → pays → gets credits |
+| M5 | Plans seed + PayU auto-debit plans, annual plans, top-ups, setup fee; renewal grants and rollover; `trial-lifecycle`; `credit-alerts`; zero-credit fallback | Stranger → demo → trial → pays → gets credits |
 | M7 | `date_range` and `callback` booking kinds; event-relative reminder scheduler replacing fixed reminder jobs | YatraKraft runs a week on the travel pack |
 
 ## What the dashboard designs need from this area
@@ -35,7 +35,7 @@ From the onboarding/dashboard prototype (Home, Calendar, Billing, Settings, Team
 |---|---|
 | Home | Credit meter (left / total, resets on renewal date), trial countdown, low-credit and paused banners, credits shown as leads (≈ 15 credits a lead) |
 | Features | Toggle list from `features` × plan, locked items with Upgrade, "≈ N credits/month" per toggle from the last 30 days, reminder timing choice (48 / 24 / 12 / 6 h) stored in `tenant_features.settings` |
-| Top-up modal | Packs, pay with UPI (Razorpay Order), balance updates and Maya resumes when credits arrive |
+| Top-up modal | Packs, pay with UPI (PayU one-time payment), balance updates and Maya resumes when credits arrive |
 | Upgrade modal | Plan comparison, upgrade starts today with extra credits for the rest of the month |
 | Billing | Plan, next bill + GST, daily usage chart, credit history (ledger rows), top-up packs, monthly/yearly switch, downgrade from next renewal, ₹4,999 setup add-on, GST invoices |
 | Calendar | Day/week per staff, statuses confirmed / held / completed / no-show, reschedule (re-sends time and resets reminders), mark visited / no-show, cancel, undo |
@@ -64,6 +64,6 @@ Designed but not yet in the specs (each needs a decision and, where noted, schem
 - Notification channel matrix, quiet hours and a Monday weekly report (new job, email via Resend).
 - Book-ahead window per tenant (only buffer and minimum lead time are in module 4).
 - Chat retention setting and a deletion job.
-- GST invoices: Razorpay invoices or our own numbering (`INV-YYMM-NNNN` in the prototype).
+- GST invoices: our own numbering (PayU has no invoices) (`INV-YYMM-NNNN` in the prototype).
 - Zero credits: the Blueprint sends one holding message and moves the lead to Human; the prototype
   says "new chats go to your inbox". Same intent, but `notify.send` needs one exact behaviour.

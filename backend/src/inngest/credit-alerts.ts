@@ -9,7 +9,7 @@ import { inngest } from "./client";
 // plan's monthly credits, and again when it has none left (billing/credit-alerts.ts). A burst of spends is one check:
 // the run waits for a minute of quiet (at most ten), then reads the balance as it is. Each alert is keyed by its level,
 // the newest grant and the owner, so it goes once per grant whatever the retries and repeat runs. Owners with an alert
-// number only; free (staff_alert, behind the staff_alerts switch). Auto top-up waits for Razorpay (Day 6).
+// number only; free (staff_alert, behind the staff_alerts switch). Auto top-up waits for PayU billing (Day 6).
 
 const CreditsSpent = z.object({ tenantId: z.guid() });
 
