@@ -276,6 +276,12 @@ function isJustOne(body: string | null): boolean {
   return body !== null && /^[1१１][.)]?$/u.test(body.trim());
 }
 
+/**
+ * The name a turn's reply goes out under (notify.send's idempotencyKey: 1 to 200 characters, and the message id it derives is the credit ref). One reply per
+ * turn, and a turn is its newest customer message, so that message names it.
+ */
+export const replyKey = (lastMessageId: string): string => `reply:${lastMessageId}`;
+
 /** Keeps something on the newest message's meta; a message that is not found is a bug, not retried. */
 async function keep(deps: ReplyDeps, turn: TurnContext, agent: Record<string, unknown>): Promise<void> {
   const lastMessageId = turn.messageIds[turn.messageIds.length - 1];
@@ -436,7 +442,12 @@ async function sendReply(turn: TurnContext, understood: UnderstandResult, starte
   // The exit question goes as two reply buttons (Raja, 9 Oct); if WhatsApp refuses them (not a retry, not an unknown outcome) the
   // same question goes once as plain text with "Reply 1". A tap or a "1" is read by plan.ts.
   const exit = plan.reply.mode === "fixed" && plan.reply.text === "exit_question" ? exitQuestionButtons(plan.reply.language) : null;
-  const send = (payload: { text: string } | { interactive: Interactive }) => deps.send(turn.tenantId, "ai_reply", { conversationId: turn.conversationId, ...payload });
+  // Named by the turn's last message (notify.send dedupes on the key): a run that died after WhatsApp accepted the reply, and so could not record it, sends it again
+  // under the same name and gets the first send's outcome instead of a second message. The buttons and the plain-text line are two forms of ONE reply and only one of
+  // them is ever recorded (a refused send is not), so they share the key: a replay that starts with the buttons finds the text that went out.
+  const key = replyKey(lastMessageId);
+  const send = (payload: { text: string } | { interactive: Interactive }) =>
+    deps.send(turn.tenantId, "ai_reply", { conversationId: turn.conversationId, ...payload, idempotencyKey: key });
   let outcome = exit
     ? await send({ interactive: { type: "buttons", body: carriesNotice ? `${exit.body}
 
@@ -538,7 +549,10 @@ export async function answerAfterFailure(ids: { tenantId: string; conversationId
     // The notice is optional: if the business's settings cannot be read, the safe line still goes out, without it.
     const info = await store.getTenantReplyInfo(ids.tenantId).catch(() => null);
     const notice = parseReplySettings(info?.agentSettings).privacyNotice && contact.consentAt === null ? `\n\n${consentNotice(language, deps.privacyPolicyUrl)}` : "";
-    const outcome = await deps.send(ids.tenantId, "ai_reply", { conversationId: ids.conversationId, text: fixedText("fallback", language) + notice });
+    // A key of its own, named by the message that started the run, so the failure handler running twice sends the line once. It is never a reply's key: the run's reply is named by the
+    // newest answerable message it took, which this cannot tell from here (a photo may be newer, or a message that arrived after the run began), and a shared name could return the
+    // safe line in place of a real answer.
+    const outcome = await deps.send(ids.tenantId, "ai_reply", { conversationId: ids.conversationId, text: fixedText("fallback", language) + notice, idempotencyKey: `gave_up:${ids.messageId}` });
     if (outcome.status === "sent" || (outcome.status === "failed" && outcome.error.outcomeUnknown)) {
       // A notice is recorded as shown only when the send is known to have gone out: an unknown outcome leaves consent_at
       // null, so the next reply carries the notice again (a repeated notice costs nothing; a false "shown" would be a lie in the log).
