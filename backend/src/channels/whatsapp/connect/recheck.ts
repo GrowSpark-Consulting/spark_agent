@@ -6,8 +6,9 @@ import { writeAudit, type AuditEntry } from "../../../lib/audit";
 import { AppError } from "../../../lib/errors";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { requireRole } from "../../../lib/tenant";
-import { graph as realGraph, runGraphChecks, withTestMessage, withWebhookConfirmed, type Check, type Graph } from "./checks";
+import { graph as realGraph, withTestMessage, withWebhookConfirmed, type Check, type Graph } from "./checks";
 import { probeMeta, type MetaProbe } from "./manual";
+import { runConnectionChecks } from "./run-checks";
 import { checkTestMessage } from "./test-message-check";
 import { webhookWasSeen } from "./webhook-seen";
 
@@ -115,37 +116,18 @@ export async function recheckConnection(context: TenantContext, connectionId: st
       throw new AppError("upstream_failed", "We couldn't read the saved access token. Connect the number again with the connection form.");
     }
 
-    const probe = await deps.probe({ wabaId: row.waba_id, phoneNumberId: row.phone_number_id, token });
-    if (probe.state === "unreachable") throw new AppError("upstream_failed", "We couldn't reach Meta to check this number. Try again in a moment.");
-
-    const accepted = probe.state === "ok";
-    const lastCheck = await runGraphChecks(
-      {
-        wabaId: row.waba_id,
-        token,
-        method: row.method,
-        accepted,
-        tokenExpired: probe.state === "rejected" && probe.reason === "token_expired",
-        onSubscribed: (value) => {
-          subscribed = value;
-        },
-        inAccount: probe.state === "ok" && probe.numberInAccount,
-        facts: { nameStatus: probe.state === "ok" ? (probe.info.facts?.nameStatus ?? null) : null, platformType: probe.state === "ok" ? (probe.info.facts?.platformType ?? null) : null },
-        webhookSeen: async () => (seenBefore = await deps.webhookSeen(tenantId, connectionId)),
-      },
-      deps.graph,
-      deps.now(),
+    const run = await runConnectionChecks(
+      { tenantId, connectionId, method: row.method, wabaId: row.waba_id, phoneNumberId: row.phone_number_id, token },
+      { probe: deps.probe, graph: deps.graph, webhookSeen: deps.webhookSeen, now: deps.now },
     );
+    if (run.state === "unreachable") throw new AppError("upstream_failed", "We couldn't reach Meta to check this number. Try again in a moment.");
+    const { lastCheck, fresh } = run;
+    subscribed = run.subscribed;
+    seenBefore = run.seenBefore;
 
     finalStatus = lastCheck.overall === "fail" ? "failed" : "active";
 
     // What Meta says about the number is refreshed along with the checks; a field Meta did not give is left as it was.
-    const fresh: Record<string, string> = {};
-    if (probe.state === "ok") {
-      if (probe.info.displayPhone) fresh.display_phone = probe.info.displayPhone;
-      if (probe.info.verifiedName) fresh.verified_name = probe.info.verifiedName;
-      if (probe.info.qualityRating) fresh.quality_rating = probe.info.qualityRating;
-    }
     const saved = await deps.db
       .from("whatsapp_connections")
       .update({ ...fresh, status: finalStatus, last_check: lastCheck })
