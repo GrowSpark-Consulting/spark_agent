@@ -235,7 +235,14 @@ function Field({ id, label, error, children }: { id: string; label: string; erro
   );
 }
 
-function ConnectionResult({ connection }: { connection: WhatsAppConnectionPublic }) {
+/** What the API returned. "Connected" only for status `active`; any other status gets `notActive` (or the manual path's words). */
+export function ConnectionResult({
+  connection,
+  notActive = { title: "Meta didn’t accept these details", body: "Nothing is connected. Fix the details below and try again." },
+}: {
+  connection: WhatsAppConnectionPublic;
+  notActive?: { title: string; body: string };
+}) {
   const active = connection.status === "active";
   const lines = checkLines(connection.last_check);
   return (
@@ -245,13 +252,13 @@ function ConnectionResult({ connection }: { connection: WhatsAppConnectionPublic
         className={active ? "border-2 border-foreground px-[18px] py-4" : "border-2 border-primary bg-brand-100 text-brand-900 px-[18px] py-4"}
       >
         <strong className="block text-[17px]">
-          {active ? "Connected" : "Meta didn’t accept these details"}
+          {active ? "Connected" : notActive.title}
           {connection.display_phone ? ` · ${connection.display_phone}` : ""}
         </strong>
         <span className="text-sm">
           {active
             ? "Your number is saved. Send a message to it from another phone: it shows as connected in your dashboard once Meta delivers it to us."
-            : "Nothing is connected. Fix the details below and try again."}
+            : notActive.body}
         </span>
       </div>
       {lines.length > 0 && (

@@ -8,9 +8,10 @@ export function StepLive({ s }: { s: OnboardingState }) {
   const K = industryKey(s);
   const dashHref =
     ROUTES.dashboard + (K !== "fix" && K !== "re" ? "?industry=" + K : "");
-  // The WhatsApp step is a preview that connects nothing, so the number is never shown as live here.
-  // The dashboard's WhatsApp page shows the real status from whatsapp_connections_public.
-  const numStatus = "Not connected yet";
+  // Connected only when Connect with Facebook got an active connection back from the API; every other path (a preview,
+  // a skip, a number that failed its checks) says not connected. The dashboard's WhatsApp page shows the real status.
+  const connected = s.waConnection?.status === "active";
+  const numStatus = connected ? "Connected" : "Not connected yet";
   // The real trial once it exists; the prototype's sample figures before that.
   const trialSummary = s.trial
     ? `${s.trial.trialDays} ${s.trial.trialDays === 1 ? "day" : "days"}` +
@@ -37,8 +38,8 @@ export function StepLive({ s }: { s: OnboardingState }) {
           <strong>Live</strong>
         </div>
         <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 py-3 border-b border-divider text-[15px]">
-          <span>Your number +91 {s.phone}</span>
-          <strong className="text-brand-700">
+          <span>Your number {connected && s.waConnection?.displayPhone ? s.waConnection.displayPhone : `+91 ${s.phone}`}</span>
+          <strong className={connected ? undefined : "text-brand-700"}>
             {numStatus}
           </strong>
         </div>

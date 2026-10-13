@@ -48,9 +48,8 @@ export interface OnboardingState {
   mWaba: string;
   mPhoneId: string;
   copied: string | null;
-  popup: boolean;
-  popStep: number;
-  cancelStep: string | null;
+  /** The connection the API returned for Connect with Facebook, if any. Connected only when `status` is `active`. */
+  waConnection: { status: string; displayPhone: string | null } | null;
   chkKind: CheckKind;
   chkStep: number;
   chkFail: number;
@@ -90,9 +89,7 @@ export const initialState: OnboardingState = {
   mWaba: "",
   mPhoneId: "",
   copied: null,
-  popup: false,
-  popStep: 0,
-  cancelStep: null,
+  waConnection: null,
   chkKind: "meta",
   chkStep: 0,
   chkFail: -1,
