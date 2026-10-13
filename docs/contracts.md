@@ -49,6 +49,8 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0033_trial_phones` | One free trial per WhatsApp number: `trial_phones` (server-only; a SHA-256 of the number, at most one per trial, kept after an unpaid trial is deleted) and `claim_trial_phone(tenant, phone)` → `claimed` / `other_sender` / `taken` (service_role only; section 4) |
 | `0034_credit_refund_retries` | `refund_credits` refunds what is still owed for the ref_id, bucket by bucket (spent less already refunded), so every failed attempt of a keyed send retried under the same message id gets its credits back, not only the first |
 | `0035_payu_billing` | Billing moves to PayU (decision 20): `plans.razorpay_plan_id` and `subscriptions.razorpay_subscription_id` go; `subscriptions` holds one PayU auto-debit mandate (`billing_cycle`, `amount_paise` with GST, `mandate_id` = PayU authpayuid, `mandate_method`, `next_plan_key`, `pre_debit_for`, `charge_attempts`; status `pending` / `active` / `past_due` / `cancelled`, one live per business); `payments` (one row per PayU transaction, `txnid` unique, base + GST paise; members read, the server writes; its id is the credit grant's ref_id); `tenants.setup_call_paid_at` |
+| `0036_payment_settlement` | `begin_payment` (records a subscribe, top-up or setup-fee payment before PayU; PA409 for a second plan, a top-up without a paid plan, or a setup fee already paid) and `settle_payment(txnid, state, ...)` (applies the result the server verified with PayU, once: a subscribe activates the mandate and the plan and grants the month's credits; a top-up grants its pack; a setup fee flags the business; a failure cancels a pending mandate; PA422 when PayU's amount is not ours; a second plan paid at once is kept cancelled and audited for a refund); `payments.credits`. Service role only |
+| `0037_renewals` | Plan renewals by PayU auto-debit: `payments.for_period_end` (one open renewal per subscription and period), `subscriptions.pre_debit_at` (the debit time the notice announced); `begin_renewal`, `renewals_to_notify`, `renewals_to_charge` (period ended, announced time come, none pending or paid, under 3 failed attempts, none in 2 days), `grant_annual_credit_months`, `lapse_overdue_subscriptions` (past due 7 days → cancelled, business paused); `settle_payment` now settles renewals (success moves the period on and grants the month to the end of the next month; failure → `past_due`) and audits a payment that needs a refund as `payment.needs_refund`. Service role only |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -553,6 +555,20 @@ replying." with the billing link); at none, `credits_exhausted`. Free, behind `s
 admin grant starts again. Credits that expire with no spend wake nothing; the next refused reply raises the
 `credits_exhausted` handoff alert as before. Auto top-up ("if on", the handover) waits for PayU billing (Day 6).
 
+**Plan renewals (`billing-renewals`, built 13 Oct; `backend/src/billing/renewals.ts`, decision 20).** Once a day at
+06:00 in India (outside NPCI's busy hours for UPI debits), five steps, each safe to repeat:
+1. **Notices:** each mandate whose period ends within 4 days gets its renewal payment and PayU's pre-debit notice (cards
+   and UPI; e-NACH needs none), announcing the job's first run at least 48 hours away and not before the period ends.
+2. **Charges:** at that run the mandate is charged. The payment is marked pending before PayU is asked, so a crash or
+   timeout never charges twice. A failure sends the owners and admins a `staff_alert` ("Your Spark Agent plan payment of
+   ₹2,948.82 didn't go through. We'll try again in 2 days." with the billing link; key `renewal_failed:<payment id>`).
+   Up to 3 attempts a period, 2 days apart; the subscription is `past_due` meanwhile and the business keeps working.
+3. **Pending:** charges pending over 10 minutes are verified with PayU; one PayU has no record of after an hour is failed.
+4. **Annual months:** an annual plan's credits still come month by month.
+5. **Lapse:** a plan unpaid 7 days after its period ended is cancelled and the business paused; the owners are told
+   (key `subscription_lapsed:<subscription id>`). Choosing a plan in Billing starts again.
+UNVERIFIED until the PayU test account: whether a retry needs a fresh pre-debit notice (UPI's sequence numbers).
+
 **Event alerts (`event-alerts`, built 12 Oct; `backend/src/inngest/event-alerts.ts`).** Dev 1's events that tell staff
 something become staff alerts (section 2): `lead.hot` → `hot_lead` (with the lead card) and `voice_note.received` →
 `voice_note`, to owners and admins with an alert number; `chat.external_waiting` → `external_waiting`, to the member who
@@ -791,6 +807,20 @@ Plain lists (leads, conversations, bookings, services) are read directly under R
 
 **Home and shell (built, 12 Oct; types `AccountStatus` and `DashboardSummary` in `@pakka/types` `dashboard.ts`).** Any member.
 
+- **PayU billing (`backend/src/billing/checkout.ts`, decision 20).** Each start route is owner only and answers
+  `PayuCheckout` `{ paymentId, payu: { url, fields } }`, which the browser POSTs to PayU (an auto-submitting form). PayU
+  needs a phone: `phone` (E.164) in the body, else the owner's alert number, else `validation_failed` with `fields.phone`.
+  `not_available` until `PAYU_MERCHANT_KEY`, `PAYU_MERCHANT_SALT` and `API_PUBLIC_URL` are set.
+  - `POST /api/billing/checkout` `{ planKey: starter | growth | pro, cycle: monthly | yearly, phone? }`: the first payment
+    (yearly = 10 months' price) with the auto-debit approval. `conflict` when the business already has a plan.
+  - `POST /api/billing/topup` `{ phone? }` or no body: 1,000 credits for ₹1,199 + GST. `conflict` without a paid plan.
+  - `POST /api/billing/setup-fee` `{ phone? }` or no body: ₹4,999 + GST, once. `conflict` when already paid.
+  - `GET /api/billing/payments/:id` → `PaymentView` `{ id, kind, status: created | pending | success | failed, amountInr,
+    failureReason, createdAt }`. Any member. While not final it asks PayU again (at most every 5 seconds).
+  - `POST /api/billing/payu/return`: PayU's surl and furl (the payer's browser, from PayU's page). Verifies with PayU, then
+    303 to `/dashboard/billing?payment=<id>` (`unknown` when the txnid isn't ours). The Billing screen polls that payment.
+  - `POST /api/webhooks/payu`: PayU's webhook (form or JSON with `txnid`). Verifies with PayU; 200 when handled or not
+    ours, 503 while PayU can't be asked (so PayU retries). Nothing posted to either URL is trusted, only `verify_payment`.
 - `GET /api/billing/balance` → `AccountStatus` (`backend/src/billing/account-status.ts`): `status`, `plan { key, name, monthlyCredits }`,
   `credits { plan, topup, total }` (`credit_balance`), `creditsGranted` (the meter's denominator: grants of plan, trial,
   top-up and admin credits whose bucket is still live), `renewsAt` (the subscription's period end, active businesses only),
