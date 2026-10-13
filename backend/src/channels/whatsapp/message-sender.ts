@@ -11,12 +11,14 @@ import { sendInteractive, sendTemplate, sendText, type AdapterDeps, type Adapter
 
 const NOT_CONNECTED = "This business has no connected WhatsApp number, so the message was not sent.";
 
-const ConnectionRow = z.object({ phone_number_id: z.string(), token_enc: z.string(), status: z.string() });
+const ConnectionRow = z.object({ tenant_id: z.string(), method: z.string(), phone_number_id: z.string(), token_enc: z.string(), status: z.string() });
 
 /**
- * The phone number id and encrypted token of one active connection of this business, read with the
- * service role (whatsapp_connections is closed to every other role). A missing or inactive connection
- * is whatsapp_not_connected; a database failure is thrown as a plain Error.
+ * The phone number id and encrypted token of one active connection, read with the service role (whatsapp_connections
+ * is closed to every other role): the business's own, or one of our platform numbers (the shared demo number a trial
+ * is routed through, which notify_target picks for a chat on its channel; 0030). The returned tenantId is the
+ * connection's own business, since the adapter decrypts the token with it. A missing or inactive connection, or another
+ * business's own number, is whatsapp_not_connected; a database failure is thrown as a plain Error.
  */
 export async function loadSendConnection(
   db: SupabaseClient,
@@ -24,14 +26,14 @@ export async function loadSendConnection(
 ): Promise<SendConnection> {
   const { data, error } = await db
     .from("whatsapp_connections")
-    .select("phone_number_id, token_enc, status")
+    .select("tenant_id, method, phone_number_id, token_enc, status")
     .eq("id", ids.connectionId)
-    .eq("tenant_id", ids.tenantId)
     .limit(1);
   if (error) throw new Error(`loading the WhatsApp connection failed: ${error.message}`);
   const [row] = z.array(ConnectionRow).max(1).parse(data);
-  if (!row || row.status !== "active") throw new SendError("whatsapp_not_connected", NOT_CONNECTED);
-  return { tenantId: ids.tenantId, connectionId: ids.connectionId, phoneNumberId: row.phone_number_id, tokenEnc: row.token_enc };
+  const usable = row && row.status === "active" && (row.tenant_id === ids.tenantId || row.method === "platform");
+  if (!row || !usable) throw new SendError("whatsapp_not_connected", NOT_CONNECTED);
+  return { tenantId: row.tenant_id, connectionId: ids.connectionId, phoneNumberId: row.phone_number_id, tokenEnc: row.token_enc };
 }
 
 /** The adapter's failure as notify.send expects it: OutsideWindowError for Meta's 131047, otherwise a SendError. */
