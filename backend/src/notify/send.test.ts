@@ -5,11 +5,12 @@ type RpcResult = { data: unknown; error: { code?: string; message: string } | nu
 const rpcHandlers: Record<string, (args: Record<string, unknown>) => RpcResult> = {};
 const rpc = vi.fn(async (fn: string, args: Record<string, unknown>) => rpcHandlers[fn](args));
 const isEnabled = vi.fn(async () => true);
+const isSwitchedOn = vi.fn(async () => true);
 // Tables read directly (the idempotency check reads messages); filled per test.
 const tables: Record<string, FakeResponse> = {};
 const db = fakeSupabase(tables);
 vi.mock("../lib/supabase-admin", () => ({ supabaseAdmin: () => ({ rpc, from: (table: string) => db.client.from(table) }) }));
-vi.mock("../features/is-enabled", () => ({ isEnabled }));
+vi.mock("../features/is-enabled", () => ({ isEnabled, isSwitchedOn }));
 const inngestSend = vi.fn<(event: unknown) => Promise<{ ids: string[] }>>(async () => ({ ids: [] }));
 vi.mock("../inngest/client", () => ({ inngest: { send: (event: unknown) => inngestSend(event) } }));
 
@@ -38,6 +39,7 @@ const sender = { sendText: vi.fn(), sendTemplate: vi.fn(), sendInteractive: vi.f
 beforeEach(() => {
   rpc.mockClear();
   isEnabled.mockReset().mockResolvedValue(true);
+  isSwitchedOn.mockReset().mockResolvedValue(true);
   sender.sendText.mockReset().mockResolvedValue({ providerMsgId: "wamid.text" });
   sender.sendTemplate.mockReset().mockResolvedValue({ providerMsgId: "wamid.tpl" });
   sender.sendInteractive.mockReset().mockResolvedValue({ providerMsgId: "wamid.buttons" });
@@ -233,6 +235,36 @@ describe("staff_alert", () => {
       status: "failed",
       error: { code: "not_found", message: "That person has no WhatsApp number for alerts." },
     });
+  });
+});
+
+describe("account notices (the trial, a plan payment)", () => {
+  const OWNER_ID = "16fd2706-8baf-433b-82eb-8c7fada847da";
+  const notice = {
+    staffUserId: OWNER_ID,
+    text: ["Skyline Homes: your trial has ended.", "https://app.test/dashboard/billing"].join("\n"),
+    templateParams: ["Skyline Homes: your trial has ended.", "https://app.test/dashboard/billing"],
+  };
+
+  it("still go when the business is paused or its trial has ended (isEnabled is off then), free, to the owner's alert number", async () => {
+    isEnabled.mockResolvedValue(false);
+    const outcome = await send(TENANT, "account_notice", notice);
+    expect(outcome).toMatchObject({ status: "sent", creditsCharged: 0 });
+    expect(isEnabled).not.toHaveBeenCalled();
+    expect(isSwitchedOn).toHaveBeenCalledWith(TENANT, "staff_alerts");
+    expect(calls("notify_staff_target")[0]).toEqual({ p_tenant_id: TENANT, p_user_id: OWNER_ID });
+    expect(calls("spend_credits")).toHaveLength(0);
+    expect(calls("notify_record")[0]).toMatchObject({ p_sender: "system", p_kind: "account_notice", p_credits: 0 });
+  });
+
+  it("are not sent to a business that switched staff alerts off, and use the staff_alert template outside the window", async () => {
+    isSwitchedOn.mockResolvedValue(false);
+    await expect(send(TENANT, "account_notice", notice)).resolves.toEqual({ status: "skipped", reason: "feature_off" });
+    isSwitchedOn.mockResolvedValue(true);
+    rpcHandlers.notify_staff_target = () => ok([target({ to_phone: "+919800011111", last_customer_msg_at: null })]);
+    rpcHandlers.notify_template = () => ok([{ name: "staff_alert_v1", language: "en", category: "utility" }]);
+    await expect(send(TENANT, "account_notice", notice)).resolves.toMatchObject({ status: "sent", usedTemplate: true });
+    expect(calls("notify_template")[0]).toMatchObject({ p_base_name: "staff_alert" });
   });
 });
 

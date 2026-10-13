@@ -70,9 +70,10 @@ export async function accountStatus(context: TenantContext, deps: AccountStatusD
 
   const trialEnded = status === "trial" && trialEndsAt !== null && Date.parse(trialEndsAt) <= now.getTime();
   const noNumber = numbers !== null && !numbers.count;
-  // Without a number nothing goes out at all, so that comes before credits.
+  // Without a number nothing goes out at all, so that comes before credits. A trial paused at its end (trial-lifecycle)
+  // still reads as an ended trial.
   const aiPausedReason =
-    status === "paused" ? "paused"
+    status === "paused" ? (context.tenant.planKey === "trial" ? "trial_ended" : "paused")
     : status === "cancelled" ? "cancelled"
     : trialEnded ? "trial_ended"
     : noNumber ? "whatsapp_not_connected"

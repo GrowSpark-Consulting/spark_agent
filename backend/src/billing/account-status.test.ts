@@ -103,6 +103,14 @@ describe("GET /api/billing/balance", () => {
     await expect(accountStatus(context(), deps({ numbers: { data: null, error: { message: "timeout" } } }).d)).rejects.toThrow("WhatsApp connection read failed");
   });
 
+  it("reads a trial paused at its end as an ended trial, and a paid plan paused as paused", async () => {
+    expect(await accountStatus(context({ status: "paused", planKey: "trial", trialEndsAt: "2026-10-11T06:00:00+00:00" }), deps({ subscription: [] }).d)).toMatchObject({
+      aiPaused: true,
+      aiPausedReason: "trial_ended",
+    });
+    expect(await accountStatus(context({ status: "paused", planKey: "starter" }), deps().d)).toMatchObject({ aiPausedReason: "paused" });
+  });
+
   it("fails loudly when the plan is missing from the catalogue", async () => {
     await expect(accountStatus(context(), deps({ plan: { data: null, error: null } }).d)).rejects.toThrow("is not in the catalogue");
   });

@@ -1,9 +1,7 @@
 import { redactSecrets } from "@pakka/types";
 import { z } from "zod";
-import { sendToAdmins, type AlertCounts, type AlertMessage } from "../channels/whatsapp/connect/health-alert";
 import { invalidateFeatureCache } from "../features/is-enabled";
-import { send } from "../notify/send";
-import { staffAlertRecipients } from "../notify/staff-alerts";
+import { sendAccountNotice, type NoticeCounts, type NoticeMessage } from "../notify/account-notices";
 import { billingDeps, syncPayment, type BillingDeps } from "./checkout";
 import { chargeMandate, indiaDate, newTxnid, preDebit, PayuError, type VerifiedPayment } from "./payu";
 
@@ -24,13 +22,14 @@ import { chargeMandate, indiaDate, newTxnid, preDebit, PayuError, type VerifiedP
 // UPI mandateSeqNo). Until the test merchant key arrives, a retry reuses the period's invoice number and notice.
 
 export interface RenewalDeps extends BillingDeps {
-  alert: (tenantId: string, message: AlertMessage, key: string) => Promise<AlertCounts>;
+  alert: (tenantId: string, message: NoticeMessage, key: string) => Promise<NoticeCounts>;
 }
 
 export function renewalDeps(): RenewalDeps {
   return {
     ...billingDeps(),
-    alert: (tenantId, message, key) => sendToAdmins(tenantId, message, key, { recipients: (id) => staffAlertRecipients(id), send: (id, kind, payload) => send(id, kind, payload) }),
+    // account_notice, not staff_alert: the lapse notice goes after the business is paused, when staff alerts are off.
+    alert: (tenantId, message, key) => sendAccountNotice(tenantId, message, key, { roles: ["owner", "admin"] }),
   };
 }
 
@@ -61,14 +60,14 @@ const billingLink = (appUrl: string) => `${appUrl.replace(/\/$/, "")}/dashboard/
  * A renewal that did not go through: how much, and that it is retried automatically (there is no manual "pay now": the
  * mandate is charged again in 2 days). Placeholder wording until Raja's.
  */
-export function renewalFailedMessage(amountPaise: number, appUrl: string): AlertMessage {
+export function renewalFailedMessage(amountPaise: number, appUrl: string): NoticeMessage {
   const headline = `Your Spark Agent plan payment of ${rupees(amountPaise)} didn't go through. We'll try again in 2 days.`;
   const link = billingLink(appUrl);
   return { text: `${headline}\nCheck that the account or card you pay with can cover it. Your plan and payments are in Billing.\n${link}`, templateParams: [headline, link] };
 }
 
 /** A plan that lapsed: the assistant is paused until a plan is chosen again. */
-export function lapsedMessage(appUrl: string): AlertMessage {
+export function lapsedMessage(appUrl: string): NoticeMessage {
   const headline = "Spark Agent is paused: your plan payment didn't go through for 7 days. Your inbox is still there.";
   const link = billingLink(appUrl);
   return { text: `${headline}\nChoose a plan in Billing to switch the assistant back on.\n${link}`, templateParams: [headline, link] };

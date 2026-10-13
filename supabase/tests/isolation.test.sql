@@ -115,6 +115,7 @@ begin
     insert into public.whatsapp_templates (tenant_id, connection_id, name, language, category, components) values (t, wc, 'iso_' || s || '_v1', 'en', 'utility', '{}');
     insert into public.whatsapp_webhook_tokens (tenant_id, token_hash, token_enc) values (t, repeat((n + 2)::text, 64), 'enc');
     insert into public.trial_phones (phone_hash, tenant_id) values (repeat((n + 4)::text, 64), t);
+    insert into public.trial_notices (tenant_id, day, claimed_by) values (t, 0, 'iso-fixture');
   end loop;
 end
 $$;

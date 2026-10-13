@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { CREDIT_COST } from "../billing/credit-costs";
 import { refundCredits, spendCredits } from "../billing/credits";
-import { isEnabled } from "../features/is-enabled";
+import { isEnabled, isSwitchedOn } from "../features/is-enabled";
 import { inngest } from "../inngest/client";
 import { supabaseAdmin } from "../lib/supabase-admin";
 import { Interactive, interactiveSummary } from "./interactive";
@@ -206,6 +206,9 @@ export async function send(tenantId: string, kind: NotificationKind, payload: No
   }
 
   if (kindConfig.feature && !(await isEnabled(tenantId, kindConfig.feature))) {
+    return { status: "skipped", reason: "feature_off" };
+  }
+  if (kindConfig.preference && !(await isSwitchedOn(tenantId, kindConfig.preference))) {
     return { status: "skipped", reason: "feature_off" };
   }
 
