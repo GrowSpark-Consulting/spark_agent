@@ -6,6 +6,8 @@ import { storeEchoedMessage, type EchoArgs, type EchoOutcome } from "./echo";
 import * as db from "./inbound-db";
 import { WebhookDbError, type ConnectionRow, type StoreInboundArgs } from "./inbound-db";
 import { noteWebhookSeen } from "./connect/webhook-seen";
+import { demoDb } from "./demo/db";
+import { routeDemoMessage, type DemoDecision, type DemoMessage } from "./demo/route";
 import { parseWebhook, type ParsedMessage } from "./parse";
 import { verifySignature } from "./signature";
 import { supabaseAdmin } from "../../lib/supabase-admin";
@@ -75,6 +77,21 @@ export interface WebhookDeps {
    * Best effort, never awaited by the answer. Optional so that a caller built before it still works.
    */
   noteWebhookSeen?: (tenantId: string, connectionId: string) => Promise<void>;
+  /**
+   * The shared demo number (demo/route.ts): a customer's message on it belongs to the business its route code names, not to
+   * the business that owns the number's connection row. Optional: without it (or when no demo number is set) every number
+   * behaves as before.
+   */
+  demo?: { phoneNumberId: string; route: (message: DemoMessage) => Promise<DemoDecision> };
+}
+
+/** The demo number's id, if one is set. An invalid environment is reported by the handler itself, so here it just means none. */
+function demoNumberId(): string | undefined {
+  try {
+    return serverEnv().WHATSAPP_DEMO_PHONE_NUMBER_ID;
+  } catch {
+    return undefined;
+  }
 }
 
 // Looked up when called (not when the module loads), so a test that replaces inbound-db or the queue is honoured.
@@ -90,6 +107,7 @@ const realDeps = (): WebhookDeps => ({
   storeEchoedMessage: (args) => storeEchoedMessage(supabaseAdmin(), args),
   sendEvent: (event) => inngest.send(event),
   noteWebhookSeen: (tenantId, connectionId) => noteWebhookSeen(tenantId, connectionId),
+  ...(demoNumberId() ? { demo: { phoneNumberId: demoNumberId() as string, route: (message: DemoMessage) => routeDemoMessage(message, demoDb()) } } : {}),
 });
 
 export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps = realDeps()): Promise<Response> {
@@ -145,7 +163,7 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
   }
   const parsed = parseWebhook(payload);
 
-  const counts = { echoes: 0, echoesSwitched: 0, echoesSkipped: 0, stored: 0, duplicates: 0, statuses: 0, unknown: 0, inactive: 0, failed: 0, templates: 0, templatesIgnored: 0, templatesNotOurs: 0, ambiguous: 0, health: 0 };
+  const counts = { echoes: 0, echoesSwitched: 0, echoesSkipped: 0, stored: 0, duplicates: 0, statuses: 0, unknown: 0, inactive: 0, failed: 0, templates: 0, templatesIgnored: 0, templatesNotOurs: 0, ambiguous: 0, health: 0, demoRouted: 0, demoDropped: 0 };
   const errorCodes = new Set<string>();
   const fail = (err: unknown) => {
     counts.failed++;
@@ -185,15 +203,29 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
       const connection = connectionFor(message);
       if (!connection) continue;
       try {
-        // The tenant and channel come from the connection row, never from the message.
+        // The tenant and channel come from the connection row, never from the message. The one exception is the shared demo
+        // number: the business is the one a route code in the visitor's messages names (looked up in route_codes, never taken
+        // from the text), and the chat sits on the number's own channel.
+        let tenantId = connection.tenantId;
+        let storable = toStorable(message);
+        if (deps.demo && connection.method === "platform" && message.phoneNumberId === deps.demo.phoneNumberId) {
+          const decision = await deps.demo.route({ from: message.from, providerMsgId: message.providerMsgId, text: message.type === "text" ? clean(message.text) : undefined });
+          if (decision.action === "drop") {
+            counts.demoDropped++;
+            continue;
+          }
+          counts.demoRouted++;
+          tenantId = decision.tenantId;
+          if (decision.body !== undefined) storable = { ...storable, body: decision.body, meta: { ...storable.meta, routeCode: decision.routeCode } };
+        }
         const stored = await deps.storeInboundMessage({
-          tenantId: connection.tenantId,
+          tenantId,
           channelId: connection.channelId,
           phone: message.from,
           contactName: clean(message.contactName),
           providerMsgId: message.providerMsgId,
           sentAt: message.timestamp,
-          ...toStorable(message),
+          ...storable,
         });
         if (stored.inserted) counts.stored++;
         else counts.duplicates++;
@@ -202,7 +234,7 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
         await deps.sendEvent({
           id: `message_received:${stored.messageId}`,
           name: "whatsapp/message.received",
-          data: { tenantId: connection.tenantId, conversationId: stored.conversationId, messageId: stored.messageId },
+          data: { tenantId, conversationId: stored.conversationId, messageId: stored.messageId },
         });
       } catch (err) {
         fail(err);
@@ -325,10 +357,11 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
   for (const item of parsed.ignored) if (item.reason === "unsupported_field") unknownFields.set(item.field, (unknownFields.get(item.field) ?? 0) + 1);
   const fields = unknownFields.size > 0 ? ` fields=${[...unknownFields].map(([name, n]) => `${name}:${n}`).join(",")}` : "";
 
+  const demo = counts.demoRouted + counts.demoDropped > 0 ? ` demo_routed=${counts.demoRouted} demo_dropped=${counts.demoDropped}` : "";
   const codes = errorCodes.size > 0 ? ` error_codes=${[...errorCodes].join(",")}` : "";
   console.log(
     `${TAG} messages=${parsed.messages.length} stored=${counts.stored} duplicates=${counts.duplicates} echoes=${parsed.echoes.length} echoes_stored=${counts.echoes} echoes_switched=${counts.echoesSwitched} echoes_skipped=${counts.echoesSkipped} statuses=${counts.statuses} ` +
-      `templates=${parsed.templateStatuses.length} templates_set=${counts.templates} templates_ignored=${counts.templatesIgnored} templates_not_ours=${counts.templatesNotOurs} accounts_unmatched=${counts.ambiguous} health=${counts.health} ignored=${parsed.ignored.length} unknown=${counts.unknown} inactive=${counts.inactive} failed=${counts.failed}${codes}${fields}`,
+      `templates=${parsed.templateStatuses.length} templates_set=${counts.templates} templates_ignored=${counts.templatesIgnored} templates_not_ours=${counts.templatesNotOurs} accounts_unmatched=${counts.ambiguous} health=${counts.health} ignored=${parsed.ignored.length} unknown=${counts.unknown} inactive=${counts.inactive} failed=${counts.failed}${codes}${fields}${demo}`,
   );
 
   if (counts.failed > 0) {

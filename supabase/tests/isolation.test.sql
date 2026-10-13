@@ -104,6 +104,7 @@ begin
     insert into public.credit_ledger (tenant_id, delta, reason) values (t, 300, 'trial_grant');
     insert into public.handoffs (tenant_id, conversation_id, trigger, priority) values (t, cv, 'asked_human', 'normal');
     insert into public.route_codes (code, kind, tenant_id) values ('ISO-' || upper(s), 'trial', t);
+    insert into public.demo_visitors (phone, tenant_id, routed_at, msg_day, msg_count) values ('+91980000020' || n, t, now(), current_date, 1);
     insert into public.audit_logs (tenant_id, actor, action) values (t, 'system', 'test.fixture');
     insert into public.whatsapp_connections (id, tenant_id, channel_id, method, waba_id, phone_number_id, token_enc, token_type, connected_by)
       values (wc, t, ch, 'manual_byo', 'waba-iso-' || s, 'pn-iso-' || s, 'enc', 'business', u::text);
@@ -112,6 +113,7 @@ begin
     insert into public.google_calendar_connections (tenant_id, resource_id, refresh_token_enc, scope) values (t, rs, 'enc', 'calendar');
     insert into public.whatsapp_templates (tenant_id, connection_id, name, language, category, components) values (t, wc, 'iso_' || s || '_v1', 'en', 'utility', '{}');
     insert into public.whatsapp_webhook_tokens (tenant_id, token_hash, token_enc) values (t, repeat((n + 2)::text, 64), 'enc');
+    insert into public.trial_phones (phone_hash, tenant_id) values (repeat((n + 4)::text, 64), t);
   end loop;
 end
 $$;

@@ -45,6 +45,8 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0026_booking_actions` | `bookings.status_changed_at` (kept by a trigger); `complete_booking`, `mark_booking_no_show`, `staff_cancel_booking`, `staff_reschedule_booking`, each with its audit row (service_role only, section 4); `bookings` and `leads` in the Realtime publication |
 | `0027_plan_limits` | Triggers keep a business within its plan's seats (`memberships`, PA413) and WhatsApp numbers (`whatsapp_connections` not disconnected and not `platform`, PA403); each locks the business's row (FOR NO KEY UPDATE) before counting, so racing additions take turns (section 6, plan limits) |
 | `0028_owner_admin_writes` | `is_admin(tenant)` (security definer, callable by `authenticated`); services, resources, catalog_items and the tenant's settings are written by owners and admins only, as the screen inventory's role table says; staff keep reading them, moving leads and setting their own alert number |
+| `0032_platform_number_fallback` | `notify_target` answers a chat through the active connection on its channel, the business's own or one of our platform numbers (a trial routed through the shared demo number); `notify_staff_target` falls back to the platform number the business's latest chat is on. A test message still needs the business's own number; another business's own number is never used. (after Dev 1's 0029 `demo_visitors` and 0031, which stores a routed chat on the platform number's channel) |
+| `0033_trial_phones` | One free trial per WhatsApp number: `trial_phones` (server-only; a SHA-256 of the number, at most one per trial, kept after an unpaid trial is deleted) and `claim_trial_phone(tenant, phone)` → `claimed` / `other_sender` / `taken` (service_role only; section 4) |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -185,7 +187,10 @@ out. Use it only for the STOP confirmation and the out-of-credits holding messag
 `staff` with an open conversation in `human` mode, so the AI never answers a member's reply and the alert is
 stored like any other message. Free text when the member has written to the business in the last 24 hours,
 otherwise the approved `staff_alert_vN` template: `{{1}}` the one-line headline, `{{2}}` the dashboard link.
-**Nobody calls it directly:** `backend/src/notify/staff-alerts.ts` builds the content and picks the recipients
+A business routed through one of our platform numbers (a trial on the shared demo number, Dev 1's demo routing) has
+no number of its own: its alerts go through the platform number its customers' latest chat is on (0032), and customer
+replies go through the number the chat came in on. The sender decrypts that number's token with the number's own
+business (`loadSendConnection`). **Nobody calls it directly:** `backend/src/notify/staff-alerts.ts` builds the content and picks the recipients
 (owners and admins with an alert number), and the jobs (section 5) send it.
 
 **The lead card and the take-over links (built, 12 Oct).** `handoff_opened` and `setup_problem` carry, inside the member's
@@ -336,6 +341,14 @@ writeAudit({ tenantId, actor, action, entity?, entityId?, diff? }): Promise<void
   handover says plan + toggle; the status check is new and needs confirming (decision 12).
 - `createTrialTenant`: one self-serve business per account. A repeat call during the trial returns
   the same business (`created: false`); an account that already owns a paying business gets an error.
+- **One trial per WhatsApp number (0033).** `claimTrialPhone(tenantId, phone)` in `backend/src/billing/trial-phone.ts`
+  → `"claimed" | "other_sender" | "taken"`. Dev 1's routing on the shared demo number calls it for a message that
+  carries a TRIAL code, with the sender's `wa_id` (the full number, country code included). The first sender becomes
+  the trial's phone (`claimed`, also on every later message from that phone). Another sender to a trial that already
+  has its phone is someone trying it (`other_sender`): route as usual. A sender who already started another trial,
+  writing to a trial with no phone yet, gets `taken`: don't route it; tell them this number has already had a free
+  trial. Only this verified sender is recorded. The phone typed during onboarding is not verified, so it is never
+  claimed, or anyone could block someone else's number.
 
 **Fixed (handover), to be built:**
 
