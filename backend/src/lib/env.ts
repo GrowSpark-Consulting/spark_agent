@@ -89,6 +89,11 @@ const serverEnvSchema = z
   META_SYSTEM_USER_TOKEN: secret.optional(),
   WHATSAPP_DEMO_WABA_ID: secret.optional(),
   WHATSAPP_DEMO_PHONE_NUMBER_ID: secret.optional(),
+  // Embedded Signup (POST /api/onboarding/whatsapp/embedded-signup) stays off until Meta approves the app; off, the route answers not_available.
+  EMBEDDED_SIGNUP_ENABLED: z
+    .enum(["true", "false"], { error: 'must be "true" or "false"' })
+    .default("false")
+    .transform((v) => v === "true"),
   WHATSAPP_REGISTER_PIN: z
     .string()
     .regex(/^\d{6}$/, "must be 6 digits")
