@@ -2,9 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getJson = vi.fn();
-vi.mock("@/lib/api/client", () => ({ getJson: (...args: unknown[]) => getJson(...args) }));
+const postJson = vi.fn();
+vi.mock("@/lib/api/client", () => ({ getJson: (...args: unknown[]) => getJson(...args), postJson: (...args: unknown[]) => postJson(...args) }));
 
-const { BillingDataError, fetchAccountStatus, fetchCreditHistory, fetchPlans, HISTORY_PAGE, planRelation, reasonLabel } = await import("./billing-data");
+const { BillingDataError, changePlan, fetchAccountStatus, fetchCreditHistory, fetchPayment, fetchPlans, HISTORY_PAGE, isPaymentId, planRelation, reasonLabel, startCheckout, startSetupFee, startTopup } = await import("./billing-data");
 
 const TENANT = "10000000-0000-4000-8000-000000000001";
 const OTHER = "10000000-0000-4000-8000-000000000009";
@@ -45,6 +46,7 @@ function fakeClient(result: { data: unknown; error: unknown }) {
 
 beforeEach(() => {
   getJson.mockReset();
+  postJson.mockReset();
 });
 
 describe("fetchAccountStatus", () => {
@@ -133,5 +135,122 @@ describe("fetchCreditHistory", () => {
     await expect(fetchCreditHistory(fakeClient({ data: [{ id: 1 }], error: null }).client, TENANT)).rejects.toBeInstanceOf(BillingDataError);
     const boom = new Error("boom");
     await expect(fetchCreditHistory(fakeClient({ data: null, error: boom }).client, TENANT)).rejects.toBe(boom);
+  });
+});
+
+// Paying -----------------------------------------------------------------------------------------------------------
+
+const PAYMENT = "20000000-0000-4000-8000-000000000002";
+const checkoutAnswer = { paymentId: PAYMENT, payu: { url: "https://test.payu.in/_payment", fields: { key: "k", txnid: "t", hash: "h" } } };
+const paymentView = (over: Record<string, unknown> = {}) => ({ id: PAYMENT, kind: "topup", status: "success", amountInr: 1414.82, failureReason: null, createdAt: "2026-10-13T10:00:00.000Z", ...over });
+
+describe("startCheckout", () => {
+  it("POSTs { planKey, cycle } for this business and returns PayU's form details", async () => {
+    postJson.mockResolvedValue(checkoutAnswer);
+    expect(await startCheckout(TENANT, { planKey: "growth", cycle: "yearly" })).toEqual(checkoutAnswer);
+    expect(postJson).toHaveBeenCalledWith("/api/billing/checkout", { planKey: "growth", cycle: "yearly" }, { tenantId: TENANT });
+  });
+
+  it("sends the phone only when there is one, and rejects a badly typed one before any request", async () => {
+    postJson.mockResolvedValue(checkoutAnswer);
+    await startCheckout(TENANT, { planKey: "starter", cycle: "monthly", phone: " +919840012345 " });
+    expect(postJson).toHaveBeenCalledWith("/api/billing/checkout", { planKey: "starter", cycle: "monthly", phone: "+919840012345" }, { tenantId: TENANT });
+    postJson.mockClear();
+    await expect(startCheckout(TENANT, { planKey: "starter", cycle: "monthly", phone: "98400" })).rejects.toMatchObject({ name: "ZodError" });
+    expect(postJson).not.toHaveBeenCalled();
+  });
+
+  it("rejects a plan the API does not sell, with no request", async () => {
+    await expect(startCheckout(TENANT, { planKey: "enterprise" as never, cycle: "monthly" })).rejects.toMatchObject({ name: "ZodError" });
+    expect(postJson).not.toHaveBeenCalled();
+  });
+
+  it("rejects an answer that is not PayU's form details, without putting the answer in the message", async () => {
+    postJson.mockResolvedValue({ paymentId: PAYMENT, payu: { url: "https://x", fields: { hash: "SECRET-HASH", n: 1 } } });
+    const err = await startCheckout(TENANT, { planKey: "growth", cycle: "monthly" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BillingDataError);
+    expect((err as Error).message).not.toContain("SECRET-HASH");
+  });
+});
+
+describe("startTopup and startSetupFee", () => {
+  it("send no body unless a phone is given (the documented { phone? } or no body)", async () => {
+    postJson.mockResolvedValue(checkoutAnswer);
+    await startTopup(TENANT);
+    await startSetupFee(TENANT);
+    expect(postJson).toHaveBeenNthCalledWith(1, "/api/billing/topup", undefined, { tenantId: TENANT });
+    expect(postJson).toHaveBeenNthCalledWith(2, "/api/billing/setup-fee", undefined, { tenantId: TENANT });
+  });
+
+  it("send { phone } when the server asked for one", async () => {
+    postJson.mockResolvedValue(checkoutAnswer);
+    await startTopup(TENANT, { phone: "+919840012345" });
+    await startSetupFee(TENANT, { phone: "+919840012345" });
+    expect(postJson).toHaveBeenNthCalledWith(1, "/api/billing/topup", { phone: "+919840012345" }, { tenantId: TENANT });
+    expect(postJson).toHaveBeenNthCalledWith(2, "/api/billing/setup-fee", { phone: "+919840012345" }, { tenantId: TENANT });
+  });
+
+  it("reject a malformed answer and a bad phone", async () => {
+    postJson.mockResolvedValue({ paymentId: PAYMENT });
+    await expect(startTopup(TENANT)).rejects.toBeInstanceOf(BillingDataError);
+    await expect(startSetupFee(TENANT)).rejects.toBeInstanceOf(BillingDataError);
+    postJson.mockClear();
+    await expect(startTopup(TENANT, { phone: "nope" })).rejects.toMatchObject({ name: "ZodError" });
+    expect(postJson).not.toHaveBeenCalled();
+  });
+});
+
+describe("changePlan", () => {
+  it("POSTs { planKey } and reads each documented outcome", async () => {
+    const answers = [
+      { action: "upgrade", ...checkoutAnswer },
+      { action: "scheduled", planKey: "starter", effectiveAt: "2026-11-01T00:00:00.000Z" },
+      { action: "kept" },
+      { action: "unchanged" },
+    ];
+    for (const answer of answers) {
+      postJson.mockResolvedValueOnce(answer);
+      expect(await changePlan(TENANT, { planKey: "starter" })).toEqual(answer);
+    }
+    expect(postJson).toHaveBeenCalledWith("/api/billing/change-plan", { planKey: "starter" }, { tenantId: TENANT });
+  });
+
+  it("rejects an outcome the contract does not have", async () => {
+    postJson.mockResolvedValue({ action: "refunded" });
+    await expect(changePlan(TENANT, { planKey: "pro" })).rejects.toBeInstanceOf(BillingDataError);
+    postJson.mockResolvedValue({ action: "upgrade", paymentId: PAYMENT });
+    await expect(changePlan(TENANT, { planKey: "pro" })).rejects.toBeInstanceOf(BillingDataError);
+  });
+
+  it("lets the API's refusal through untouched", async () => {
+    const refusal = new Error("conflict");
+    postJson.mockRejectedValue(refusal);
+    await expect(changePlan(TENANT, { planKey: "pro" })).rejects.toBe(refusal);
+  });
+});
+
+describe("fetchPayment", () => {
+  it("GETs this payment for this business and returns the documented shape", async () => {
+    getJson.mockResolvedValue(paymentView());
+    expect(await fetchPayment(TENANT, PAYMENT)).toEqual(paymentView());
+    expect(getJson).toHaveBeenCalledWith(`/api/billing/payments/${PAYMENT}`, { tenantId: TENANT, signal: undefined });
+  });
+
+  it("rejects an unknown status, a missing field and an answer for another payment", async () => {
+    getJson.mockResolvedValue(paymentView({ status: "paid" }));
+    await expect(fetchPayment(TENANT, PAYMENT)).rejects.toBeInstanceOf(BillingDataError);
+    getJson.mockResolvedValue({ id: PAYMENT, status: "success" });
+    await expect(fetchPayment(TENANT, PAYMENT)).rejects.toBeInstanceOf(BillingDataError);
+    getJson.mockResolvedValue(paymentView({ id: "30000000-0000-4000-8000-000000000003" }));
+    await expect(fetchPayment(TENANT, PAYMENT)).rejects.toBeInstanceOf(BillingDataError);
+  });
+});
+
+describe("isPaymentId", () => {
+  it("accepts the API's ids and refuses what PayU's return can carry instead", () => {
+    expect(isPaymentId(PAYMENT)).toBe(true);
+    expect(isPaymentId("unknown")).toBe(false);
+    expect(isPaymentId("")).toBe(false);
+    expect(isPaymentId("../balance")).toBe(false);
   });
 });

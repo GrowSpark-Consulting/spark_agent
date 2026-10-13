@@ -68,6 +68,11 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
   { call: "GET /api/dashboard/summary", file: "features/home/home-api.ts" },
   { call: "GET /api/billing/balance", file: "features/home/home-api.ts" },
   { call: "GET /api/billing/balance", file: "features/billing/billing-data.ts" },
+  { call: "POST /api/billing/checkout", file: "features/billing/billing-data.ts" },
+  { call: "POST /api/billing/topup", file: "features/billing/billing-data.ts" },
+  { call: "POST /api/billing/setup-fee", file: "features/billing/billing-data.ts" },
+  { call: "POST /api/billing/change-plan", file: "features/billing/billing-data.ts" },
+  { call: "GET /api/billing/payments/:id", file: "features/billing/billing-data.ts" },
   { call: "GET /api/conversations/:id/templates", file: "features/inbox/template-reply.ts" },
   // Registered behind EMBEDDED_SIGNUP_ENABLED (not_available while off). It refuses connectToken (validation_failed) until the assisted-link PR.
   { call: "POST /api/onboarding/whatsapp/embedded-signup", file: "features/connect/connect-link.ts" },
@@ -93,12 +98,7 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   "PUT /api/inngest": "Inngest calls it: syncs the function list",
   "GET /h/:token": "a staff member's browser follows the link in a WhatsApp alert; it redirects to /dashboard/inbox?chat=<id>",
   "GET /api/calendar/google/callback": "Google redirects the browser here after consent; it redirects back to Booking setup with the outcome",
-  // PayU billing (Dev 2, decision 20). The Billing screen's buttons move these to FRONTEND_CALLS when they call them.
-  "POST /api/billing/checkout": "not called yet: the Billing screen's Choose plan button (PayU checkout with auto-debit)",
-  "POST /api/billing/topup": "not called yet: the Billing screen's top-up button (PayU one-time payment)",
-  "POST /api/billing/setup-fee": "not called yet: the Billing screen's setup add-on (PayU one-time payment)",
-  "POST /api/billing/change-plan": "not called yet: the Billing screen's plan change (an upgrade opens PayU; a downgrade is scheduled)",
-  "GET /api/billing/payments/:id": "not called yet: the Billing screen polls it after PayU sends the payer back with ?payment=<id>",
+  // PayU billing (Dev 2, decision 20): the routes PayU itself calls. The ones the Billing screen calls are in FRONTEND_CALLS.
   "POST /api/billing/payu/return": "PayU's checkout page posts the payer's browser here (a navigation); it redirects to /dashboard/billing",
   "POST /api/webhooks/payu": "PayU calls it: payment results (verified with PayU before anything changes)",
 };

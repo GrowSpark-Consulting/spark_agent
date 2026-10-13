@@ -1,14 +1,19 @@
-import { AccountStatus } from "@pakka/types";
+import { AccountStatus, ChangePlanInput, ChangePlanResult, CheckoutInput, OneTimePaymentInput, PayuCheckout, PaymentView } from "@pakka/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
-import { getJson } from "@/lib/api/client";
+import { getJson, postJson } from "@/lib/api/client";
 
-// The Billing screen's reads (docs/dashboard-screen-contracts.md, "Billing & credits"):
-//   GET /api/billing/balance → AccountStatus     (backend/src/billing/account-status.ts; shape from @pakka/types)
-//   credit_ledger            → the credit history, read under RLS (members read their own business's rows, 0001)
-//   plans                    → the plans on offer, read under RLS (a catalogue every signed-in user reads, 0001)
-// Paying is NOT here: POST /api/billing/checkout, /topup and /change-plan, the Razorpay webhook and invoices are Dev 2's and are not on the
-// API yet (backend/src/server/routes.ts), so this file has no call for them and the screen has no button for them.
+// The Billing screen's calls (docs/contracts.md, "PayU billing", decision 20; shapes from @pakka/types billing.ts):
+//   GET  /api/billing/balance          → AccountStatus     (backend/src/billing/account-status.ts)
+//   credit_ledger                      → the credit history, read under RLS (members read their own business's rows, 0001)
+//   plans                              → the plans on offer, read under RLS (a catalogue every signed-in user reads, 0001)
+//   POST /api/billing/checkout         { planKey, cycle, phone? } → PayuCheckout        owner only
+//   POST /api/billing/topup            { phone? } or no body      → PayuCheckout        owner only
+//   POST /api/billing/setup-fee        { phone? } or no body      → PayuCheckout        owner only
+//   POST /api/billing/change-plan      { planKey, cycle?, phone? } → ChangePlanResult   owner only
+//   GET  /api/billing/payments/:id     → PaymentView (created | pending | success | failed); any member
+// The server decides every amount; the browser sends no price. A PayuCheckout is not a payment: it is the form to POST to PayU
+// (payu-form.ts). Only GET /api/billing/payments/:id says whether a payment went through (payment-poll.ts).
 
 export class BillingDataError extends Error {
   constructor(what: string) {
@@ -21,6 +26,49 @@ export async function fetchAccountStatus(tenantId: string, signal?: AbortSignal)
   const parsed = AccountStatus.safeParse(await getJson<unknown>("/api/billing/balance", { tenantId, signal }));
   if (!parsed.success) throw new BillingDataError("balance");
   return parsed.data;
+}
+
+// Paying -----------------------------------------------------------------------------------------------------------
+
+/** A payment id as the API makes it (a uuid). PayU sends the payer back with ?payment=unknown when the transaction isn't ours. */
+export const isPaymentId = (text: string): boolean => z.guid().safeParse(text).success;
+
+/** Reads an answer with its shared schema; the message never carries the answer itself (it can hold PayU's signed fields). */
+function parseAnswer<T>(schema: z.ZodType<T>, raw: unknown, what: string): T {
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) throw new BillingDataError(what);
+  return parsed.data;
+}
+
+/** The plan's first payment and its auto-debit approval. Input is checked before it is sent (a bad phone throws a ZodError). */
+export async function startCheckout(tenantId: string, input: CheckoutInput): Promise<PayuCheckout> {
+  const body = CheckoutInput.parse(input);
+  return parseAnswer(PayuCheckout, await postJson<unknown>("/api/billing/checkout", body, { tenantId }), "checkout");
+}
+
+/** One top-up pack. `phone` only when the server asked for it; without it the request has no body. */
+export async function startTopup(tenantId: string, input: OneTimePaymentInput = {}): Promise<PayuCheckout> {
+  const body = OneTimePaymentInput.parse(input);
+  return parseAnswer(PayuCheckout, await postJson<unknown>("/api/billing/topup", body.phone ? body : undefined, { tenantId }), "top-up");
+}
+
+/** The assisted-onboarding setup fee. Same body rule as the top-up. */
+export async function startSetupFee(tenantId: string, input: OneTimePaymentInput = {}): Promise<PayuCheckout> {
+  const body = OneTimePaymentInput.parse(input);
+  return parseAnswer(PayuCheckout, await postJson<unknown>("/api/billing/setup-fee", body.phone ? body : undefined, { tenantId }), "setup fee");
+}
+
+/** upgrade → pay on PayU; scheduled, kept and unchanged are done and need no payment. */
+export async function changePlan(tenantId: string, input: ChangePlanInput): Promise<ChangePlanResult> {
+  const body = ChangePlanInput.parse(input);
+  return parseAnswer(ChangePlanResult, await postJson<unknown>("/api/billing/change-plan", body, { tenantId }), "plan change");
+}
+
+/** One payment of this business. The answer must be for the payment asked about. */
+export async function fetchPayment(tenantId: string, id: string, signal?: AbortSignal): Promise<PaymentView> {
+  const payment = parseAnswer(PaymentView, await getJson<unknown>(`/api/billing/payments/${encodeURIComponent(id)}`, { tenantId, signal }), "payment");
+  if (payment.id !== id) throw new BillingDataError("payment");
+  return payment;
 }
 
 // Plans ------------------------------------------------------------------------------------------------------------
