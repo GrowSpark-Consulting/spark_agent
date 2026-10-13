@@ -69,6 +69,7 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
   { call: "GET /api/billing/balance", file: "features/home/home-api.ts" },
   { call: "GET /api/billing/balance", file: "features/billing/billing-data.ts" },
   { call: "GET /api/conversations/:id/templates", file: "features/inbox/template-reply.ts" },
+  { call: "POST /api/onboarding/whatsapp/embedded-signup", file: "features/connect/connect-link.ts" },
 ];
 
 /**
@@ -79,7 +80,6 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
  */
 const AWAITING_BACKEND: { call: string; file: string; where: string }[] = [
   { call: "GET /api/connect-links/:token", file: "features/connect/connect-link.ts", where: "Dev 1, contract only (docs/whatsapp-connection-contract.md); not in routes.ts on main" },
-  { call: "POST /api/onboarding/whatsapp/embedded-signup", file: "features/connect/connect-link.ts", where: "Dev 1, contract only (docs/whatsapp-connection-contract.md); not in routes.ts on main" },
 ];
 
 /** Backend routes the browser never calls, and why. Anything not here and not in FRONTEND_CALLS fails the test. */

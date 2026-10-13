@@ -14,14 +14,15 @@ export type LastCheck = { ran_at: string; overall: "pass" | "warn" | "fail"; che
 
 /** Meta's answer to one Graph call: a status and a body, or nothing at all when it could not be reached. */
 export type GraphAnswer = { state: "answered"; ok: boolean; status: number; body: unknown } | { state: "unreachable" };
-export type Graph = (method: "GET" | "POST" | "DELETE", path: string, token: string) => Promise<GraphAnswer>;
+export type Graph = (method: "GET" | "POST" | "DELETE", path: string, token: string, body?: unknown) => Promise<GraphAnswer>;
 
 /** The real Graph client: the pinned version, the client's own token, ten seconds at most. */
-export const graph: Graph = async (method, path, token) => {
+export const graph: Graph = async (method, path, token, body) => {
   try {
     const res = await fetch(`https://graph.facebook.com/${serverEnv().META_GRAPH_API_VERSION}/${path}`, {
       method,
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: AbortSignal.timeout(10_000),
     });
     const answer: GraphAnswer = { state: "answered", ok: res.ok, status: res.status, body: await res.json().catch(() => null) };

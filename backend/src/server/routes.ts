@@ -11,6 +11,7 @@ import { cancelFromCalendar, completeFromCalendar, noShowFromCalendar, reschedul
 import { googleConnectUrl, handleGoogleCallback } from "../booking/google-calendar";
 import { sendTestMessage } from "../channels/whatsapp/test-message";
 import { handleWhatsAppWebhook } from "../channels/whatsapp/inbound";
+import { connectEmbeddedSignup } from "../channels/whatsapp/connect/embedded-signup";
 import { connectManual } from "../channels/whatsapp/connect/manual";
 import { disconnectConnection, recheckConnection } from "../channels/whatsapp/connect/recheck";
 import { getWebhookConfig } from "../channels/whatsapp/connect/webhook-token";
@@ -215,6 +216,8 @@ const whatsappManualConnect = tenantRoute(
   },
   { status: 201 },
 );
+// { code, wabaId, phoneNumberId, coexistence } → 201 connection. Owner or admin; off (not_available) until EMBEDDED_SIGNUP_ENABLED.
+const whatsappEmbeddedSignup = tenantRoute(({ context, body }) => connectEmbeddedSignup(context, body), { status: 201 });
 // no body → 200 connection. Owner or admin of the business that owns it. The browser sends a POST with no body, so (like the gap routes) these
 // authenticate themselves and let the app turn a thrown error into the envelope.
 const whatsappRecheck: RouteHandler = async (request, deps, params) => {
@@ -263,6 +266,7 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/kb/gaps/:id/dismiss", browser: true, methods: { POST: kbDismissGap } },
   { path: "/api/whatsapp/webhook-config", browser: true, methods: { GET: (request, deps) => whatsappWebhookConfig(request, deps.userClient) } },
   { path: "/api/whatsapp/manual", browser: true, methods: { POST: (request, deps) => whatsappManualConnect(request, deps.userClient) } },
+  { path: "/api/onboarding/whatsapp/embedded-signup", browser: true, methods: { POST: (request, deps) => whatsappEmbeddedSignup(request, deps.userClient) } },
   { path: "/api/whatsapp/connections/:id/recheck", browser: true, methods: { POST: whatsappRecheck } },
   { path: "/api/whatsapp/connections/:id/disconnect", browser: true, methods: { POST: whatsappDisconnect } },
   { path: "/api/admin/whatsapp/manual", browser: true, methods: { POST: (request, deps) => adminManualConnect(request, deps.userClient) } },

@@ -42,11 +42,17 @@ export type ConnectionRecord = {
   clientBusinessId: string | null;
   tokenEnc: string;
   tokenType: "business" | "system_user";
-  appSecretEnc: string;
+  /** The business's own app secret (manual_byo); null for a connection whose webhooks our own app signs. */
+  appSecretEnc: string | null;
   status: "active" | "failed";
   lastCheck: LastCheck;
   qualityRating: string | null;
   connectedBy: string;
+  /** Left out by a manual connection: `manual_byo`, and the columns keep their defaults. */
+  method?: "manual_byo" | "embedded_signup";
+  coexistence?: boolean;
+  messagingLimit?: string | null;
+  tokenExpiresAt?: Date | null;
 };
 
 export interface ManualConnectDb {
@@ -255,7 +261,7 @@ export async function connectManual(
 const PUBLIC_COLUMNS =
   "id, tenant_id, method, waba_id, phone_number_id, display_phone, verified_name, coexistence, status, last_check, quality_rating, messaging_limit, created_at";
 
-function realDb(): ManualConnectDb {
+export function realDb(): ManualConnectDb {
   const db = supabaseAdmin();
   const fail = (what: string) => new AppError("upstream_failed", `We couldn't ${what}. Try again in a moment.`);
   return {
@@ -280,7 +286,7 @@ function realDb(): ManualConnectDb {
     async save(r, replace) {
       const columns = {
         channel_id: r.channelId,
-        method: "manual_byo",
+        method: r.method ?? "manual_byo",
         waba_id: r.wabaId,
         phone_number_id: r.phoneNumberId,
         display_phone: r.displayPhone,
@@ -293,6 +299,9 @@ function realDb(): ManualConnectDb {
         last_check: r.lastCheck,
         quality_rating: r.qualityRating,
         connected_by: r.connectedBy,
+        ...(r.coexistence === undefined ? {} : { coexistence: r.coexistence }),
+        ...(r.messagingLimit === undefined ? {} : { messaging_limit: r.messagingLimit }),
+        ...(r.tokenExpiresAt === undefined ? {} : { token_expires_at: r.tokenExpiresAt === null ? null : r.tokenExpiresAt.toISOString() }),
       };
       // Both writes are filtered by the business, so a retry can never touch another business's row.
       const { error } = replace
