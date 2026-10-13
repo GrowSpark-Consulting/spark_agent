@@ -47,6 +47,16 @@ export function describeBookingService(services: Service[], chosenId: string | n
   return { kind: "several", services: active, chosen, stale: chosenId !== null && chosen === null };
 }
 
+/**
+ * Whether `serviceId` may be saved as the choice: no choice (null) always may; an id only when it names one of the active services in
+ * `services`. A first check on the page, so a service switched off in another tab is caught before the write; the assistant checks again
+ * when it books (reply.ts `chosenService`), and Row-level security decides who may write at all.
+ */
+export function isSelectableChoice(services: Service[], serviceId: string | null): boolean {
+  if (serviceId === null) return true;
+  return ServiceId.safeParse(serviceId).success && services.some((s) => s.active && s.id === serviceId);
+}
+
 async function readSettings(client: SupabaseClient, tenantId: string): Promise<unknown> {
   const { data, error } = await client.from("tenants").select(COLUMNS).eq("id", tenantId).maybeSingle();
   if (error) throw error;
