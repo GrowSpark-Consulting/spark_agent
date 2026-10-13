@@ -4,7 +4,8 @@ import { z } from "zod";
 // GET /api/billing/balance and GET /api/dashboard/summary (backend/src/billing/account-status.ts, dashboard/summary.ts).
 
 /** Why the assistant is not replying right now, or null when it can. */
-export const AI_PAUSED_REASONS = ["paused", "cancelled", "trial_ended", "no_credits"] as const;
+/** whatsapp_not_connected: a paying business has no active WhatsApp number to reply on (never connected, or it failed). */
+export const AI_PAUSED_REASONS = ["paused", "cancelled", "trial_ended", "whatsapp_not_connected", "no_credits"] as const;
 
 export const AccountStatus = z.object({
   status: z.enum(["trial", "active", "paused", "cancelled"]),

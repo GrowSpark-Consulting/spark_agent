@@ -760,7 +760,9 @@ Plain lists (leads, conversations, bookings, services) are read directly under R
 - `GET /api/billing/balance` → `AccountStatus` (`backend/src/billing/account-status.ts`): `status`, `plan { key, name, monthlyCredits }`,
   `credits { plan, topup, total }` (`credit_balance`), `creditsGranted` (the meter's denominator: grants of plan, trial,
   top-up and admin credits whose bucket is still live), `renewsAt` (the subscription's period end, active businesses only),
-  `trialEndsAt`, `aiPaused` with `aiPausedReason` (`paused`, `cancelled`, `trial_ended` or `no_credits`), `lowCredits` (a
+  `trialEndsAt`, `aiPaused` with `aiPausedReason` (in this order: `paused`, `cancelled`, `trial_ended`,
+  `whatsapp_not_connected` (a paying business with no active WhatsApp number, never connected or failed; a trial replies
+  through the shared demo number, so never) or `no_credits`), `lowCredits` (a
   fifth or less of the monthly credits left, as the credit alerts use) and `aiAutoReply` (the AI-replies switch, apart from
   a pause).
 - `GET /api/dashboard/summary` → `DashboardSummary` (`backend/src/dashboard/summary.ts`), in the business's time zone:
