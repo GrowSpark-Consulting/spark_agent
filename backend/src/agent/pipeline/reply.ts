@@ -474,7 +474,12 @@ ${consentNotice(noticeLanguage, deps.privacyPolicyUrl)}` : exit.body, buttons: [
       }
       console.error(`${TAG} the reply could not be sent (${outcome.error.code})`);
       // Waiting can fix it (a blip, a rate limit): the step is tried again; anything else is final.
-      if (outcome.error.retryable) throw new Error(`the reply could not be sent (${outcome.error.code})`);
+      if (outcome.error.retryable) {
+        // A count and nothing else (no ids, phone numbers or text): how often this happens, to judge whether saving the written reply between attempts would ever pay.
+        // The last attempt of a run is counted too; the "gave up" line of the function's failure handler follows it.
+        console.log(`${TAG} reply send retried`);
+        throw new Error(`the reply could not be sent (${outcome.error.code})`);
+      }
       return { status: "not_sent", reason: "send_failed" };
   }
 }
