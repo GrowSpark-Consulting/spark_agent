@@ -104,6 +104,7 @@ begin
     insert into public.credit_ledger (tenant_id, delta, reason) values (t, 300, 'trial_grant');
     insert into public.handoffs (tenant_id, conversation_id, trigger, priority) values (t, cv, 'asked_human', 'normal');
     insert into public.route_codes (code, kind, tenant_id) values ('ISO-' || upper(s), 'trial', t);
+    insert into public.demo_visitors (phone, tenant_id, routed_at, msg_day, msg_count) values ('+91980000020' || n, t, now(), current_date, 1);
     insert into public.audit_logs (tenant_id, actor, action) values (t, 'system', 'test.fixture');
     insert into public.whatsapp_connections (id, tenant_id, channel_id, method, waba_id, phone_number_id, token_enc, token_type, connected_by)
       values (wc, t, ch, 'manual_byo', 'waba-iso-' || s, 'pn-iso-' || s, 'enc', 'business', u::text);

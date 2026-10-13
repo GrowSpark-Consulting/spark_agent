@@ -4,7 +4,7 @@
 -- is checked by hand with two sessions and relies on conversations_one_open_idx.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(62);
+select plan(68);
 
 insert into public.tenants (id, name, vertical) values
   ('d0000000-0000-0000-0000-00000000000a', 'Inbound A', 'test-pack'),
@@ -184,6 +184,31 @@ select throws_ok($$select pg_temp.inbound('d0000000-0000-0000-0000-00000000000b'
   'PA409', null, 'a message id that belongs to another business is refused');
 select is((select count(*) from public.messages where tenant_id = 'd0000000-0000-0000-0000-00000000000b' and provider_msg_id = 'wamid.pg1'),
   0::bigint, 'and nothing is stored under the other business');
+
+-- The shared demo number (0031): a channel of one of our own platform connections may carry another business's chat,
+-- a client's own (manual_byo) channel may not.
+insert into public.channels (id, tenant_id, type) values
+  ('d2000000-0000-0000-0000-0000000000c1', 'd0000000-0000-0000-0000-00000000000a', 'whatsapp'),
+  ('d2000000-0000-0000-0000-0000000000c2', 'd0000000-0000-0000-0000-00000000000a', 'whatsapp');
+insert into public.whatsapp_connections (tenant_id, channel_id, method, waba_id, phone_number_id, token_enc, token_type, connected_by) values
+  ('d0000000-0000-0000-0000-00000000000a', 'd2000000-0000-0000-0000-0000000000c1', 'platform', 'pg-demo-waba', 'pg-demo-pnid', 'placeholder', 'system_user', 'system:seed'),
+  ('d0000000-0000-0000-0000-00000000000a', 'd2000000-0000-0000-0000-0000000000c2', 'manual_byo', 'pg-own-waba', 'pg-own-pnid', 'placeholder', 'system_user', 'system:seed');
+
+create temp table rp as
+  select * from pg_temp.inbound('d0000000-0000-0000-0000-00000000000b', 'd2000000-0000-0000-0000-0000000000c1',
+    '+919800000401', 'Visitor', 'wamid.pgP1', '2026-10-06 10:00:00+00');
+select is((select inserted from rp), true, 'a platform channel carries another business''s chat');
+select is((select tenant_id || '/' || channel_id from public.conversations where id = (select conversation_id from rp)),
+  'd0000000-0000-0000-0000-00000000000b/d2000000-0000-0000-0000-0000000000c1',
+  'the chat belongs to the routed business and sits on the platform channel');
+select is((select inserted from pg_temp.inbound('d0000000-0000-0000-0000-00000000000b', 'd2000000-0000-0000-0000-0000000000c1',
+    '+919800000401', 'Visitor', 'wamid.pgP1', '2026-10-06 10:00:00+00')), false, 'a replay on the platform channel stores nothing new');
+select throws_ok($$select pg_temp.inbound('d0000000-0000-0000-0000-00000000000a', 'd2000000-0000-0000-0000-0000000000c1', '+919800000402', null, 'wamid.pgP1', now())$$,
+  'PA409', null, 'a message id of another business is still refused on the platform channel');
+select throws_ok($$select pg_temp.inbound('d0000000-0000-0000-0000-0000000000ff', 'd2000000-0000-0000-0000-0000000000c1', '+919800000403', null, 'wamid.pgP2', now())$$,
+  'PA404', null, 'a business that does not exist is refused on the platform channel');
+select throws_ok($$select pg_temp.inbound('d0000000-0000-0000-0000-00000000000b', 'd2000000-0000-0000-0000-0000000000c2', '+919800000404', null, 'wamid.pgP3', now())$$,
+  'PA404', null, 'a client''s own channel is still refused for another business');
 
 -- Delivery statuses -----------------------------------------------------------------------------------
 
