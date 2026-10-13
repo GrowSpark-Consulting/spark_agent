@@ -97,6 +97,7 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   "POST /api/billing/checkout": "not called yet: the Billing screen's Choose plan button (PayU checkout with auto-debit)",
   "POST /api/billing/topup": "not called yet: the Billing screen's top-up button (PayU one-time payment)",
   "POST /api/billing/setup-fee": "not called yet: the Billing screen's setup add-on (PayU one-time payment)",
+  "POST /api/billing/change-plan": "not called yet: the Billing screen's plan change (an upgrade opens PayU; a downgrade is scheduled)",
   "GET /api/billing/payments/:id": "not called yet: the Billing screen polls it after PayU sends the payer back with ?payment=<id>",
   "POST /api/billing/payu/return": "PayU's checkout page posts the payer's browser here (a navigation); it redirects to /dashboard/billing",
   "POST /api/webhooks/payu": "PayU calls it: payment results (verified with PayU before anything changes)",

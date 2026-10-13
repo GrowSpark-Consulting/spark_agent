@@ -12,6 +12,7 @@ import {
   paymentHash,
   paymentRequest,
   preDebit,
+  revokeMandate,
   siDetails,
   verifyPayment,
   withGst,
@@ -200,5 +201,21 @@ describe("renewals: pre-debit notice and charge", () => {
     const failed = { status: 1, details: { R1abc: { status: "failed", field9: "Basic authentication check failed" } } };
     expect(await chargeMandate(config, charge, fakeFetch(failed).impl)).toMatchObject({ state: "failed", reason: "Basic authentication check failed" });
     await expect(chargeMandate(config, charge, fakeFetch({ status: 0, msg: "Invalid Hash." }).impl)).rejects.toMatchObject({ code: "rejected" });
+  });
+});
+
+describe("revokeMandate", () => {
+  it("uses UPI's own command, and the shared one for cards and e-NACH", async () => {
+    const upi = fakeFetch({ status: 1, action: "MANDATE_REVOKE", message: "Mandate Revoke request processed successfully" });
+    expect(await revokeMandate(config, { mandateId: "m-1", method: "upi", requestId: "X1" }, upi.impl)).toBe("revoked");
+    expect(Object.fromEntries(upi.posted[0].body)).toMatchObject({ command: "upi_mandate_revoke", var1: JSON.stringify({ authpayuid: "m-1", requestId: "X1" }) });
+    const card = fakeFetch({ status: 1, message: "Mandate Revoked Successfully" });
+    await revokeMandate(config, { mandateId: "m-2", method: "card", requestId: "X2" }, card.impl);
+    expect(card.posted[0].body.get("command")).toBe("mandate_revoke");
+  });
+
+  it("counts a mandate that is no longer active as done, and throws anything else", async () => {
+    expect(await revokeMandate(config, { mandateId: "m-1", method: "enach", requestId: "X3" }, fakeFetch({ status: 0, message: "Mandate is not active" }).impl)).toBe("already");
+    await expect(revokeMandate(config, { mandateId: "m-1", method: "card", requestId: "X4" }, fakeFetch({ status: 0, message: "Try later" }).impl)).rejects.toMatchObject({ code: "rejected" });
   });
 });

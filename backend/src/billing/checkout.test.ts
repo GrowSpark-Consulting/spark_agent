@@ -6,7 +6,7 @@ import type { FetchLike, PayuConfig } from "./payu";
 const invalidateFeatureCache = vi.fn<(tenantId?: string) => void>();
 vi.mock("../features/is-enabled", () => ({ invalidateFeatureCache }));
 
-const { handlePayuReturn, handlePayuWebhook, paymentStatus, startCheckout, startSetupFee, startTopup, syncPayment } = await import("./checkout");
+const { changePlan, handlePayuReturn, handlePayuWebhook, paymentStatus, startCheckout, startSetupFee, startTopup, syncPayment } = await import("./checkout");
 type Deps = Parameters<typeof startCheckout>[2] & object;
 
 const TENANT = "5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d";
@@ -241,5 +241,65 @@ describe("GET /api/billing/payments/:id", () => {
   it("does not know another business's payment, or an id that isn't one", async () => {
     await expect(paymentStatus(context(), PAYMENT, deps({ payments: { data: null, error: null } }).d)).rejects.toMatchObject({ code: "not_found" });
     await expect(paymentStatus(context(), "nope", deps({}).d)).rejects.toMatchObject({ code: "not_found" });
+  });
+});
+
+describe("POST /api/billing/change-plan", () => {
+  const live = (cycle = "monthly"): FakeDbResponse => ({ data: { billing_cycle: cycle }, error: null });
+  const change = (action: string, extra: Record<string, unknown> = {}): FakeDbResponse => ({
+    data: [{ action, payment_id: null, amount_paise: null, mandate_paise: null, effective_at: "2026-10-28T06:00:00+00:00", ...extra }],
+    error: null,
+  });
+  const tables = (over: Record<string, FakeDbResponse> = {}) => ({ subscriptions: live(), plans: plan("growth", "Growth", 5999, 5000), memberships: ownerPhone, ...over });
+
+  it("upgrades now: the rest of the period's difference on PayU, approving the new full price", async () => {
+    const { d, calls } = deps(tables({ "rpc:begin_plan_change": change("upgrade", { payment_id: PAYMENT, amount_paise: 2065_00, mandate_paise: 7078_82 }) }));
+    const out = await changePlan(context(), { planKey: "growth" }, d);
+    expect(out.action).toBe("upgrade");
+    if (out.action !== "upgrade") return;
+    expect(rpcArgs(calls, "begin_plan_change")).toMatchObject({ p_tenant_id: TENANT, p_plan_key: "growth", p_created_by: OWNER });
+    expect(out.paymentId).toBe(PAYMENT);
+    expect(out.payu.fields).toMatchObject({ amount: "2065.00", productinfo: "Spark Agent upgrade to Growth (monthly)", si: "4" });
+    expect(JSON.parse(out.payu.fields.si_details)).toMatchObject({ billingAmount: "7078.82", billingCycle: "MONTHLY" });
+    expect(out.payu.fields.txnid).toBe(rpcArgs(calls, "begin_plan_change")?.p_txnid);
+  });
+
+  it("schedules a downgrade, cancels one, or changes nothing, without needing PayU", async () => {
+    const down = deps(tables({ plans: plan("starter", "Starter", 2499, 1500), "rpc:begin_plan_change": change("scheduled") }), { payu: null });
+    expect(await changePlan(context(), { planKey: "starter" }, down.d)).toEqual({ action: "scheduled", planKey: "starter", effectiveAt: "2026-10-28T06:00:00.000Z" });
+    expect(await changePlan(context(), { planKey: "growth" }, deps(tables({ "rpc:begin_plan_change": change("kept") }), { payu: null }).d)).toEqual({ action: "kept" });
+    expect(await changePlan(context(), { planKey: "growth" }, deps(tables({ "rpc:begin_plan_change": change("unchanged") }), { payu: null }).d)).toEqual({ action: "unchanged" });
+  });
+
+  it("is for the owner, needs a plan to change, keeps the cycle, and puts a failed renewal first", async () => {
+    await expect(changePlan(context("admin"), { planKey: "pro" }, deps(tables()).d)).rejects.toMatchObject({ code: "forbidden" });
+    await expect(changePlan(context(), { planKey: "pro" }, deps(tables({ subscriptions: { data: null, error: null } })).d)).rejects.toMatchObject({ code: "conflict" });
+    await expect(changePlan(context(), { planKey: "pro", cycle: "yearly" }, deps(tables()).d)).rejects.toMatchObject({ code: "not_available" });
+    const behind = deps(tables({ "rpc:begin_plan_change": { data: null, error: { code: "PA428", message: "a renewal is past due" } } }));
+    await expect(changePlan(context(), { planKey: "pro" }, behind.d)).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("try it again automatically") });
+  });
+
+  it("revokes the replaced mandate at PayU once the upgrade is paid", async () => {
+    const posted: { command: string; var1: string }[] = [];
+    const fetch = vi.fn<FetchLike>(async (_url, init) => {
+      const body = new URLSearchParams(init.body);
+      const command = body.get("command") ?? "";
+      const var1 = body.get("var1") ?? "";
+      posted.push({ command, var1 });
+      const answer = command === "verify_payment" ? { status: 1, transaction_details: { [var1]: { mihpayid: "new-m", status: "success", mode: "CC", amt: "2065.00" } } } : { status: 1, message: "Mandate Revoke request processed successfully" };
+      return { ok: true, status: 200, json: async () => answer };
+    });
+    const { d } = deps(
+      {
+        payments: [{ data: { id: PAYMENT, status: "created" }, error: null }, { data: { subscriptions: { replaces_subscription_id: "old-sub" } }, error: null }],
+        subscriptions: { data: { mandate_id: "old-m", mandate_method: "upi" }, error: null },
+        "rpc:settle_payment": { data: [{ payment_id: PAYMENT, tenant_id: TENANT, kind: "plan_change", status: "success", applied: true }], error: null },
+      },
+      { fetch },
+    );
+    expect(await syncPayment("C1abc", d)).toEqual({ paymentId: PAYMENT, status: "success" });
+    expect(invalidateFeatureCache).toHaveBeenCalledWith(TENANT);
+    expect(posted.map((p) => p.command)).toEqual(["verify_payment", "upi_mandate_revoke"]);
+    expect(JSON.parse(posted[1].var1)).toMatchObject({ authpayuid: "old-m" });
   });
 });
