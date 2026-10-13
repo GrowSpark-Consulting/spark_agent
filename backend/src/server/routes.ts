@@ -3,6 +3,7 @@ import { handleHandoffLink } from "../agent/handoff/takeover";
 import { getLeadCard } from "../agent/leadcard/route";
 import { suggestReply } from "../agent/leadcard/suggest";
 import { accountStatus } from "../billing/account-status";
+import { handlePayuReturn, handlePayuWebhook, paymentStatus, startCheckout, startSetupFee, startTopup } from "../billing/checkout";
 import { getBalance } from "../billing/credits";
 import { startTrialFor } from "../billing/start-trial";
 import { createTrialTenant } from "../billing/trial";
@@ -113,6 +114,23 @@ const conversationSuggest: RouteHandler = async (request, deps, params) => {
 };
 // → AccountStatus: the balance, the meter's denominator, renewal and trial dates, and whether the assistant is paused. Any member.
 const billingBalance = tenantRoute(({ context }) => accountStatus(context));
+// PayU billing (billing/checkout.ts, decision 20). Owner only; each answers PayuCheckout, which the browser posts to PayU.
+// { planKey, cycle, phone? }: the plan's first payment, which also approves the auto-debit.
+const billingCheckout = tenantRoute(({ context, body }) => startCheckout(context, body));
+// { phone? } or no body: 1,000 credits, for a business on a paid plan. Like the other body-optional routes, these
+// authenticate themselves and let the app turn a thrown error into the envelope.
+const billingTopup: RouteHandler = async (request, deps) => {
+  const { context } = await requireTenant(request, deps.userClient);
+  return Response.json(await startTopup(context, await optionalJson(request)));
+};
+// { phone? } or no body: the assisted-onboarding setup fee, once.
+const billingSetupFee: RouteHandler = async (request, deps) => {
+  const { context } = await requireTenant(request, deps.userClient);
+  return Response.json(await startSetupFee(context, await optionalJson(request)));
+};
+// → PaymentView: one payment, for the Billing screen after PayU sends the payer back (asks PayU again while not final). Any member.
+const billingPayment: RouteHandler = (request, deps, params) =>
+  tenantRoute(({ context, params: p }) => paymentStatus(context, p.id))(request, deps.userClient, params);
 // → DashboardSummary: the month's numbers, last night's chats, hot leads and today's bookings (staff: their own). Any member.
 const homeSummary = tenantRoute(({ context }) => dashboardSummary(context));
 // → FeatureList: every feature with what the plan includes, the business's switch and settings, and the credits it
@@ -220,6 +238,15 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/conversations/:id/lead-card", browser: true, methods: { GET: conversationLeadCard } },
   { path: "/api/conversations/:id/suggest", browser: true, methods: { POST: conversationSuggest } },
   { path: "/api/billing/balance", browser: true, methods: { GET: (request, deps) => billingBalance(request, deps.userClient) } },
+  { path: "/api/billing/checkout", browser: true, methods: { POST: (request, deps) => billingCheckout(request, deps.userClient) } },
+  { path: "/api/billing/topup", browser: true, methods: { POST: billingTopup } },
+  { path: "/api/billing/setup-fee", browser: true, methods: { POST: billingSetupFee } },
+  { path: "/api/billing/payments/:id", browser: true, methods: { GET: billingPayment } },
+  // PayU's surl and furl: the payer's browser posts here from PayU's page (a navigation, not a fetch, so not `browser`).
+  // Nothing posted is trusted: the server asks PayU, then redirects to the Billing screen.
+  { path: "/api/billing/payu/return", methods: { POST: (request) => handlePayuReturn(request) } },
+  // PayU's webhook, server to server: the posted txnid is verified with PayU before anything changes.
+  { path: "/api/webhooks/payu", methods: { POST: (request) => handlePayuWebhook(request) } },
   { path: "/api/dashboard/summary", browser: true, methods: { GET: (request, deps) => homeSummary(request, deps.userClient) } },
   { path: "/api/features", browser: true, methods: { GET: (request, deps) => featureList(request, deps.userClient) } },
   { path: "/api/features/:key", browser: true, methods: { PATCH: featureUpdate } },

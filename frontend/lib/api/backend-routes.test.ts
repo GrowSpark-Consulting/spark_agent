@@ -93,6 +93,13 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   "PUT /api/inngest": "Inngest calls it: syncs the function list",
   "GET /h/:token": "a staff member's browser follows the link in a WhatsApp alert; it redirects to /dashboard/inbox?chat=<id>",
   "GET /api/calendar/google/callback": "Google redirects the browser here after consent; it redirects back to Booking setup with the outcome",
+  // PayU billing (Dev 2, decision 20). The Billing screen's buttons move these to FRONTEND_CALLS when they call them.
+  "POST /api/billing/checkout": "not called yet: the Billing screen's Choose plan button (PayU checkout with auto-debit)",
+  "POST /api/billing/topup": "not called yet: the Billing screen's top-up button (PayU one-time payment)",
+  "POST /api/billing/setup-fee": "not called yet: the Billing screen's setup add-on (PayU one-time payment)",
+  "GET /api/billing/payments/:id": "not called yet: the Billing screen polls it after PayU sends the payer back with ?payment=<id>",
+  "POST /api/billing/payu/return": "PayU's checkout page posts the payer's browser here (a navigation); it redirects to /dashboard/billing",
+  "POST /api/webhooks/payu": "PayU calls it: payment results (verified with PayU before anything changes)",
 };
 
 function sourceFiles(dir: string): string[] {

@@ -394,7 +394,9 @@ UI: current plan, next bill + GST, daily usage chart, credit history, top-up pac
   ↓ data: AccountStatus, BillingOverview, LedgerEntry[]
   ↓ API: GET  /api/billing/balance (shell)                 BUILT · Dev 2
         RLS READ credit_ledger (or view)                  Dev 2
-        POST /api/billing/checkout | /topup | /change-plan HANDOVER · Dev 2 → PayU hosted checkout (decision 20)
+        POST /api/billing/checkout | /topup | /setup-fee  BUILT · Dev 2 → PayU hosted checkout (decision 20)
+        GET  /api/billing/payments/:id                    BUILT · Dev 2 (poll after PayU returns)
+        POST /api/billing/change-plan                     HANDOVER · Dev 2 (with the renewal job)
   ↓ loading: the browser leaves for PayU; PayU sends the payer back to the Billing screen with ?payment=<id>,
              which polls the payment until the server has verified it with PayU
   ↓ error: payment failed / cancelled → balance unchanged, toast

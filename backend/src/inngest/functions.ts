@@ -1,3 +1,4 @@
+import { billingRenewals } from "./billing-renewals";
 import { bookingReminders } from "./booking-reminders";
 import { connectionHealth, connectionHealthCheck } from "./connection-health";
 import { creditAlerts } from "./credit-alerts";
@@ -41,5 +42,6 @@ export const functions = [
   connectionHealth,
   connectionHealthCheck,
   tokenExpiry,
+  billingRenewals,
   demoReply,
 ];
