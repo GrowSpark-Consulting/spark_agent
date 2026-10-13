@@ -33,8 +33,8 @@ select results_eq($$select status, mandate_id, mandate_method, current_period_en
   $$values ('active'::text, '1001'::text, 'upi'::text, true)$$, 'the mandate is active, with PayU''s id and the payment method, for a month');
 select results_eq($$select status, plan_key from public.tenants where id = '0c100000-0000-0000-0000-000000000001'$$,
   $$values ('active'::text, 'starter'::text)$$, 'the business is now active on Starter');
-select is((select sum(delta)::int from public.credit_ledger where tenant_id = '0c100000-0000-0000-0000-000000000001' and reason = 'plan_grant'), 1500,
-  'the first month''s credits are granted');
+select results_eq($$select sum(delta)::int, bool_and(expires_at > now() + interval '58 days') from public.credit_ledger where tenant_id = '0c100000-0000-0000-0000-000000000001' and reason = 'plan_grant'$$,
+  $$values (1500, true)$$, 'the first month''s credits are granted, lasting to the end of the next month (rollover)');
 
 select results_eq($$select status, applied from public.settle_payment('Sone', 'success', '1001', 'UPI', 294882)$$,
   $$values ('success'::text, false)$$, 'the same success again (webhook after the return) applies nothing');

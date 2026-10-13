@@ -164,8 +164,9 @@ begin
            charge_attempts = 0, pre_debit_for = null
      where s.id = p.subscription_id;
     update public.tenants t set status = 'active', plan_key = p.plan_key where t.id = p.tenant_id;
-    -- Credits are monthly whatever the billing cycle; an annual plan's later months come from the renewal job.
-    perform public.renew_plan_credits(p.tenant_id, p.credits, now() + interval '1 month', p.id);
+    -- Credits are monthly whatever the billing cycle; an annual plan's later months come from the renewal job. Like every
+    -- plan grant (0005), the month's credits last to the end of the NEXT month: one month of rollover.
+    perform public.renew_plan_credits(p.tenant_id, p.credits, now() + interval '2 months', p.id);
   end if;
 
   insert into public.audit_logs (tenant_id, actor, action, entity, entity_id, diff)
