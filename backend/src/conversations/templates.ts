@@ -7,9 +7,10 @@ import { templateVariableCount } from "../notify/send";
 
 // GET /api/conversations/:id/templates: the approved templates staff can send in this chat, for the inbox's template
 // picker. A template belongs to one WhatsApp number (whatsapp_templates.connection_id), and the browser cannot tell which
-// number a chat is on (whatsapp_connections_public has no channel_id), so the server picks it the way notify.send does:
-// the active connection on the chat's channel (notify_target, 0009). Sending one is POST /api/conversations/:id/messages
-// with { template: { name, language, params } }. Any member.
+// number a chat is on (whatsapp_connections_public has no channel_id), so the server asks notify_target, which notify.send
+// sends through: the business's active number on the chat's channel, or for a routed trial the platform number its
+// customer wrote to (0032). That number's templates belong to whichever business owns the connection, so they are read by
+// connection. Sending one is POST /api/conversations/:id/messages with { template: { name, language, params } }. Any member.
 
 export interface ConversationTemplate {
   id: string;
@@ -44,28 +45,24 @@ export function templateBody(components: unknown): string | null {
 
 export async function conversationTemplates(context: TenantContext, conversationId: string, db: SupabaseClient = supabaseAdmin()): Promise<ConversationTemplates> {
   if (!Id.safeParse(conversationId).success) throw new AppError("not_found", NOT_FOUND);
-  const tenantId = context.tenant.id;
-  const chat = await db.from("conversations").select("channel_id").eq("tenant_id", tenantId).eq("id", conversationId).maybeSingle();
-  if (chat.error) throw new Error(`conversation templates: chat read failed: ${chat.error.message}`);
-  if (!chat.data) throw new AppError("not_found", NOT_FOUND);
-  const channelId = z.object({ channel_id: z.string() }).parse(chat.data).channel_id;
-
-  const connection = await db.from("whatsapp_connections").select("id").eq("tenant_id", tenantId).eq("channel_id", channelId).eq("status", "active").limit(1);
-  if (connection.error) throw new Error(`conversation templates: connection read failed: ${connection.error.message}`);
-  const [active] = z.array(z.object({ id: z.string() })).parse(connection.data ?? []);
-  if (!active) return { connectionId: null, templates: [] };
+  const target = await db.rpc("notify_target", { p_tenant_id: context.tenant.id, p_conversation_id: conversationId, p_to: null });
+  if (target.error) {
+    if (target.error.code === "PA404") throw new AppError("not_found", NOT_FOUND);
+    if (target.error.code === "PA409") return { connectionId: null, templates: [] };
+    throw new Error(`conversation templates: notify_target failed: ${target.error.message}`);
+  }
+  const [active] = z.array(z.object({ connection_id: z.string() })).length(1).parse(target.data);
 
   const rows = await db
     .from("whatsapp_templates")
     .select("id, name, language, category, components")
-    .eq("tenant_id", tenantId)
-    .eq("connection_id", active.id)
+    .eq("connection_id", active.connection_id)
     .eq("status", "approved")
     .order("name", { ascending: true })
     .order("language", { ascending: true });
   if (rows.error) throw new Error(`conversation templates: templates read failed: ${rows.error.message}`);
   return {
-    connectionId: active.id,
+    connectionId: active.connection_id,
     templates: z
       .array(Row)
       .parse(rows.data ?? [])
