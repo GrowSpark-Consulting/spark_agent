@@ -20,7 +20,7 @@ describe("a voice note on its own", () => {
     const out = await replyTurn(r.step, w.turn, noText, NOW, w.deps);
     expect(out).toMatchObject({ case: "voice_note", reply: { status: "sent", source: "fixed" }, handoff: null, voiceNote: "alerted" });
     expect(w.send).toHaveBeenCalledOnce();
-    expect(w.send.mock.calls[0]).toEqual([A, "ai_reply", { conversationId: CONV, text: fixedText("voice_note", "en") }]);
+    expect(w.send.mock.calls[0]).toEqual([A, "ai_reply", { conversationId: CONV, text: fixedText("voice_note", "en"), idempotencyKey: expect.stringMatching(/^reply:[0-9a-f-]{36}$/) }]);
     expect(w.complete).not.toHaveBeenCalled();
     expect(r.ran).toEqual(["plan", "reply", "voice-alert"]);
   });

@@ -136,7 +136,7 @@ describe("an answer from the knowledge base", () => {
     const out = await replyTurn(r.step, w.turn, understood(found), Date.now(), w.deps);
     expect(out).toMatchObject({ case: "answered_from_kb", reply: { status: "sent", source: "model" }, handoff: null });
     expect(w.send).toHaveBeenCalledOnce();
-    expect(w.send).toHaveBeenCalledWith(A, "ai_reply", { conversationId: CONV, text: "Yes, we do site visits. Shall we plan one?" });
+    expect(w.send).toHaveBeenCalledWith(A, "ai_reply", { conversationId: CONV, text: "Yes, we do site visits. Shall we plan one?", idempotencyKey: `reply:${M1}` });
     expect(w.audits).toEqual([{ tenantId: A, actor: "ai", action: "message.answered", entity: "message", entityId: M1 }]);
     expect(r.ran).toEqual(["plan", "reply"]);
   });
@@ -513,6 +513,109 @@ describe("never two replies", () => {
     const out = await replyTurn(runner().step, down.turn, understood(found), Date.now(), down.deps);
     expect(out.reply.status).toBe("sent");
     expect(down.send).toHaveBeenCalledOnce();
+  });
+});
+
+describe("the reply goes out under a key that names the turn (notify.send dedupes on it: a retry after Meta accepted the reply cannot send it twice)", () => {
+  /** What notify.send does with a key: the first send is delivered, a repeat of the key returns that first outcome and delivers nothing. */
+  function dedupe(w: ReturnType<typeof world>) {
+    const delivered = new Map<string, SendOutcome>();
+    w.send.mockImplementation(async (_tenant, _kind, payload) => {
+      const key = payload.idempotencyKey as string;
+      const earlier = delivered.get(key);
+      if (earlier) return earlier;
+      delivered.set(key, SENT);
+      return SENT;
+    });
+    return delivered;
+  }
+
+  it("is named by the turn's last message, and is a legal notify.send key (1 to 200 characters)", async () => {
+    const w = world();
+    await replyTurn(runner().step, w.turn, understood(found), Date.now(), w.deps);
+    const key = w.send.mock.calls[0][2].idempotencyKey;
+    expect(key).toBe(`reply:${M1}`);
+    expect(key?.length).toBeGreaterThan(0);
+    expect(key?.length).toBeLessThanOrEqual(200);
+  });
+
+  it("is a different key for a different turn: a later message is a new reply", async () => {
+    const later: FakeMessage = { id: M2, tenantId: A, conversationId: CONV, direction: "in", sender: "customer", kind: "text", createdAt: at(3), body: CUSTOMER_WORDS, meta: { agent: { extraction: { question: QUESTION } } } };
+    const w = world({ messages: [later] });
+    await replyTurn(runner().step, w.turn, understood(found), Date.now(), w.deps);
+    expect(w.send.mock.calls[0][2].idempotencyKey).toBe(`reply:${M2}`);
+  });
+
+  it("is the same on every attempt: a retry after a send that waiting can fix sends under the key of the first", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const w = world({ script: ["Yes!", "Yes again!"], send: (n) => (n === 1 ? { status: "failed", error: { code: "rate_limited", message: "x", retryable: true, outcomeUnknown: false } } : SENT) });
+    const r = runner();
+    await expect(replyTurn(r.step, w.turn, understood(found), Date.now(), w.deps)).rejects.toThrow(/could not be sent/);
+    await replyTurn(r.step, w.turn, understood(found), Date.now(), w.deps);
+    expect(w.send.mock.calls.map((c) => c[2].idempotencyKey)).toEqual([`reply:${M1}`, `reply:${M1}`]);
+  });
+
+  it("a run that died after the send was accepted, with the marker and the answered rows lost, delivers the reply once when it runs again", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const w = world({ script: ["Yes, we do site visits.", "Yes, we do site visits, shall we plan one?"], auditFailures: 99 });
+    const delivered = dedupe(w);
+    const original = w.store.saveAgentMeta.bind(w.store);
+    w.store.saveAgentMeta = async (...args) => {
+      if ((args[3] as { reply?: unknown }).reply !== undefined) throw new Error("the marker could not be written");
+      return original(...args);
+    };
+    await replyTurn(runner().step, w.turn, understood(found), Date.now(), w.deps); // delivered; nothing could be recorded
+    const again = await replyTurn(runner().step, w.turn, understood(found), Date.now(), w.deps); // the retry: nothing says it was answered
+    expect(again.reply.status).toBe("sent");
+    expect(w.send).toHaveBeenCalledTimes(2);
+    expect([...delivered.keys()]).toEqual([`reply:${M1}`]); // one message reached the customer
+  });
+
+  it("the buttons refused and the plain-text line delivered, then a replay that lost its records: one message reaches the customer (the replay's buttons find the text under the shared key)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const unclear = () => understood({ outcome: "skipped" }, { intent: "unclear_exit", confidence: 0.7 });
+    const refused: SendOutcome = { status: "failed", error: { code: "validation_failed", message: "x", retryable: false, outcomeUnknown: false } };
+    const w = world({ auditFailures: 99 });
+    const recorded = new Set<string>();
+    let delivered = 0;
+    w.send.mockImplementation(async (_tenant, _kind, payload) => {
+      const key = payload.idempotencyKey as string;
+      if (recorded.has(key)) return SENT; // notify.send: an earlier send of this key is returned, nothing is sent
+      if (payload.interactive) return refused; // never recorded: nothing went out
+      recorded.add(key);
+      delivered++;
+      return SENT;
+    });
+    const original = w.store.saveAgentMeta.bind(w.store);
+    w.store.saveAgentMeta = async (...args) => {
+      if ((args[3] as { reply?: unknown }).reply !== undefined) throw new Error("the marker could not be written");
+      return original(...args);
+    };
+    await replyTurn(runner().step, w.turn, unclear(), Date.now(), w.deps); // buttons refused, text delivered, nothing recorded
+    expect(w.send).toHaveBeenCalledTimes(2);
+    await replyTurn(runner().step, w.turn, unclear(), Date.now(), w.deps); // the retry starts with the buttons again
+    expect(w.send.mock.calls.map((c) => c[2].idempotencyKey)).toEqual([`reply:${M1}`, `reply:${M1}`, `reply:${M1}`]);
+    expect(w.send).toHaveBeenCalledTimes(3); // the buttons, found as sent: no text is sent again
+    expect(delivered).toBe(1);
+  });
+
+  it("the safe line after a run gave up has a key of its own, named by the message that started the run: it never shares a reply's name, whatever else is waiting", async () => {
+    const image: FakeMessage = { id: M2, tenantId: A, conversationId: CONV, direction: "in", sender: "customer", kind: "image", createdAt: at(1), body: null, meta: {} };
+    const text: FakeMessage = { id: M1, tenantId: A, conversationId: CONV, direction: "in", sender: "customer", kind: "text", createdAt: at(3), body: "price?", meta: {} };
+    const w = world({ messages: [text, image] });
+    expect(await answerAfterFailure({ tenantId: A, conversationId: CONV, messageId: M1 }, 15_000, w.deps)).toBe("sent");
+    expect(w.send.mock.calls[0][2].idempotencyKey).toBe(`gave_up:${M1}`);
+  });
+
+  it("the safe line is sent under the same key if the failure handler runs twice for the same message", async () => {
+    const w = world();
+    const delivered = dedupe(w);
+    const ids = { tenantId: A, conversationId: CONV, messageId: M1 };
+    await answerAfterFailure(ids, 15_000, w.deps);
+    w.answered.clear(); // as if the answered rows had not been written
+    await answerAfterFailure(ids, 15_000, w.deps);
+    expect(w.send.mock.calls.map((c) => c[2].idempotencyKey)).toEqual([`gave_up:${M1}`, `gave_up:${M1}`]);
+    expect([...delivered.keys()]).toEqual([`gave_up:${M1}`]);
   });
 });
 
@@ -976,7 +1079,9 @@ describe("the exit question as two reply buttons", () => {
     const w = world({ send: (n) => (n === 1 ? refused : SENT) });
     const out = await replyTurn(runner().step, w.turn, unclear(), Date.now(), w.deps);
     expect(w.send).toHaveBeenCalledTimes(2);
-    expect(w.send.mock.calls[1][2]).toEqual({ conversationId: CONV, text: fixedText("exit_question", "en") });
+    // the buttons and the plain-text line are two forms of ONE reply and only one of them is ever recorded: they share the key, so a replay finds whichever went out
+    expect(w.send.mock.calls[0][2].idempotencyKey).toBe(`reply:${M1}`);
+    expect(w.send.mock.calls[1][2]).toEqual({ conversationId: CONV, text: fixedText("exit_question", "en"), idempotencyKey: `reply:${M1}` });
     expect(out.reply).toMatchObject({ status: "sent" });
     expect(w.audits.filter((a) => a.action === "message.answered")).toHaveLength(1);
 
@@ -992,7 +1097,7 @@ describe("the exit question as two reply buttons", () => {
   it("is plain text when the business has the team handover off: no button leads nowhere", async () => {
     const w = world({ agentSettings: { handoffTriggers: [{ key: "asked_human", enabled: false }] } });
     await replyTurn(runner().step, w.turn, unclear(), Date.now(), w.deps);
-    expect(w.send.mock.calls[0][2]).toEqual({ conversationId: CONV, text: fixedText("exit_prompt", "en") });
+    expect(w.send.mock.calls[0][2]).toEqual({ conversationId: CONV, text: fixedText("exit_prompt", "en"), idempotencyKey: `reply:${M1}` });
   });
 
   it("a tap on Talk to the team hands the chat to a person", async () => {

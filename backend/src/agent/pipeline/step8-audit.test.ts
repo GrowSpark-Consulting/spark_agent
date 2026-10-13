@@ -14,7 +14,7 @@ import type { Retrieval, UnderstandResult } from "./understand";
 // target and the 25-second hard stop (docs/task-notes/2026-10-13-day6-dev1-step8-audit.md has the reading and the findings). reply.test.ts covers the send and the
 // record case by case; this file pins what it does not, and marks the gaps the audit found.
 //
-// `it.fails` is a KNOWN GAP: the test describes what should hold, and it passes only while the code does not do it. When a fix lands it starts failing, which is the
+// (The first gap, the missing idempotency key, is closed: that test is an ordinary test below.) `it.fails` is a KNOWN GAP: the test describes what should hold, and it passes only while the code does not do it. When a fix lands it starts failing, which is the
 // reminder to turn it into an ordinary `it`. Nothing here changes the code, a prompt or the agent's behaviour.
 
 const A = "e0000000-0000-0000-0000-00000000000a";
@@ -145,16 +145,16 @@ describe("the turn's clock and the model calls inside it", () => {
   });
 });
 
-describe("KNOWN GAPS (the audit's findings; each passes only while the gap exists)", () => {
-  it.fails("the reply is sent with an idempotency key that names the turn's last message, so a run that died after Meta accepted the reply cannot send it a second time (notify.send dedupes on the key; the reply is sent without one)", async () => {
+describe("the reply's idempotency key (was the audit's first gap; reply.test.ts has the cases)", () => {
+  it("the reply is sent with an idempotency key that names the turn's last message, so a run that died after Meta accepted the reply cannot send it a second time (notify.send dedupes on the key)", async () => {
     const w = world();
     await replyTurn(runner(), w.turn, understood, Date.now(), w.deps);
     expect(w.send).toHaveBeenCalledOnce();
-    const key = w.send.mock.calls[0][2].idempotencyKey;
-    expect(key).toEqual(expect.any(String)); // any stable name for the turn will do; the fix decides which
-    expect(key).not.toBe("");
+    expect(w.send.mock.calls[0][2].idempotencyKey).toBe(`reply:${M1}`);
   });
+});
 
+describe("KNOWN GAPS (the audit's findings; each passes only while the gap exists)", () => {
   it.fails("a retry of the reply step after a send that waiting can fix does not ask the reply model again (the text is written and sent in one step, so every retry writes it again: another model call, more latency, a different text)", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const w = world({ script: ["Yes, we do site visits.", "Yes, we do site visits, shall we plan one?"], send: (n) => (n === 1 ? RETRYABLE : SENT) });
