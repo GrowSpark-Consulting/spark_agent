@@ -96,7 +96,16 @@ create table public.whatsapp_templates (
 ```
 
 - RLS: members read their own tenant; only the server writes.
-- Dev 2's `createTemplate` inserts the row as `pending` after Dev 1's adapter submits the template to Meta.
+- **Built (13 Oct):** after a Graph submit succeeds, the caller stores the row with
+  `saveSubmittedTemplate(tenantId, { connectionId, name, language, category, components, meta: { id, status?, category? }, actor? })`
+  in `backend/src/notify/templates.ts` → `{ id, status }`. It serves both callers: `createTemplate` (once the adapter
+  can submit) and Dev 1's catalogue submission. Details:
+  - One row per number, name and language. Submitting again replaces the row with Meta's latest id and status.
+  - Meta's status and category from its answer win (`APPROVED` / `REJECTED`, otherwise `pending`).
+  - `components` is what was sent to Meta and must include the body text.
+  - The connection must belong to `tenantId`. For the shared platform number, that is the platform business.
+  - It writes a `template.submitted` audit row.
+  - A status webhook that arrives before the row exists finds nothing, so store the row as soon as Meta answers.
 - Dev 1's webhook, on `message_template_status_update`, calls Dev 2's
   `set_template_status(meta_template_id, status, reason)`. It never writes the table directly.
 
