@@ -73,25 +73,29 @@ type Conn = { id: string; tenantId: string; channelId: string; phoneNumberId: st
 const conn = (over: Partial<Conn> = {}): Conn => ({ id: "c1", tenantId: OWNER, channelId: CHANNEL, phoneNumberId: DEMO_PNID, wabaId: WABA, method: "platform", status: "active", ...over });
 
 type Decision = Awaited<ReturnType<NonNullable<Deps["demo"]>["route"]>>;
-function fakes(over: { connections?: Conn[]; decision?: Decision | Error; withDemo?: boolean; inserted?: boolean } = {}) {
+function fakes(over: { connections?: Conn[]; decision?: Decision | Error; withDemo?: boolean; inserted?: boolean; messageTenant?: string | null; storeError?: boolean } = {}) {
   const connections = over.connections ?? [conn()];
   const route = vi.fn(async () => {
     if (over.decision instanceof Error) throw over.decision;
     return over.decision ?? { action: "store" as const, tenantId: ROUTED };
   });
+  const messageTenant = vi.fn<(args: { providerMsgId: string; channelId: string }) => Promise<string | null>>(async () => (over.messageTenant === undefined ? ROUTED : over.messageTenant));
   const deps = {
     findConnections: vi.fn(async (ids: string[]) => connections.filter((c) => ids.includes(c.phoneNumberId))),
     findConnectionsByWaba: vi.fn(async () => []),
     findByoSecrets: vi.fn(async () => []),
-    storeInboundMessage: vi.fn(async () => ({ conversationId: "cv", messageId: "m1", inserted: over.inserted ?? true })),
+    storeInboundMessage: vi.fn(async () => {
+      if (over.storeError) throw new Error("database down");
+      return { conversationId: "cv", messageId: "m1", inserted: over.inserted ?? true };
+    }),
     applyMessageStatus: vi.fn(async () => true),
     templateBelongsToTenant: vi.fn(async () => true),
     setTemplateStatus: vi.fn(async () => true),
     updateConnectionHealth: vi.fn(async () => undefined),
     sendEvent: vi.fn(async () => undefined),
-    ...(over.withDemo === false ? {} : { demo: { phoneNumberId: DEMO_PNID, route } }),
+    ...(over.withDemo === false ? {} : { demo: { phoneNumberId: DEMO_PNID, route, messageTenant } }),
   };
-  return { deps: deps as unknown as Deps, mocks: deps, route };
+  return { deps: deps as unknown as Deps, mocks: deps, route, messageTenant };
 }
 
 let log: ReturnType<typeof vi.spyOn>;
@@ -119,7 +123,7 @@ describe("a message on the shared demo number", () => {
   it("asks the router with the sender, the message id and the text, only for a verified message", async () => {
     const f = fakes();
     await handleWhatsAppWebhook(request(textBody("hello")), f.deps);
-    expect(f.route).toHaveBeenCalledWith({ from: `+${PHONE_DIGITS}`, providerMsgId: "wamid.DEMO1", text: "hello" });
+    expect(f.route).toHaveBeenCalledWith({ from: `+${PHONE_DIGITS}`, providerMsgId: "wamid.DEMO1", channelId: CHANNEL, deskTenantId: OWNER, text: "hello" });
   });
 
   it("a visitor on a route keeps their text as sent", async () => {
@@ -131,7 +135,7 @@ describe("a message on the shared demo number", () => {
   it("gives the router no text for a photo, which follows the route", async () => {
     const f = fakes();
     await handleWhatsAppWebhook(request(imageBody()), f.deps);
-    expect(f.route).toHaveBeenCalledWith({ from: `+${PHONE_DIGITS}`, providerMsgId: "wamid.DEMO2", text: undefined });
+    expect(f.route).toHaveBeenCalledWith({ from: `+${PHONE_DIGITS}`, providerMsgId: "wamid.DEMO2", channelId: CHANNEL, deskTenantId: OWNER, text: undefined });
     expect(f.mocks.storeInboundMessage).toHaveBeenCalledWith(expect.objectContaining({ tenantId: ROUTED, kind: "image" }));
   });
 
@@ -165,6 +169,118 @@ describe("a message on the shared demo number", () => {
     const out = logged();
     expect(out).toContain("demo_routed=1");
     for (const secret of [PHONE_DIGITS, "Visitor", "haircut", "DEMO-SALON", ROUTED, OWNER]) expect(out).not.toContain(secret);
+  });
+});
+
+describe("a message the router answers instead of routing (the menu, the limit notice, a refused code or trial)", () => {
+  const reply = { action: "drop" as const, reason: "no_route" as const, reply: { kind: "menu" as const, lang: "ta" as const } };
+
+  it("is stored with the front desk (the business that owns the number's connection), on the number's own channel, and the assistant is not asked", async () => {
+    const f = fakes({ decision: reply });
+    expect((await handleWhatsAppWebhook(request(textBody("வணக்கம்")), f.deps)).status).toBe(200);
+    expect(f.mocks.storeInboundMessage).toHaveBeenCalledWith(expect.objectContaining({ tenantId: OWNER, channelId: CHANNEL, phone: `+${PHONE_DIGITS}`, providerMsgId: "wamid.DEMO1", kind: "text", body: "வணக்கம்" }));
+    expect(f.mocks.sendEvent).not.toHaveBeenCalledWith(expect.objectContaining({ name: "whatsapp/message.received" }));
+  });
+
+  it("starts the reply as an event with ids and the kind and language only, named by the message", async () => {
+    const f = fakes({ decision: reply });
+    await handleWhatsAppWebhook(request(textBody("வணக்கம்")), f.deps);
+    expect(f.mocks.sendEvent).toHaveBeenCalledTimes(1);
+    expect(f.mocks.sendEvent).toHaveBeenCalledWith({
+      id: "demo_reply:m1",
+      name: "whatsapp/demo.reply",
+      data: { tenantId: OWNER, conversationId: "cv", messageId: "m1", kind: "menu", lang: "ta" },
+    });
+  });
+
+  it("every kind of answer is stored and answered the same way", async () => {
+    for (const kind of ["menu", "bad_code", "limit", "trial_taken"] as const) {
+      const f = fakes({ decision: { action: "drop", reason: "no_route", reply: { kind, lang: "en" } } });
+      await handleWhatsAppWebhook(request(textBody("hello")), f.deps);
+      expect(f.mocks.sendEvent).toHaveBeenCalledWith(expect.objectContaining({ name: "whatsapp/demo.reply", data: expect.objectContaining({ kind, lang: "en" }) }));
+    }
+  });
+
+  it("a redelivered message starts the same event again, which Inngest drops", async () => {
+    const f = fakes({ decision: reply, inserted: false });
+    await handleWhatsAppWebhook(request(textBody("hello")), f.deps);
+    expect(f.mocks.sendEvent).toHaveBeenCalledWith(expect.objectContaining({ id: "demo_reply:m1" }));
+  });
+
+  it("a drop without an answer stores and starts nothing", async () => {
+    const f = fakes({ decision: { action: "drop", reason: "limit" } });
+    await handleWhatsAppWebhook(request(textBody("hello")), f.deps);
+    expect(f.mocks.storeInboundMessage).not.toHaveBeenCalled();
+    expect(f.mocks.sendEvent).not.toHaveBeenCalled();
+  });
+
+  it("answers 500 when it cannot be stored, so Meta tries again, and starts no reply", async () => {
+    const f = fakes({ decision: reply, storeError: true });
+    expect((await handleWhatsAppWebhook(request(textBody("hello")), f.deps)).status).toBe(500);
+    expect(f.mocks.sendEvent).not.toHaveBeenCalled();
+    expect(logged()).not.toContain("database down");
+  });
+
+  it("is counted, and the log holds counts only: no number, name, text or business", async () => {
+    const f = fakes({ decision: reply });
+    await handleWhatsAppWebhook(request(textBody("வணக்கம் secret words")), f.deps);
+    const out = logged();
+    expect(out).toContain("demo_replied=1");
+    for (const secret of [PHONE_DIGITS, "Visitor", "வணக்கம்", "secret", OWNER, ROUTED]) expect(out).not.toContain(secret);
+  });
+});
+
+describe("delivery statuses on the demo number", () => {
+  const statusBody = (pnid = DEMO_PNID, status = "delivered") =>
+    JSON.stringify({
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: WABA,
+          changes: [
+            {
+              field: "messages",
+              value: {
+                messaging_product: "whatsapp",
+                metadata: { display_phone_number: "910000000001", phone_number_id: pnid },
+                statuses: [{ id: "wamid.OUT1", status, timestamp: "1759743180", recipient_id: PHONE_DIGITS }],
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+  it("are applied to the business whose chat holds the message, not to the business that owns the number's connection", async () => {
+    const f = fakes({ messageTenant: ROUTED });
+    expect((await handleWhatsAppWebhook(request(statusBody()), f.deps)).status).toBe(200);
+    expect(f.messageTenant).toHaveBeenCalledWith({ providerMsgId: "wamid.OUT1", channelId: CHANNEL });
+    expect(f.mocks.applyMessageStatus).toHaveBeenCalledWith({ tenantId: ROUTED, providerMsgId: "wamid.OUT1", status: "delivered" });
+  });
+
+  it("a message of the front desk itself (the menu) is applied to the front desk, as it is found", async () => {
+    const f = fakes({ messageTenant: OWNER });
+    await handleWhatsAppWebhook(request(statusBody("200000000000001", "read")), f.deps);
+    expect(f.mocks.applyMessageStatus).toHaveBeenCalledWith({ tenantId: OWNER, providerMsgId: "wamid.OUT1", status: "read" });
+  });
+
+  it("a message nobody holds is not applied to anyone", async () => {
+    const f = fakes({ messageTenant: null });
+    expect((await handleWhatsAppWebhook(request(statusBody()), f.deps)).status).toBe(200);
+    expect(f.mocks.applyMessageStatus).not.toHaveBeenCalled();
+  });
+
+  it("answers 500 when the lookup fails, so Meta tries again", async () => {
+    const f = fakes();
+    f.messageTenant.mockRejectedValueOnce(new Error("down"));
+    expect((await handleWhatsAppWebhook(request(statusBody()), f.deps)).status).toBe(500);
+  });
+
+  it("on any other number the status is applied to the connection's business, as before, and nothing is looked up", async () => {
+    const f = fakes({ connections: [conn({ phoneNumberId: OTHER_PNID })] });
+    await handleWhatsAppWebhook(request(statusBody(OTHER_PNID)), f.deps);
+    expect(f.messageTenant).not.toHaveBeenCalled();
+    expect(f.mocks.applyMessageStatus).toHaveBeenCalledWith({ tenantId: OWNER, providerMsgId: "wamid.OUT1", status: "delivered" });
   });
 });
 
