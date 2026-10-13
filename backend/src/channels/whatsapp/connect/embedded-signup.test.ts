@@ -360,6 +360,23 @@ describe("when Meta says no", () => {
   });
 });
 
+describe("a coexistence number at connect time", () => {
+  const odd = { ...GOOD, info: { ...GOOD.info, facts: { nameStatus: "APPROVED", platformType: "NOT_APPLICABLE" } } } as MetaProbe;
+
+  it("is not saved failed on an odd platform_type: the number check is not_verified and the connection is active", async () => {
+    const s = setup({ probe: odd });
+    const result = await s.run({ ...BODY, coexistence: true });
+    expect(result.status).toBe("active");
+    expect((result.last_check as { checks: { key: string; status: string }[] }).checks.find((c) => c.key === "number_registered")?.status).toBe("not_verified");
+    expect(s.sendEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("a number that is not coexistence is still saved failed on it", async () => {
+    const s = setup({ probe: odd });
+    expect((await s.run({ ...BODY, coexistence: false })).status).toBe("failed");
+  });
+});
+
 describe("the number", () => {
   it("is refused when another business has it", async () => {
     const s = setup({ existing: { id: "x", tenantId: B, channelId: "c", method: "embedded_signup", status: "active" } });

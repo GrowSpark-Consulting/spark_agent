@@ -16,7 +16,7 @@ export type ExpiringConnection = { tenantId: string; connectionId: string; phone
 
 const Row = z.object({ id: z.string(), tenant_id: z.string(), display_phone: z.string().nullable(), token_expires_at: z.string() });
 
-/** Active manual connections whose token runs out after now and before `WARN_DAYS` days from now, the soonest first. */
+/** Active connections (of the methods in `HEALTH_METHODS`) whose token runs out after now and before `WARN_DAYS` days from now, the soonest first. */
 export async function expiringConnections(deps: { db: SupabaseClient; now: () => Date }): Promise<ExpiringConnection[]> {
   const now = deps.now();
   const { data, error } = await deps.db
