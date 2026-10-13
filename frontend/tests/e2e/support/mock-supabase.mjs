@@ -193,15 +193,15 @@ const MEMBER_PREFS = new Map();
 const MEMBER_WRITABLE = ["whatsapp_phone", "takeover_pref"];
 const prefsOf = (email, tenantId) => MEMBER_PREFS.get(`${email}|${tenantId}`) ?? { whatsapp_phone: null, takeover_pref: null };
 /**
- * { role?, phone?, refused?, readError? } → { email, tenantId, userId }. phone is the stored alert number;
+ * { role?, phone?, takeoverPref?, refused?, readError? } → { email, tenantId, userId }. phone is the stored alert number, takeoverPref the stored choice;
  * refused makes updates come back empty, as RLS does for a row that isn't the member's; readError makes
  * the Team screen's read return rows the app can't parse.
  */
-function createTeamAccount({ role = "owner", phone = null, refused = false, readError = false } = {}) {
+function createTeamAccount({ role = "owner", phone = null, takeoverPref = null, refused = false, readError = false } = {}) {
   const email = `team-${randomUUID()}@test.local`;
   const t = tenant(randomUUID(), "Team Studio", "salon");
   USERS[email] = { memberships: [[t, role]], view: { status: 200, body: [] }, prefsRefused: refused, prefsError: readError };
-  if (phone) MEMBER_PREFS.set(`${email}|${t.id}`, { whatsapp_phone: phone, takeover_pref: null });
+  if (phone || takeoverPref) MEMBER_PREFS.set(`${email}|${t.id}`, { whatsapp_phone: phone, takeover_pref: takeoverPref });
   return { email, tenantId: t.id, userId: idOf(email) };
 }
 
@@ -885,6 +885,10 @@ ${choose("Cancel", "cancel=1")}
       const view = USERS[email].view;
       if (view.delay) await new Promise((r) => setTimeout(r, view.delay));
       return send(res, view.status, view.body);
+    }
+    if (table === "plans" || table === "credit_ledger") {
+      // Billing reads both under RLS (0001): plans is a catalogue, credit_ledger is the member's own business's. Empty unless a test stubs them.
+      return send(res, 200, []);
     }
     if (table === "whatsapp_templates") {
       // Members read their own business's templates (0007 tenant_read); none until a test sets them.

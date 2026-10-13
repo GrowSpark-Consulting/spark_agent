@@ -7,7 +7,7 @@ import { staffAlertRecipients } from "../notify/staff-alerts";
 import { billingDeps, syncPayment, type BillingDeps } from "./checkout";
 import { chargeMandate, indiaDate, newTxnid, preDebit, PayuError, type VerifiedPayment } from "./payu";
 
-// Renewing plans by PayU auto-debit (decision 20; migration 0036), for the billing-renewals job (inngest/billing-renewals.ts),
+// Renewing plans by PayU auto-debit (decision 20; migration 0037), for the billing-renewals job (inngest/billing-renewals.ts),
 // which runs these once a day at 06:00 in India (NPCI asks for UPI debits outside 10:00-13:00 and 17:00-21:30):
 //   1. notices: each mandate whose period ends within 4 days gets its renewal payment and PayU's pre-debit notice
 //      (cards and UPI; RBI), announcing the job's first run at least 48 hours away and not before the period ends.

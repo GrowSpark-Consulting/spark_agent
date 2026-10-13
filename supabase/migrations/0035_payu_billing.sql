@@ -1,4 +1,4 @@
--- 0034_payu_billing: billing moves from Razorpay to PayU (decided 13 Oct 2026; replaces docs/handover.md, module 8's
+-- 0035_payu_billing: billing moves from Razorpay to PayU (decided 13 Oct 2026; replaces docs/handover.md, module 8's
 -- Razorpay Subscriptions and Orders). A plan renews by auto-debit: the business approves a PayU mandate once (card,
 -- UPI Autopay or net-banking e-NACH) and the server charges it each cycle. Top-ups and the setup fee are one-time
 -- payments. No Razorpay code or data existed (no plan ids, no subscription rows on staging).

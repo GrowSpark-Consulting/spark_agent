@@ -214,7 +214,7 @@ export async function saveBusinessHours(client: SupabaseClient, tenantId: string
   const rows = z.array(TenantHoursRow).safeParse(data ?? []);
   if (!rows.success) throw new SetupError("invalid_response", "The business hours were not returned after saving.");
   const [row] = rows.data;
-  if (!row) throw new SetupError("not_found", "Your business couldn't be updated. Refresh and try again.");
+  if (!row) throw new SetupError("not_found", "Nothing was changed. Only an owner or admin can change this, so check your role, then refresh and try again.");
   return { timezone: row.timezone, hours: parseHours(row.business_hours) };
 }
 

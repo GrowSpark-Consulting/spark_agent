@@ -1,4 +1,4 @@
--- 0036_renewals: renewing a plan by PayU auto-debit (decision 20; the billing-renewals job, backend/src/billing/renewals.ts).
+-- 0037_renewals: renewing a plan by PayU auto-debit (decision 20; the billing-renewals job, backend/src/billing/renewals.ts).
 --
 -- One renewal payment per subscription and period (payments.for_period_end = the period end it renews); a failed attempt
 -- is final, so a retry is a new payment for the same period. The job, once a day:
@@ -13,7 +13,7 @@
 --      payment grants month 0). Each month is granted once (ref = a hash of the subscription and the month).
 --   4. lapse_overdue_subscriptions: a mandate still past_due 7 days after its period ended is cancelled and the business
 --      paused (its inbox stays readable; choosing a plan in Billing starts again).
--- settle_payment (replacing 0035's) now settles renewals:
+-- settle_payment (replacing 0036's) now settles renewals:
 --   * success: the period moves on (start = the old end), the plan of the next cycle takes over, the business is active,
 --     and the month's credits are granted to the end of the next month (one month of rollover), once (ref = the payment).
 --     A renewal paid after its mandate lapsed revives it unless the business has a plan again (then audited for a refund).

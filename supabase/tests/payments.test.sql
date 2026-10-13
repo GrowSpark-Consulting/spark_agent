@@ -1,4 +1,4 @@
--- PayU payments (0034, 0035): begin_payment records one, settle_payment applies its verified result exactly once.
+-- PayU payments (0035, 0036): begin_payment records one, settle_payment applies its verified result exactly once.
 -- Run: pnpm db:test
 begin;
 create extension if not exists pgtap with schema extensions;

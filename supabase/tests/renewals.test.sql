@@ -1,4 +1,4 @@
--- Renewals by PayU auto-debit (0036): who gets the pre-debit notice, who is charged and when, what a paid or failed
+-- Renewals by PayU auto-debit (0037): who gets the pre-debit notice, who is charged and when, what a paid or failed
 -- renewal changes, an annual plan's monthly credits, and pausing after the grace period. Run: pnpm db:test
 begin;
 create extension if not exists pgtap with schema extensions;

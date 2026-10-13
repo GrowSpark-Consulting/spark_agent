@@ -1,4 +1,4 @@
--- 0035_payment_settlement: starting a PayU payment and applying its verified result (decision 20; 0034's tables).
+-- 0036_payment_settlement: starting a PayU payment and applying its verified result (decision 20; 0035's tables).
 --
 -- begin_payment records a payment before the payer is sent to PayU:
 --   * subscribe: a pending subscription (the mandate to approve) for a paid plan and cycle. Refused (PA409) while the
