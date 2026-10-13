@@ -1,4 +1,4 @@
--- One free trial per WhatsApp number (0031): claim_trial_phone records each trial's first TRIAL-code sender and
+-- One free trial per WhatsApp number (0033): claim_trial_phone records each trial's first TRIAL-code sender and
 -- refuses that sender a second trial. Run: pnpm db:test
 begin;
 create extension if not exists pgtap with schema extensions;

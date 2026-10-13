@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { supabaseAdmin } from "../lib/supabase-admin";
 
-// One free trial per WhatsApp number (migration 0031). Server-only. The routing step on the shared demo number (Dev 1)
+// One free trial per WhatsApp number (migration 0033). Server-only. The routing step on the shared demo number (Dev 1)
 // calls this for a message that carries a TRIAL code, with the sender WhatsApp names (wa_id): the only verified phone a
 // trial owner gives us. The phone typed during onboarding is not verified, so it is never claimed.
 

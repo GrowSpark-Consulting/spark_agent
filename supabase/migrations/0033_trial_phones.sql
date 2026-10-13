@@ -1,4 +1,4 @@
--- 0031_trial_phones: one free trial per WhatsApp number (9-day plan, Day 6 abuse controls; Dev 1, 13 Oct: "refuse a
+-- 0033_trial_phones: one free trial per WhatsApp number (9-day plan, Day 6 abuse controls; Dev 1, 13 Oct: "refuse a
 -- second trial for the same owner phone"). One trial per account is already enforced by create_trial_tenant (0006), and
 -- one business per WhatsApp business number by whatsapp_connections.phone_number_id being unique.
 --

@@ -45,7 +45,7 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0026_booking_actions` | `bookings.status_changed_at` (kept by a trigger); `complete_booking`, `mark_booking_no_show`, `staff_cancel_booking`, `staff_reschedule_booking`, each with its audit row (service_role only, section 4); `bookings` and `leads` in the Realtime publication |
 | `0027_plan_limits` | Triggers keep a business within its plan's seats (`memberships`, PA413) and WhatsApp numbers (`whatsapp_connections` not disconnected and not `platform`, PA403); each locks the business's row (FOR NO KEY UPDATE) before counting, so racing additions take turns (section 6, plan limits) |
 | `0028_owner_admin_writes` | `is_admin(tenant)` (security definer, callable by `authenticated`); services, resources, catalog_items and the tenant's settings are written by owners and admins only, as the screen inventory's role table says; staff keep reading them, moving leads and setting their own alert number |
-| `0031_trial_phones` | One free trial per WhatsApp number: `trial_phones` (server-only; a SHA-256 of the number, at most one per trial, kept after an unpaid trial is deleted) and `claim_trial_phone(tenant, phone)` → `claimed` / `other_sender` / `taken` (service_role only; section 4) |
+| `0033_trial_phones` | One free trial per WhatsApp number: `trial_phones` (server-only; a SHA-256 of the number, at most one per trial, kept after an unpaid trial is deleted) and `claim_trial_phone(tenant, phone)` → `claimed` / `other_sender` / `taken` (service_role only; section 4) |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -328,7 +328,7 @@ writeAudit({ tenantId, actor, action, entity?, entityId?, diff? }): Promise<void
   handover says plan + toggle; the status check is new and needs confirming (decision 12).
 - `createTrialTenant`: one self-serve business per account. A repeat call during the trial returns
   the same business (`created: false`); an account that already owns a paying business gets an error.
-- **One trial per WhatsApp number (0031).** `claimTrialPhone(tenantId, phone)` in `backend/src/billing/trial-phone.ts`
+- **One trial per WhatsApp number (0033).** `claimTrialPhone(tenantId, phone)` in `backend/src/billing/trial-phone.ts`
   → `"claimed" | "other_sender" | "taken"`. Dev 1's routing on the shared demo number calls it for a message that
   carries a TRIAL code, with the sender's `wa_id` (the full number, country code included). The first sender becomes
   the trial's phone (`claimed`, also on every later message from that phone). Another sender to a trial that already
