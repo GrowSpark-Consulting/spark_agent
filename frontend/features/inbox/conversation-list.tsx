@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { EmptyState, ErrorState, LoadingState } from "@/components/shared/states";
 import type { FormattedError } from "@/lib/errors";
 import {
@@ -62,6 +62,7 @@ export function ConversationList({
   realtime,
   now,
   timeZone,
+  notice = null,
 }: {
   list: ListState;
   visible: ConversationSummary[];
@@ -75,6 +76,8 @@ export function ConversationList({
   realtime: RealtimeState;
   now: Date;
   timeZone: string;
+  /** A message about how the inbox was opened (a link to a chat that isn't there), shown above the rows. */
+  notice?: ReactNode;
 }) {
   const all = list.status === "ready" ? list.items : [];
 
@@ -110,6 +113,8 @@ export function ConversationList({
           </span>
         </div>
       </div>
+
+      {notice}
 
       {realtime === "unavailable" && list.status === "ready" ? (
         <div role="status" style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap", padding: "8px 16px", fontSize: "13px", color: "var(--color-neutral-700)", borderBottom: "1px solid var(--color-divider)", flex: "none" }}>
