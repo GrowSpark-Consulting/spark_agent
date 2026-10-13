@@ -4,13 +4,10 @@ import { newSignupSession, parseSignupMessage, reduceSignup, type SignupInput, t
 // Meta Embedded Signup, the browser part: loads Facebook's JS SDK on demand and runs one FB.login
 // popup, returning what happened. Browser only (call it from a click handler in a client component).
 //
-// Where it belongs: the WhatsApp step of the onboarding wizard (and later the assisted /connect/:token
-// page) calls runEmbeddedSignup when the person clicks "Continue with Facebook". The SDK is loaded
-// then, not in a layout, so no page loads Facebook's script unless someone starts the flow.
-//
-// Not wired in yet: the endpoint that exchanges the code (POST /api/onboarding/whatsapp/embedded-signup,
-// handover module 10) doesn't exist, and the code expires in about 30 seconds, so collecting one now
-// would connect nothing. The onboarding step keeps its labelled preview until the API is ready.
+// Where it is used: the WhatsApp step of the onboarding wizard (lib/whatsapp/owner-embedded-signup.ts) and the
+// assisted /connect/:token page call runEmbeddedSignup when the person clicks "Continue with Facebook". The SDK
+// is loaded then, not in a layout, so no page loads Facebook's script unless someone starts the flow. The code
+// it returns expires in about 30 seconds and goes straight to POST /api/onboarding/whatsapp/embedded-signup.
 
 export const FACEBOOK_SDK_URL = "https://connect.facebook.net/en_US/sdk.js";
 /**

@@ -5,7 +5,7 @@ import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { CHECKS, INDUSTRIES, POPUP_STEPS, PROFILES, ROUTES, STEP_LABELS, TOTAL_STEPS, type CheckKind } from "@/features/onboarding/data";
+import { CHECKS, INDUSTRIES, PROFILES, ROUTES, STEP_LABELS, TOTAL_STEPS, type CheckKind } from "@/features/onboarding/data";
 import { offeredTrades, type ActivePack, type OfferedTrade } from "@/features/onboarding/packs";
 import {
   industryKey,
@@ -21,7 +21,6 @@ import { StepBusiness } from "@/components/onboarding/step-business";
 import { StepTeach } from "@/components/onboarding/step-teach";
 import { StepTry } from "@/components/onboarding/step-try";
 import { StepWhatsApp } from "@/components/onboarding/step-whatsapp";
-import { MetaPopup } from "@/components/onboarding/meta-popup";
 import { StepTeam } from "@/components/onboarding/step-team";
 import { StepLive } from "@/components/onboarding/step-live";
 
@@ -98,19 +97,6 @@ export function OnboardingFlow({ activePacks }: { activePacks: ActivePack[] | nu
     [set]
   );
 
-  /* ── Meta pop-up ── */
-  const openPopup = () => set({ popup: true, popStep: 0, cancelStep: null });
-  const nextPopup = () => {
-    if (s.popStep < POPUP_STEPS.length - 1) {
-      set({ popStep: s.popStep + 1 });
-    } else {
-      set({ popup: false });
-      startChecks("meta");
-    }
-  };
-  const cancelPopup = () =>
-    set((x) => ({ popup: false, cancelStep: POPUP_STEPS[x.popStep].title }));
-
   /* ── Business step: the API creates the trial business (or finds the account's business) ── */
   const [savingBusiness, startSavingBusiness] = React.useTransition();
   const submitBusiness = () => {
@@ -157,7 +143,9 @@ export function OnboardingFlow({ activePacks }: { activePacks: ActivePack[] | nu
         : st === 3
           ? "I’ve tried it"
           : st === 4
-            ? s.wa === "idle"
+            ? s.waConnection?.status === "active"
+              ? "Continue"
+              : s.wa === "idle"
               ? "Do this later"
               : s.wa === "pending"
                 ? "Continue while we wait"
@@ -238,17 +226,10 @@ export function OnboardingFlow({ activePacks }: { activePacks: ActivePack[] | nu
           {st === 2 && <StepTeach s={s} set={set} onImport={startImport} />}
           {st === 3 && <StepTry s={s} />}
           {st === 4 && (
-            <StepWhatsApp
-              s={s}
-              set={set}
-              onOpenPopup={openPopup}
-              onRunChecks={startChecks}
-            />
+            <StepWhatsApp s={s} set={set} onRunChecks={startChecks} />
           )}
           {st === 5 && <StepTeam s={s} set={set} />}
           {st === 6 && <StepLive s={s} />}
-
-          <MetaPopup s={s} onNext={nextPopup} onCancel={cancelPopup} />
 
           {/* ── Footer nav ── */}
           {inSteps && (

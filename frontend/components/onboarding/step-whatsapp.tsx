@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { FacebookConnect } from "@/components/onboarding/facebook-connect";
 import { OwnAppConnect } from "@/components/onboarding/own-app-connect";
 import { loadWebhookConfig, resolveWhatsAppTenant, type WebhookConfigResult } from "@/lib/whatsapp/manual-connect";
 import {
@@ -31,12 +32,10 @@ import {
 export function StepWhatsApp({
   s,
   set,
-  onOpenPopup,
   onRunChecks,
 }: {
   s: OnboardingState;
   set: SetState;
-  onOpenPopup: () => void;
   onRunChecks: (kind: CheckKind) => void;
 }) {
   const idle = s.wa === "idle";
@@ -122,7 +121,8 @@ export function StepWhatsApp({
         once it’s connected.
       </StepIntro>
 
-      {!(idle && !meta && s.mMode === "own") && (
+      {/* Only partner access is still a scripted preview: Facebook runs Meta's real Embedded Signup and the own-app path posts to the API. */}
+      {(!idle || (!meta && s.mMode === "partner")) && (
       <div
         role="note"
         aria-label="Preview"
@@ -152,7 +152,7 @@ export function StepWhatsApp({
                 type="button"
                 role="radio"
                 aria-checked={on}
-                onClick={() => set({ waMethod: wm.key, cancelStep: null })}
+                onClick={() => set({ waMethod: wm.key })}
                 className={cn(
                   "flex flex-col gap-1 text-left px-4 py-3.5 border-2 text-foreground cursor-pointer",
                   on ? "border-primary bg-brand-100" : "border-divider bg-transparent"
@@ -221,23 +221,18 @@ export function StepWhatsApp({
             </span>
           </div>
 
-          {s.cancelStep && (
-            <div
-              role="alert"
-              className="border-2 border-primary bg-brand-100 text-brand-900 px-3.5 py-3 text-sm"
-            >
-              <strong>You closed the Meta window at “{s.cancelStep}”.</strong> Nothing
-              was changed. Try again when you’re ready.
+          {s.waConnection?.status === "active" ? (
+            // Back on this step after connecting: the API already returned an active number, so it isn't offered again.
+            <div role="status" data-testid="facebook-result" data-state="connected" className="border-2 border-foreground px-[18px] py-4">
+              <strong className="block text-[17px]">Connected{s.waConnection.displayPhone ? ` · ${s.waConnection.displayPhone}` : ""}</strong>
+              <span className="text-sm">Your dashboard’s WhatsApp page shows its checks and lets you recheck it.</span>
             </div>
+          ) : (
+            <FacebookConnect
+              coexistence={s.coex === "yes"}
+              onConnected={(c) => set({ waConnection: { status: c.status, displayPhone: c.display_phone } })}
+            />
           )}
-
-          <Button
-            variant="primary"
-            onClick={onOpenPopup}
-            className="self-start text-base px-[18px] py-3 min-w-[260px] justify-start"
-          >
-            Continue with Facebook
-          </Button>
         </>
       )}
 

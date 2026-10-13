@@ -76,6 +76,7 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
   { call: "GET /api/conversations/:id/templates", file: "features/inbox/template-reply.ts" },
   // Registered behind EMBEDDED_SIGNUP_ENABLED (not_available while off). It refuses connectToken (validation_failed) until the assisted-link PR.
   { call: "POST /api/onboarding/whatsapp/embedded-signup", file: "features/connect/connect-link.ts" },
+  { call: "POST /api/onboarding/whatsapp/embedded-signup", file: "lib/whatsapp/owner-embedded-signup.ts" },
   { call: "GET /api/connect-links/:token", file: "features/connect/connect-link.ts" },
 ];
 
