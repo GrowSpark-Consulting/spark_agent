@@ -38,11 +38,11 @@ function fakes(
   const deps = {
     findRoute: vi.fn(async (code: string) => routes[code] ?? null),
     isLive: vi.fn(async (tenantId: string) => !(over.dead ?? []).includes(tenantId)),
-    claimTrialPhone: vi.fn(async (): Promise<Claim> => over.claim ?? "claimed"),
+    claimTrialPhone: vi.fn<DemoDeps["claimTrialPhone"]>(async () => over.claim ?? "claimed"),
     hasRoute: vi.fn(async () => session !== null),
     menu: vi.fn(async () => MENU),
     messageTenant: vi.fn<(args: { providerMsgId: string; channelId: string }) => Promise<string | null>>(async () => over.holder ?? null),
-    admit: vi.fn(async ({ routeTenantId }: { routeTenantId: string | null }): Promise<Admit> => {
+    admit: vi.fn<DemoDeps["admit"]>(async ({ routeTenantId }): Promise<Admit> => {
       if (over.allowed === false) return { allowed: false, replay: false, notifyLimit: over.notifyLimit ?? false, tenantId: null };
       if (over.replayOf !== undefined) return { allowed: true, replay: true, notifyLimit: false, tenantId: over.replayOf };
       if (routeTenantId) session = routeTenantId;
@@ -151,6 +151,78 @@ describe("a trial code", () => {
     const f = fakes({ dead: [B] });
     expect(await routeDemoMessage(msg("TRIAL-7F3K"), f.deps)).toMatchObject({ action: "drop", reason: "bad_code" });
     expect(f.claimTrialPhone).not.toHaveBeenCalled();
+  });
+});
+
+describe("two messages from one phone at the same moment, each with a TRIAL code", () => {
+  const T1 = "e1000000-0000-4000-8000-0000000000e1";
+  const T2 = "e2000000-0000-4000-8000-0000000000e2";
+
+  /**
+   * Dev 2's claim_trial_phone as its migration (0033) defines it, one claim at a time like the database does (its unique keys make a second claim wait for the
+   * first), with a pause before each so the two calls really interleave. The real function under real parallel sessions is checked by
+   * backend/src/scripts/trial-claim-race.ts.
+   */
+  function race() {
+    const phoneOwner = new Map<string, string>(); // phone -> trial
+    const trialPhone = new Map<string, string>(); // trial -> phone
+    const counted: string[] = [];
+    const claim = async (tenantId: string, phone: string): Promise<Claim> => {
+      await Promise.resolve();
+      await Promise.resolve();
+      if (!phoneOwner.has(phone) && !trialPhone.has(tenantId)) {
+        phoneOwner.set(phone, tenantId);
+        trialPhone.set(tenantId, phone);
+        return "claimed";
+      }
+      if (phoneOwner.get(phone) === tenantId) return "claimed";
+      return trialPhone.has(tenantId) ? "other_sender" : "taken";
+    };
+    const f = fakes({ routes: { "TRIAL-AAAA": { tenantId: T1, kind: "trial" }, "TRIAL-BBBB": { tenantId: T2, kind: "trial" } } });
+    f.claimTrialPhone.mockImplementation(claim);
+    f.admit.mockImplementation(async ({ routeTenantId, wamid }) => {
+      counted.push(wamid);
+      return { allowed: true, replay: false, notifyLimit: false, tenantId: routeTenantId };
+    });
+    return { f, counted, claimed: () => [...phoneOwner.entries()] };
+  }
+  const message = (text: string, wamid: string) => ({ ...msg(text), providerMsgId: wamid });
+
+  it("two different trials: one is routed, the other is refused with the trial_taken answer, whichever arrives first; each message is counted once and the phone is claimed once", async () => {
+    for (const order of ["ab", "ba"]) {
+      const r = race();
+      const a = message("Hi TRIAL-AAAA", "wamid.a");
+      const b = message("Hi TRIAL-BBBB", "wamid.b");
+      const decisions = await Promise.all((order === "ab" ? [a, b] : [b, a]).map((m) => routeDemoMessage(m, r.f.deps)));
+      const stored = decisions.filter((d) => d.action === "store");
+      const refused = decisions.filter((d) => d.action === "drop");
+      expect(stored).toHaveLength(1);
+      expect(refused).toEqual([{ action: "drop", reason: "trial_taken", reply: { kind: "trial_taken", lang: "en" } }]);
+      expect(r.claimed()).toHaveLength(1);
+      expect(r.claimed()[0][1]).toBe(stored[0].action === "store" ? stored[0].tenantId : "");
+      expect(r.counted.sort()).toEqual(["wamid.a", "wamid.b"]);
+      expect(r.f.admit).toHaveBeenCalledTimes(2);
+      // the refused message was counted without a route: it started none
+      expect(r.f.admit.mock.calls.filter(([args]) => args.routeTenantId === null)).toHaveLength(1);
+    }
+  });
+
+  it("the same trial twice: both are routed (the claim is idempotent), the phone is claimed once, each message is counted once", async () => {
+    const r = race();
+    const decisions = await Promise.all([routeDemoMessage(message("Hi TRIAL-AAAA", "wamid.a"), r.f.deps), routeDemoMessage(message("again TRIAL-AAAA", "wamid.b"), r.f.deps)]);
+    expect(decisions.map((d) => d.action)).toEqual(["store", "store"]);
+    expect(decisions.every((d) => d.action === "store" && d.tenantId === T1)).toBe(true);
+    expect(r.claimed()).toEqual([[PHONE, T1]]);
+    expect(r.counted.sort()).toEqual(["wamid.a", "wamid.b"]);
+  });
+
+  it("two phones for one trial: the first is the trial's phone and the other is routed as someone trying it, both counted once", async () => {
+    const r = race();
+    const other = { ...message("Hi TRIAL-AAAA", "wamid.b"), from: "+919800000002" };
+    const decisions = await Promise.all([routeDemoMessage(message("Hi TRIAL-AAAA", "wamid.a"), r.f.deps), routeDemoMessage(other, r.f.deps)]);
+    expect(decisions.map((d) => d.action)).toEqual(["store", "store"]);
+    expect(r.claimed()).toHaveLength(1);
+    expect(r.counted.sort()).toEqual(["wamid.a", "wamid.b"]);
   });
 });
 
