@@ -29,8 +29,29 @@ const LEAD = "10000000-0000-0000-0000-0000000000f1";
 export const PRIVACY_URL = "https://example.test/privacy";
 const messageId = (kind: "in" | "out", n: number) => `${kind === "in" ? "a" : "d"}0000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
 
+/**
+ * Timing of one run, for the latency harness (conversation-tests/latency.ts). Everything it is given is a name and a number of milliseconds: no text, no ids.
+ * Nothing the pipeline does depends on it, and without one the run is exactly what it was.
+ */
+/** An error that carries this is not recorded as a timing: the call never happened (the latency harness's request cap refusing it). */
+export interface UntimedError {
+  untimed: true;
+}
+
+export interface StageProbe {
+  /**
+   * One timed piece of work: a pipeline step ("step:extract"), a model call ("llm:extraction", "llm:reply"), the knowledge-base search ("kb"), the send
+   * ("send") or a calendar call ("booking"). Calls made inside a step are inside that step's time.
+   */
+  record(stage: string, ms: number): void;
+  /** A whole turn (stop check, understanding and reply), from before the stop check to after the reply step. */
+  turn?(index: number, ms: number): void;
+}
+
 export interface RunOptions {
   mode: "mock" | "live";
+  /** Times the steps and the calls (conversation-tests/latency.ts). */
+  probe?: StageProbe;
   /** The real client, in live mode. */
   llm?: LlmClient;
   /** Called with the index of each turn just before it starts (the triage harness uses it to tell which message a model call belongs to). */
@@ -56,20 +77,58 @@ export interface ChatReport {
 const result = (text: string): LlmResult => ({ text, model: "mock", stopReason: "end_turn", usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, costUsd: 0, latencyMs: 0, attempts: 1, requestId: null });
 const QUIET_EXTRACTION = { language: "en", intent: "question", fields: {}, question: null, preferredTime: null, sentiment: "neutral", asksIfHuman: false, confidence: 0.9 };
 
-function memoRunner(): StepRunner {
+function memoRunner(probe?: StageProbe): StepRunner {
   const memo = new Map<string, unknown>();
   return {
     async run(id, fn) {
       if (memo.has(id)) return memo.get(id) as never;
-      const value = await fn();
-      memo.set(id, value);
-      return value;
+      const startedAt = performance.now();
+      try {
+        const value = await fn();
+        memo.set(id, value);
+        return value;
+      } finally {
+        recordSafely(probe, `step:${id}`, performance.now() - startedAt);
+      }
     },
+  };
+}
+
+/** A probe that fails must never change a run: it is told, and if it throws, nothing else happens. */
+function recordSafely(probe: StageProbe | undefined, stage: string, ms: number): void {
+  try {
+    probe?.record(stage, ms);
+  } catch {
+    // a timing that could not be kept is not worth a run
+  }
+}
+
+/** The function, timed under a stage name when there is a probe; the function itself when there is not. */
+function timed<A extends unknown[], R>(probe: StageProbe | undefined, stage: string | ((...args: A) => string), fn: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
+  if (!probe) return fn;
+  return async (...args: A) => {
+    const startedAt = performance.now();
+    let untimed = false;
+    try {
+      return await fn(...args);
+    } catch (error) {
+      untimed = typeof error === "object" && error !== null && (error as Partial<UntimedError>).untimed === true;
+      throw error;
+    } finally {
+      if (!untimed) recordSafely(probe, typeof stage === "string" ? stage : stage(...args), performance.now() - startedAt);
+    }
   };
 }
 
 const subset = (actual: Record<string, unknown> | undefined, wanted: Record<string, unknown>): string[] =>
   Object.entries(wanted).filter(([key, value]) => actual?.[key] !== value).map(([key, value]) => `${key}: wanted ${JSON.stringify(value)}, got ${JSON.stringify(actual?.[key])}`);
+
+/** Every function of the calendar port, timed as "booking". */
+function timedPort<P extends object>(port: P, probe: StageProbe): P {
+  const wrapped: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(port)) wrapped[name] = typeof value === "function" ? timed(probe, "booking", value as (...args: unknown[]) => Promise<unknown>) : value;
+  return wrapped as P;
+}
 
 export async function runChat(chat: Chat, options: RunOptions): Promise<ChatReport> {
   const pack = JSON.parse(readFileSync(`${PACKS_DIR}/${chat.pack}.json`, "utf8")) as { key: string; version: number };
@@ -123,10 +182,11 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
       return result(next);
     },
   };
-  const llm = live ? options.llm : mockLlm;
-  if (!llm) throw new Error("live mode needs a language-model client");
+  const chosenLlm = live ? options.llm : mockLlm;
+  if (!chosenLlm) throw new Error("live mode needs a language-model client");
+  const llm: LlmClient = options.probe ? { complete: timed(options.probe, (request: LlmRequest) => `llm:${request.role}`, (request: LlmRequest) => chosenLlm.complete(request)) } : chosenLlm;
 
-  const send: ReplyDeps["send"] = async (_tenantId, kind, payload): Promise<SendOutcome> => {
+  const plainSend: ReplyDeps["send"] = async (_tenantId, kind, payload): Promise<SendOutcome> => {
     // Out of credits: notify.send refuses the reply and spends nothing.
     if (creditsZero) return { status: "skipped", reason: "insufficient_credits" };
     const interactive = payload.interactive;
@@ -136,6 +196,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
     fake.messages.set(messageId("out", ++outCount), { id: messageId("out", outCount), tenantId: A, conversationId: CONV, direction: "out", sender: "ai", kind: "text", createdAt: sentAt, body: text, meta: {} } as FakeMessage);
     return { status: "sent", messageId: `m-out-${outCount}`, providerMsgId: `wamid.${outCount}`, creditsCharged: 1, usedTemplate: false };
   };
+  const send: ReplyDeps["send"] = timed(options.probe, "send", plainSend);
   const audit = async (entry: AuditEntry) => {
     audits.push(entry);
     if (entry.action === "message.answered" && entry.entityId) fake.answered.set(entry.entityId, Date.now());
@@ -167,7 +228,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
     ...(setup && calendar
       ? {
           scheduling: {
-            port: calendar.port,
+            port: options.probe ? timedPort(calendar.port, options.probe) : calendar.port,
             isEnabled: async () => true,
             services: async () => Array.from({ length: setup.services }, (_, i) => ({ id: `30000000-0000-0000-0000-${String(i + 3).padStart(12, "0")}` })),
             timeZone: async () => setup.timeZone,
@@ -179,7 +240,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
     store: fake.store,
     llm,
     loadPackDefinition: async (key, version) => (key === pack.key && version === pack.version ? (pack as unknown) : null),
-    retrieve: async () => kb.map((content, i) => ({ chunkId: `chunk-${i}`, documentId: "doc-1", title: "Knowledge base", content, similarity: 0.8 })),
+    retrieve: timed(options.probe, "kb", async () => kb.map((content, i) => ({ chunkId: `chunk-${i}`, documentId: "doc-1", title: "Knowledge base", content, similarity: 0.8 }))),
     ...(setup ? { scoring: { loadCatalog: async () => setup.catalog, isEnabled: async () => true } } : {}),
   };
 
@@ -201,7 +262,8 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
     const id = messageId("in", index + 1);
     fake.messages.set(id, { id, tenantId: A, conversationId: CONV, direction: "in", sender: "customer", kind: turnSpec.voice ? "audio" : turnSpec.tap ? "interactive" : "text", createdAt: new Date(base + index * 60_000).toISOString(), body: turnSpec.voice ? null : turnSpec.customer, meta: turnSpec.tap ? { buttonId: turnSpec.tap } : {} } as FakeMessage);
     const turn: TurnContext = { tenantId: A, conversationId: CONV, contactId: CONTACT, leadId: LEAD, leadCreated: false, messageIds: [id], language: null, vertical: pack.key, verticalVersion: pack.version };
-    const step = memoRunner();
+    const step = memoRunner(options.probe);
+    const turnStartedAt = performance.now();
 
     let stopped = false;
     let understood: UnderstandResult | null = null;
@@ -221,6 +283,11 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
       fail(`the pipeline threw: ${error instanceof NonRetriableError ? "non-retriable " : ""}${error instanceof Error ? error.message : String(error)}`);
     }
 
+    try {
+      options.probe?.turn?.(index, performance.now() - turnStartedAt);
+    } catch {
+      // see recordSafely
+    }
     const turnSends = sends.slice(sendsBefore);
     const replyText = turnSends[0]?.text ?? null;
     const contact = fake.contacts.get(CONTACT);
