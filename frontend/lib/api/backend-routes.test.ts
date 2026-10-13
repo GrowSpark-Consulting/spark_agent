@@ -67,6 +67,7 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
   { call: "GET /api/bookings/:id/slots", file: "features/calendar/booking-actions.ts" },
   { call: "GET /api/dashboard/summary", file: "features/home/home-api.ts" },
   { call: "GET /api/billing/balance", file: "features/home/home-api.ts" },
+  { call: "GET /api/billing/balance", file: "features/billing/billing-data.ts" },
   { call: "GET /api/conversations/:id/templates", file: "features/inbox/template-reply.ts" },
 ];
 
