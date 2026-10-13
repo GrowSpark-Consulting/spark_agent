@@ -14,6 +14,7 @@
     "test:watch": "vitest",
     "test:conversations": "tsx --env-file-if-exists=.env.local src/conversation-tests/cli.ts",
     "triage:chats": "tsx --env-file-if-exists=.env.local src/conversation-tests/triage-cli.ts",
+    "latency:chats": "tsx --env-file-if-exists=.env.local src/conversation-tests/latency-cli.ts",
     "seed:connection": "tsx --env-file-if-exists=.env.local src/scripts/seed-connection.ts",
     "packs:sync": "tsx --env-file-if-exists=.env.local src/scripts/sync-packs.ts"
   },
