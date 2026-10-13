@@ -47,6 +47,16 @@ export function describeBookingService(services: Service[], chosenId: string | n
   return { kind: "several", services: active, chosen, stale: chosenId !== null && chosen === null };
 }
 
+/**
+ * Whether `serviceId` may be saved as the choice: no choice (null) always may; an id only when it names one of the active services in
+ * `services`. A first check on the page, so a service switched off in another tab is caught before the write; the assistant checks again
+ * when it books (reply.ts `chosenService`), and Row-level security decides who may write at all.
+ */
+export function isSelectableChoice(services: Service[], serviceId: string | null): boolean {
+  if (serviceId === null) return true;
+  return ServiceId.safeParse(serviceId).success && services.some((s) => s.active && s.id === serviceId);
+}
+
 async function readSettings(client: SupabaseClient, tenantId: string): Promise<unknown> {
   const { data, error } = await client.from("tenants").select(COLUMNS).eq("id", tenantId).maybeSingle();
   if (error) throw error;
@@ -80,7 +90,7 @@ export async function saveBookingService(client: SupabaseClient, tenantId: strin
   const rows = z.array(TenantSettingsRow).safeParse(data ?? []);
   if (!rows.success) throw new SetupError("invalid_response", "The choice was not returned after saving.");
   const [row] = rows.data;
-  if (!row) throw new SetupError("not_found", "Your business couldn't be updated. Refresh and try again.");
+  if (!row) throw new SetupError("not_found", "Nothing was changed. Only an owner or admin can change this, so check your role, then refresh and try again.");
   const saved = chosenServiceId(row.agent_settings);
   if (saved !== serviceId) throw new SetupError("invalid_response", "The choice that came back after saving wasn't the one sent. Refresh and check it.");
   return saved;

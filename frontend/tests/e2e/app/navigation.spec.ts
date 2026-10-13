@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, expectNoHorizontalOverflow, mainNav, SIGNED_OUT, test } from "../support/app";
+import { stubApi } from "../support/day5";
 import { mockKbApi } from "../support/kb-api";
 
 // The real dashboard's main navigation as one journey, signed in through the project's storage state
@@ -14,6 +15,7 @@ const SECTIONS = [
   // The calendar's heading is the day it shows (today, in the business's time zone).
   { link: "Calendar", path: "/dashboard/calendar", heading: /^(Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day \d{1,2} [A-Z][a-z]{2}$/ },
   { link: "Features", path: "/dashboard/features", heading: "Features" },
+  { link: "Billing", path: "/dashboard/billing", heading: "Billing and credits" },
   { link: "Knowledge base", path: "/dashboard/knowledge", heading: "Knowledge base" },
   { link: "Booking setup", path: "/dashboard/settings/booking", heading: "Booking setup" },
   { link: "Team", path: "/dashboard/team", heading: "Team" },
@@ -30,6 +32,11 @@ const exactPath = (path: string) => new RegExp(`^[^?#]*//[^/]+${path.replace(/\/
  */
 async function holdRealtime(page: Page) {
   await page.routeWebSocket(/\/realtime\/v1\/websocket/, () => {});
+  // Billing reads GET /api/billing/balance and, under RLS, plans and credit_ledger; the journey only needs the screen to open.
+  await stubApi(page, /\/api\/billing\/balance$/, () => ({
+    status: 200,
+    body: { status: "active", plan: { key: "growth", name: "Growth", monthlyCredits: 1500 }, credits: { plan: 1, topup: 0, total: 1 }, creditsGranted: 10, renewsAt: null, trialEndsAt: null, aiPaused: false, aiPausedReason: null, lowCredits: false, aiAutoReply: true },
+  }));
 }
 
 test.describe("dashboard navigation", () => {

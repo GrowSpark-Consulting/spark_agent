@@ -98,6 +98,10 @@ export function formatError(err: unknown): FormattedError {
       };
     }
     // PostgREST: { code, message, details, hint }. Database detail never reaches the screen.
+    // 42501 is a row-level-security refusal on a write (migration 0028: only owners and admins change the business's setup).
+    if (err.code === "42501" && "details" in err && "hint" in err) {
+      return { code: "forbidden", title: TITLES.forbidden, message: "Only an owner or admin can change this. Nothing was changed.", retryable: false };
+    }
     if (typeof err.code === "string" && "details" in err && "hint" in err) {
       return { code: "upstream_failed", title: TITLES.upstream_failed, message: "We couldn't load this data. Try again in a moment.", retryable: true };
     }
