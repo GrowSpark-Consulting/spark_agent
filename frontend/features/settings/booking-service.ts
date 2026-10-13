@@ -80,7 +80,7 @@ export async function saveBookingService(client: SupabaseClient, tenantId: strin
   const rows = z.array(TenantSettingsRow).safeParse(data ?? []);
   if (!rows.success) throw new SetupError("invalid_response", "The choice was not returned after saving.");
   const [row] = rows.data;
-  if (!row) throw new SetupError("not_found", "Your business couldn't be updated. Refresh and try again.");
+  if (!row) throw new SetupError("not_found", "Nothing was changed. Only an owner or admin can change this, so check your role, then refresh and try again.");
   const saved = chosenServiceId(row.agent_settings);
   if (saved !== serviceId) throw new SetupError("invalid_response", "The choice that came back after saving wasn't the one sent. Refresh and check it.");
   return saved;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseApiUrl, parseMetaSignupEnv, parsePublicEnv } from "./env";
+import { parseApiUrl, parseMetaSignupEnv, parsePublicEnv, parseSetupCallUrl } from "./env";
 
 describe("parseApiUrl", () => {
   it("accepts the API's origin, with or without a trailing slash", () => {
@@ -64,5 +64,17 @@ describe("parseMetaSignupEnv", () => {
     const result = parseMetaSignupEnv({ NEXT_PUBLIC_META_APP_ID: "app-secret-ish", NEXT_PUBLIC_META_ES_CONFIG_ID: "2" });
     expect(result).toEqual({ status: "off", problems: ["NEXT_PUBLIC_META_APP_ID must be a numeric id"] });
     expect(JSON.stringify(result)).not.toContain("app-secret-ish");
+  });
+});
+
+describe("parseSetupCallUrl", () => {
+  it("accepts an https address and returns it normalised", () => {
+    expect(parseSetupCallUrl("https://cal.example.com/spark/setup")).toBe("https://cal.example.com/spark/setup");
+    expect(parseSetupCallUrl("  https://cal.example.com  ")).toBe("https://cal.example.com/");
+  });
+  it("is null when unset, blank, not https or not an address, so the page falls back to its text instead of a dead button", () => {
+    for (const bad of [undefined, "", "   ", "http://cal.example.com", "javascript:alert(1)", "cal.example.com", "ftp://x.test"]) {
+      expect(parseSetupCallUrl(bad), String(bad)).toBeNull();
+    }
   });
 });
