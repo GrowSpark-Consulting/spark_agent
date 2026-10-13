@@ -74,6 +74,8 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
   { call: "POST /api/billing/change-plan", file: "features/billing/billing-data.ts" },
   { call: "GET /api/billing/payments/:id", file: "features/billing/billing-data.ts" },
   { call: "GET /api/conversations/:id/templates", file: "features/inbox/template-reply.ts" },
+  // Registered behind EMBEDDED_SIGNUP_ENABLED (not_available while off). It refuses connectToken (validation_failed) until the assisted-link PR.
+  { call: "POST /api/onboarding/whatsapp/embedded-signup", file: "features/connect/connect-link.ts" },
 ];
 
 /**
@@ -84,7 +86,6 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
  */
 const AWAITING_BACKEND: { call: string; file: string; where: string }[] = [
   { call: "GET /api/connect-links/:token", file: "features/connect/connect-link.ts", where: "Dev 1, contract only (docs/whatsapp-connection-contract.md); not in routes.ts on main" },
-  { call: "POST /api/onboarding/whatsapp/embedded-signup", file: "features/connect/connect-link.ts", where: "Dev 1, contract only (docs/whatsapp-connection-contract.md); not in routes.ts on main" },
 ];
 
 /** Backend routes the browser never calls, and why. Anything not here and not in FRONTEND_CALLS fails the test. */

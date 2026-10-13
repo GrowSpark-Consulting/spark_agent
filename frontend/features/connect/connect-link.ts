@@ -9,6 +9,9 @@ import type { EmbeddedSignupPayload } from "@/lib/whatsapp/embedded-signup";
 //   GET  /api/connect-links/:token                       public → { tenantName, expiresAt }; unknown, expired or used → not_found (404);
 //                                                        not_available (501) while Embedded Signup is switched off on the server
 //   POST /api/onboarding/whatsapp/embedded-signup        { code, wabaId, phoneNumberId, coexistence, connectToken } → 201 the connection
+//                                                        not_available (501) while EMBEDDED_SIGNUP_ENABLED is off. Until the assisted-link
+//                                                        PR it takes only { code, wabaId, phoneNumberId, coexistence } and answers
+//                                                        validation_failed to connectToken, which this page reads as "failed"
 // The token is a credential: it is read from the address, sent only to these two routes, kept in memory and never logged or stored. The
 // Meta login code is sent once, in the POST body, and is not kept anywhere (embedded-signup.ts).
 

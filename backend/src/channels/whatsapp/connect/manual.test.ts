@@ -103,6 +103,7 @@ describe("connectManual", () => {
     const { record } = s.saved[0];
     expect(record.tokenEnc).not.toContain(TOKEN);
     expect(record.appSecretEnc).not.toContain(APP_SECRET);
+    if (record.appSecretEnc === null) throw new Error("a manual connection stores the app secret");
     const ctx = (column: "token_enc" | "app_secret_enc") => connectionSecretContext({ column, tenantId: A, connectionId: NEW_ID });
     expect(decryptSecret(record.tokenEnc, ctx("token_enc"))).toBe(TOKEN);
     expect(decryptSecret(record.appSecretEnc, ctx("app_secret_enc"))).toBe(APP_SECRET);
