@@ -1,7 +1,6 @@
 -- Plans (docs/handover.md, module 8). Prices in INR per month, GST extra.
--- razorpay_plan_id is filled in after Raja creates the plans in Razorpay; re-running this
--- seed keeps whatever id is already there. Seats 999 = unlimited in the UI.
--- Annual billing is a separate Razorpay plan per tier (10x monthly), not a row here.
+-- Seats 999 = unlimited in the UI. Billing is PayU (0034): annual billing is 10x price_inr, computed by the server,
+-- not a row here.
 
 insert into public.plans (key, name, price_inr, monthly_credits, seats, whatsapp_numbers, feature_keys) values
 ('starter', 'Starter', 2499,  1500, 2,   1,

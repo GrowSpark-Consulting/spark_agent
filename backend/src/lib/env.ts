@@ -99,9 +99,12 @@ const serverEnvSchema = z
   // Exactly as registered in the Google Cloud OAuth client: <API origin>/api/calendar/google/callback.
   GOOGLE_REDIRECT_URI: z.url({ protocol: /^https?$/ }).optional(),
 
-  RAZORPAY_KEY_ID: secret.optional(),
-  RAZORPAY_KEY_SECRET: secret.optional(),
-  RAZORPAY_WEBHOOK_SECRET: secret.optional(),
+  // PayU (billing: plan auto-debit, top-ups, the setup fee). The merchant key and salt from PayU's dashboard, both or
+  // neither: without them billing answers not_available. PAYU_MODE picks PayU's test or live hosts; test unless it is
+  // exactly "live", so a missing setting can never move real money.
+  PAYU_MERCHANT_KEY: secret.optional(),
+  PAYU_MERCHANT_SALT: secret.optional(),
+  PAYU_MODE: z.enum(["test", "live"], { error: 'must be "test" or "live"' }).default("test"),
 
   INNGEST_EVENT_KEY: secret.optional(),
   INNGEST_SIGNING_KEY: secret.optional(),
@@ -132,6 +135,10 @@ const serverEnvSchema = z
   .refine((env) => (env.LANGFUSE_PUBLIC_KEY === undefined) === (env.LANGFUSE_SECRET_KEY === undefined), {
     message: "LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY must be set together",
     path: ["LANGFUSE_SECRET_KEY"],
+  })
+  .refine((env) => (env.PAYU_MERCHANT_KEY === undefined) === (env.PAYU_MERCHANT_SALT === undefined), {
+    message: "PAYU_MERCHANT_KEY and PAYU_MERCHANT_SALT must be set together",
+    path: ["PAYU_MERCHANT_SALT"],
   });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

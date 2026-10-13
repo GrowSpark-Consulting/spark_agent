@@ -24,7 +24,7 @@ column exists. A change to an agreed shape goes through a pull request like any 
    status. Codes the UI branches on: `unauthenticated`, `forbidden`, `not_found`, `validation_failed`,
    `plan_required`, `seat_limit`, `insufficient_credits`, `outside_window`, `slot_taken`, `conflict`,
    `upstream_failed`.
-5. **No secrets in responses.** No WhatsApp tokens, app secrets, Razorpay secrets, service-role keys or
+5. **No secrets in responses.** No WhatsApp tokens, app secrets, PayU salt, service-role keys or
    encryption keys. WhatsApp connection data comes only from `whatsapp_connections_public`.
 6. **Validation:** routes validate input with Zod. The shared types for these shapes should live in
    `packages/types` (`@pakka/types`, shared ownership).
@@ -394,8 +394,9 @@ UI: current plan, next bill + GST, daily usage chart, credit history, top-up pac
   ↓ data: AccountStatus, BillingOverview, LedgerEntry[]
   ↓ API: GET  /api/billing/balance (shell)                 BUILT · Dev 2
         RLS READ credit_ledger (or view)                  Dev 2
-        POST /api/billing/checkout | /topup | /change-plan HANDOVER · Dev 2 → Razorpay widget
-  ↓ loading: payment in progress while Razorpay is open
+        POST /api/billing/checkout | /topup | /change-plan HANDOVER · Dev 2 → PayU hosted checkout (decision 20)
+  ↓ loading: the browser leaves for PayU; PayU sends the payer back to the Billing screen with ?payment=<id>,
+             which polls the payment until the server has verified it with PayU
   ↓ error: payment failed / cancelled → balance unchanged, toast
   ↓ permission: owner pays; admin read-only
   ↓ plan: downgrade/cycle change applies at next renewal (server decides and returns effectiveAt)
@@ -418,8 +419,9 @@ interface LedgerEntry {
           'template_marketing' | 'staff_alert' | 'cycle_reset' | 'admin';
   label: string; expiresAt: string | null;
 }
-interface CheckoutResponse { razorpay: { orderId?: string; subscriptionId?: string; keyId: string } }
-// keyId is RAZORPAY_KEY_ID (public); the key secret never leaves the server.
+interface CheckoutResponse { paymentId: string; payu: { url: string; fields: Record<string, string> } }
+// The browser POSTs `fields` to `url` (an auto-submitting form). The fields carry a hash signed on the server; the
+// PayU salt never leaves the server. Card and net banking only for plans over ₹15,000 with GST (Pro, annual).
 ```
 
 Replaces: `PLANS`, `USE`, `TOPUP_PACKS`, `PLAN_PRICES`, `PLAN_SEATS`, `PLAN_NUMBERS`.
