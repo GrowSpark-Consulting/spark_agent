@@ -381,50 +381,6 @@ export const PARTNER_COPY: CopyItem[] = [
   { label: "Spark Agent Business Portfolio ID", value: null },
 ];
 
-export interface PopupStep {
-  title: string;
-  body: string;
-  options: string[] | null;
-  cta: string;
-}
-
-/** A preview of Meta's Embedded Signup window, five screens. Not the real Facebook window. */
-export const POPUP_STEPS: PopupStep[] = [
-  {
-    title: "Log in to Facebook",
-    body: "Use the Facebook account that manages your business.",
-    options: null,
-    cta: "Continue",
-  },
-  {
-    title: "Choose your business portfolio",
-    body: "Pick the business this WhatsApp number belongs to, or create one.",
-    options: ["Skyline Homes", "Create a new business portfolio"],
-    cta: "Next",
-  },
-  {
-    title: "Choose a WhatsApp account",
-    body: "Use an existing WhatsApp Business account or create a new one.",
-    options: ["Create a new WhatsApp Business account", "Use an existing account"],
-    cta: "Next",
-  },
-  {
-    title: "Add your phone number",
-    body: "We’ll send a 6-digit code by SMS or call to confirm it’s yours.",
-    options: ["+91 98400 12345 · code sent"],
-    cta: "Verify",
-  },
-  {
-    title: "Review access",
-    body: "Spark Agent will be able to manage your WhatsApp account and send messages for you. You can remove this any time in Business Settings.",
-    options: null,
-    cta: "Finish",
-  },
-];
-
-export const POPUP_QR_BODY =
-  "Open WhatsApp Business on your phone and scan the QR code shown here to keep using the app on this number.";
-
 export interface ConnectionCheck {
   title: string;
   /** Shown when this check fails */

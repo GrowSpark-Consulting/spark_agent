@@ -138,30 +138,34 @@ async function expectNoConnectionClaim(page: Page) {
   await expect(body).not.toContainText(/9 of 12|In review|Not added/);
 }
 
-test("Connect with Facebook: a labelled preview that ends without connecting anything", async ({ page }) => {
+// Connect with Facebook runs Meta's real Embedded Signup (components/onboarding/facebook-connect.tsx). This e2e build has no Meta app
+// (NEXT_PUBLIC_META_APP_ID and NEXT_PUBLIC_META_ES_CONFIG_ID are unset), so the popup cannot open here and these tests can only show the
+// "not set up" state. What the step does with each Meta and API outcome (start, payload, cancel, not_available, refusals, network, duplicate
+// clicks) is covered with SDK and API stubs in lib/whatsapp/owner-embedded-signup.test.ts. No real Meta connection is tested anywhere here.
+test("Connect with Facebook without a Meta app configured: says so, loads nothing from Facebook, sends nothing, claims nothing", async ({ page }) => {
+  const facebook: string[] = [];
+  const signups: string[] = [];
+  page.on("request", (r) => {
+    const url = new URL(r.url());
+    if (/facebook\.(com|net)$/.test(url.hostname)) facebook.push(r.url());
+    if (url.pathname === "/api/onboarding/whatsapp/embedded-signup") signups.push(r.method());
+  });
   await openOnboarding(page);
   await walkTo(page, "WhatsApp");
-  await expectPreviewNotice(page);
-  await next(page, "Continue with Facebook").click();
-  const popup = page.getByRole("dialog");
-  // The preview window doesn't pose as facebook.com.
-  await expect(popup).toContainText("Preview · Meta’s WhatsApp setup window");
-  await expect(popup).not.toContainText("facebook.com");
-  for (const cta of ["Continue", "Next", "Next", "Verify", "Finish"]) {
-    if (cta === "Verify") await expect(popup).toContainText("+91 98400 12345 · code sent");
-    await popup.getByRole("button", { name: cta, exact: true }).click();
-  }
-  await expect(popup).toHaveCount(0);
-  await advance(page, 700, 8);
-  await expect(next(page, /^Continue$/)).toBeVisible();
-  await expect(page.getByRole("status").filter({ hasText: "Preview finished" })).toContainText(
-    "Preview finished: +91 98400 12345 isn’t connected yet",
-  );
+  // Facebook is the default method. It is no longer a scripted preview, so no "Preview" label: it says plainly that it isn't set up.
+  await expect(option(page, "Connect with Facebook")).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("note", { name: "Preview" })).toHaveCount(0);
+  await expect(page.getByTestId("facebook-not-configured")).toContainText("Connecting with Facebook isn’t set up on this site yet.");
+  await expect(page.getByTestId("facebook-not-configured")).toContainText("no number is connected");
+  await expect(page.getByRole("button", { name: /Continue with Facebook|Try again with Facebook/ })).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expectNoConnectionClaim(page);
   await expectNoHorizontalOverflow(page);
+  expect(facebook).toEqual([]);
+  expect(signups).toEqual([]);
 
-  // The Live step never shows the number as live after a preview.
-  await next(page, /^Continue$/).click();
+  // Skipping keeps the honest footer, and the Live step never shows the number as connected.
+  await next(page, "Do this later").click();
   await next(page, "Go live").click();
   await expect(page.getByText("Your number +91 98400 12345")).toBeVisible();
   await expect(page.getByText("Not connected yet")).toBeVisible();
