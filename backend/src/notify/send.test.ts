@@ -98,9 +98,14 @@ describe("a template chosen by staff (staff_reply)", () => {
     expect(calls("notify_template")).toHaveLength(0);
     expect(calls("spend_credits")).toHaveLength(0);
     expect(calls("notify_record")[0]).toMatchObject({ p_template_name: "reminder_24h_v2", p_sender: "staff", p_actor: STAFF, p_kind: "staff_reply" });
-    for (const [column, value] of [["tenant_id", TENANT], ["connection_id", target().connection_id], ["name", "reminder_24h_v2"], ["language", "en"], ["status", "approved"]]) {
-      expect(db.calls).toContainEqual({ table: "whatsapp_templates", method: "eq", args: [column, value] });
-    }
+    // By the connection notify_target picked: on a routed trial that is the platform number, whose templates belong to
+    // the platform business, so the business is not a filter here.
+    expect(db.calls.filter((c) => c.table === "whatsapp_templates" && c.method === "eq").map((c) => c.args)).toEqual([
+      ["connection_id", target().connection_id],
+      ["name", "reminder_24h_v2"],
+      ["language", "en"],
+      ["status", "approved"],
+    ]);
   });
 
   it("refuses a template that isn't approved for this number, or the wrong number of values", async () => {
@@ -548,9 +553,11 @@ describe("the ids of a template's quick-reply buttons", () => {
     tables.whatsapp_templates = { data: [{ components: metaButtons(3) }], error: null };
     await send(TENANT, "reminder_24h", { conversationId: CONVERSATION, text: "x", templateParams: ["a", "b", "c"], templateButtons: ids });
     expect(sender.sendTemplate).toHaveBeenCalledWith("+919840012345", "reminder_24h_v2", "en", ["a", "b", "c"], ids);
-    for (const [column, value] of [["tenant_id", TENANT], ["connection_id", target().connection_id], ["name", "reminder_24h_v2"], ["language", "en"]]) {
-      expect(db.calls).toContainEqual({ table: "whatsapp_templates", method: "eq", args: [column, value] });
-    }
+    expect(db.calls.filter((c) => c.table === "whatsapp_templates" && c.method === "eq").map((c) => c.args)).toEqual([
+      ["connection_id", target().connection_id],
+      ["name", "reminder_24h_v2"],
+      ["language", "en"],
+    ]);
   });
 
   it("are left out when the approved template has another number of buttons, or none can be read", async () => {
