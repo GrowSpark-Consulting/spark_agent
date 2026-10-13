@@ -59,7 +59,7 @@ function submittedStatus(metaStatus: string | undefined): TemplateStatus {
  * changes arrive through set_template_status from the webhook; one that arrives before this row exists finds nothing.
  *
  * The connection must belong to `tenantId`: for our shared platform number that is the platform business, which owns its
- * templates (0030). Throws when it doesn't, or when the input is not a submitted template.
+ * templates (0032). Throws when it doesn't, or when the input is not a submitted template.
  */
 export async function saveSubmittedTemplate(
   tenantId: string,
