@@ -42,7 +42,7 @@ type Existing = { id: string; tenantId: string; channelId: string; method: strin
 function setup(
   probe: MetaProbe = GOOD,
   existing: Existing | null = null,
-  over: { graph?: Graph; webhookSeen?: boolean; webhookSeenLater?: boolean; sixth?: Check; numberLimit?: (tenantId: string, keepConnectionId: string | null) => Promise<void> } = {},
+  over: { graph?: Graph; webhookSeen?: boolean; webhookSeenLater?: boolean; sixth?: Check; sendEvent?: () => Promise<void>; audit?: () => Promise<void>; numberLimit?: (tenantId: string, keepConnectionId: string | null) => Promise<void> } = {},
 ) {
   const saved: { record: ConnectionRecord; replace: boolean }[] = [];
   const updates: { id: string; tenantId: string; lastCheck: unknown }[] = [];
@@ -70,7 +70,8 @@ function setup(
   };
   let seenCalls = 0;
   const probeFn = vi.fn(async () => probe);
-  const audit = vi.fn(async () => {});
+  const audit = vi.fn(over.audit ?? (async () => {}));
+  const sendEvent = vi.fn<(event: { name: string; id: string; data: Record<string, unknown> }) => Promise<void>>(async () => void (await over.sendEvent?.()));
   const testMessage = vi.fn(async () => over.sixth ?? SIXTH_OK);
   const deps = {
     db,
@@ -83,8 +84,9 @@ function setup(
     webhookSeen: async () => (++seenCalls === 1 ? (over.webhookSeen ?? true) : (over.webhookSeenLater ?? over.webhookSeen ?? true)),
     testMessage,
     numberLimit: over.numberLimit,
+    sendEvent,
   };
-  return { saved, updates, testMessage, probeFn, audit, run: (input: unknown = INPUT, actor = "user-1") => connectManual(input, actor, deps) };
+  return { saved, updates, testMessage, probeFn, audit, sendEvent, run: (input: unknown = INPUT, actor = "user-1") => connectManual(input, actor, deps) };
 }
 
 describe("connectManual", () => {
@@ -242,6 +244,85 @@ describe("connectManual", () => {
       expect(s.saved[0].replace).toBe(true);
       expect(s.saved[0].record.id).toBe("e0000000-0000-4000-8000-0000000000e1");
     });
+  });
+});
+
+describe("connectManual: whatsapp/connected", () => {
+  const EVENT_ID = (ranAt: string) => `whatsapp_connected:${NEW_ID}:${ranAt}`;
+
+  it("is sent once for an active connection: ids only, and an id that holds the check's time", async () => {
+    const s = setup();
+    const result = await s.run();
+    expect(result.status).toBe("active");
+    expect(s.sendEvent).toHaveBeenCalledTimes(1);
+    const ranAt = (result.last_check as { ran_at: string }).ran_at;
+    expect(s.sendEvent).toHaveBeenCalledWith({ name: "whatsapp/connected", id: EVENT_ID(ranAt), data: { tenantId: A, connectionId: NEW_ID } });
+  });
+
+  it("carries no token, app secret or phone number", async () => {
+    const s = setup();
+    await s.run();
+    const text = JSON.stringify(s.sendEvent.mock.calls);
+    for (const secret of [TOKEN, APP_SECRET, "98765", "+91"]) expect(text).not.toContain(secret);
+  });
+
+  it("is not sent when the connection is saved failed (a rejected token, or a number not in the account)", async () => {
+    const rejected = setup({ state: "rejected" });
+    expect((await rejected.run()).status).toBe("failed");
+    expect(rejected.sendEvent).not.toHaveBeenCalled();
+    const elsewhere = setup({ ...GOOD, numberInAccount: false } as MetaProbe);
+    expect((await elsewhere.run()).status).toBe("failed");
+    expect(elsewhere.sendEvent).not.toHaveBeenCalled();
+  });
+
+  it("is not sent when Meta cannot be reached or the plan has no room: nothing is saved either", async () => {
+    const unreachable = setup({ state: "unreachable" });
+    await unreachable.run().catch(() => {});
+    expect(unreachable.sendEvent).not.toHaveBeenCalled();
+    const full = setup(GOOD, null, { numberLimit: async () => Promise.reject(new AppError("plan_required", "Your plan allows 1 WhatsApp number.")) });
+    await full.run().catch(() => {});
+    expect(full.sendEvent).not.toHaveBeenCalled();
+  });
+
+  it("a send that fails does not fail or undo the connection, nothing leaks, and the test message check still runs", async () => {
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => void logs.push(a.join(" ")));
+    const s = setup(GOOD, null, { sendEvent: async () => Promise.reject(new Error(`inngest down ${TOKEN}`)) });
+    const result = await s.run();
+    expect(result.status).toBe("active");
+    expect(s.saved).toHaveLength(1);
+    expect(s.testMessage).toHaveBeenCalledTimes(1);
+    expect(s.updates).toHaveLength(1);
+    expect(logs).toContain("[whatsapp-connect] the connected event could not be sent");
+    expect(logs.join(" ")).not.toContain(TOKEN);
+    spy.mockRestore();
+  });
+
+  it("is still sent when the audit write fails", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const s = setup(GOOD, null, { audit: async () => Promise.reject(new Error("audit down")) });
+    expect((await s.run()).status).toBe("active");
+    expect(s.sendEvent).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+
+  it("is sent after the save and the audit row, and before the test message check", async () => {
+    const order: string[] = [];
+    const s = setup(GOOD, null, { sendEvent: async () => void order.push("event"), audit: async () => void order.push("audit") });
+    const original = s.saved.push.bind(s.saved);
+    s.saved.push = (...items) => (order.push("saved"), original(...items));
+    s.testMessage.mockImplementation(async () => (order.push("test message"), SIXTH_OK));
+    await s.run();
+    expect(order).toEqual(["saved", "audit", "event", "test message"]);
+  });
+
+  it("a connection connected again in place sends an event for the same connection (a later check time gives a new id: connected-event.test.ts)", async () => {
+    const s = setup(GOOD, { id: NEW_ID, tenantId: A, channelId: "c0000000-0000-4000-8000-0000000000c1", method: "manual_byo", status: "failed" });
+    const result = await s.run();
+    expect(result.status).toBe("active");
+    expect(s.saved[0].replace).toBe(true);
+    expect(s.sendEvent).toHaveBeenCalledTimes(1);
+    expect(s.sendEvent.mock.calls[0][0]).toMatchObject({ id: EVENT_ID((result.last_check as { ran_at: string }).ran_at), data: { tenantId: A, connectionId: NEW_ID } });
   });
 });
 

@@ -6,8 +6,10 @@ import { connectionSecretContext, encryptSecret } from "../../../lib/crypto";
 import { serverEnv } from "../../../lib/env";
 import { writeAudit, type AuditEntry } from "../../../lib/audit";
 import { AppError, zodFieldErrors } from "../../../lib/errors";
+import { inngest } from "../../../inngest/client";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { graph as realGraph, isExpiredTokenAnswer, runGraphChecks, withTestMessage, withWebhookConfirmed, type Check, type Graph, type LastCheck, type NumberFacts } from "./checks";
+import { sendConnectedEvent, type SendConnectedEvent } from "./connected-event";
 import { checkTestMessage } from "./test-message-check";
 import { webhookWasSeen } from "./webhook-seen";
 
@@ -91,6 +93,8 @@ export type ManualConnectDeps = {
    * the last word.
    */
   numberLimit?: (tenantId: string, keepConnectionId: string | null) => Promise<void>;
+  /** Sends `whatsapp/connected` once the connection is saved active (connected-event.ts). Optional: a caller that gives none sends nothing. */
+  sendEvent?: SendConnectedEvent;
 };
 
 const PLATFORM_APP_SECRET_MESSAGE = "This is Spark Agent's own Meta app, which our team connects, not this form. Enter the app secret of the business's own Meta app.";
@@ -162,6 +166,7 @@ export async function connectManual(
     webhookSeen: (tenantId, connectionId) => webhookWasSeen(supabaseAdmin(), tenantId, connectionId),
     testMessage: (tenantId, actor) => checkTestMessage(tenantId, actor),
     numberLimit: (tenantId, keepConnectionId) => assertNumberAvailable(tenantId, keepConnectionId),
+    sendEvent: (event) => inngest.send(event),
   },
 ): Promise<WhatsAppConnectionPublic> {
   const parsed = StrictInput.safeParse(rawInput);
@@ -246,6 +251,8 @@ export async function connectManual(
 
   // The sixth check, only for a number that is active (notify.send refuses any other). It never changes the status; a failure here keeps the connection as saved.
   if (saved.data.status !== "active") return saved.data;
+  // `whatsapp/connected` (connected-event.ts): only for an active connection, after the save, ids only, best effort.
+  await sendConnectedEvent(deps.sendEvent, saved.data, lastCheck.ran_at);
   try {
     const sixth = withTestMessage(lastCheck, await deps.testMessage(saved.data.tenant_id, actor));
     // The test message can bring the first signed webhook of the business's own app; read the proof again so the result saved now does not undo what it cleared.
