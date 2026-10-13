@@ -184,36 +184,40 @@ So "Billing before Home" cannot be satisfied with `home-api.ts` in the Home PR (
 
 ## PR split result (13 Oct)
 
-Eight local branches, stacked in this order, each based on the previous one and on `5fefa4f` (not rebased onto `origin/main`, which is one backend-only commit ahead). Built in a separate worktree (`C:/Users/PC/AgentX-split`) so the working tree on `dev3/day6-completion` was not touched. **All local; nothing pushed, no PR opened.** The original uncommitted work is still in the working tree on `dev3/day6-completion`, and the stack's final tree matches it file by file (all 52 paths, compared ignoring line endings).
+The work is split into 8 PR branches. The first version was a single stack (each branch on the previous one); that was replaced by branches that are independent wherever the code allows, so each PR's diff holds only its own change. The old stacked branches (`dev3/pr3-template-picker`, `dev3/pr4-inbox-deeplink-wa-refresh`, `dev3/pr5-team-takeover-booking-service`, `dev3/pr6-connect-page`, `dev3/pr7-onboarding-trial-note`, `dev3/pr8-docs-audit`) still exist locally, unchanged, and are not to be published.
 
-| # | Branch | Commit | Files | Purpose | Needs |
+Built in a separate worktree (`C:/Users/PC/AgentX-split`); the working tree on `dev3/day6-completion` was not touched. **Nothing is pushed and no PR is open.** `origin/main` at the time of the split is `99bb5cf` (#149).
+
+| # | Branch | Based on | Files | Purpose | Depends on |
 |---|---|---|---|---|---|
-| 1 | `dev3/pr1-shared-plumbing` | `e854e68` | 10 | permission-aware write errors (`lib/errors`), zero-row wording (`resources-data`, `booking-service`), `anonymous` API option, setup-call env setting, mock `plans`/`credit_ledger`/`takeoverPref` | none |
-| 2 | `dev3/pr2-billing-home` | `b17c138` | 13 | Billing screen and nav item; Home on shared `AccountStatus`/`DashboardSummary` with every pause reason; route-guard entry | 1 |
-| 3 | `dev3/pr3-template-picker` | `19b829b` | 5 | template picker reads `GET /api/conversations/:id/templates`; route-guard entry | stack order only |
-| 4 | `dev3/pr4-inbox-deeplink-wa-refresh` | `f863077` | 8 | `?chat=` not-available and failed-read states; WhatsApp screen polling and daily-check note | stack order only |
-| 5 | `dev3/pr5-team-takeover-booking-service` | `c156048` | 9 | own-number takeover choice from `handoff_own_number`; active-service check for the booking-service choice | 1 (mock), 2 (Billing link) |
-| 6 | `dev3/pr6-connect-page` | `e02de1b` | 7 | `/connect/:token` page, awaiting backend; route-guard awaiting entries | 1 (anonymous calls, setup-call setting) |
-| 7 | `dev3/pr7-onboarding-trial-note` | `acb3565` | 2 | one-trial-per-number note on the onboarding "try it" step | none |
-| 8 | `dev3/pr8-docs-audit` | see `git log` | 1 | this report | none |
+| 1 | `dev3/pr1-shared-plumbing` | `main` (built on `5fefa4f`) | 10 | permission-aware write errors, zero-row wording, `anonymous` API option, setup-call env setting, mock `plans`/`credit_ledger`/`takeoverPref` | none |
+| 2 | `dev3/pr2-billing-home` | PR1 | 13 | Billing screen and nav item; Home on shared `AccountStatus`/`DashboardSummary` with every pause reason | PR1 (mock tables) |
+| 3 | `dev3/independent-template-picker` | `main` | 5 | template picker reads `GET /api/conversations/:id/templates`; route-guard entry for that route only | none |
+| 4 | `dev3/independent-inbox-wa-refresh` | `main` | 8 | `?chat=` not-available and failed-read states; WhatsApp screen polling and daily-check note | none |
+| 5 | `dev3/pr5-team-takeover-booking-service-independent` | PR2 | 9 | own-number takeover choice from `handoff_own_number`; active-service check for the booking-service choice | PR1 (mock option), PR2 (Billing page it links to) |
+| 6 | `dev3/pr6-connect-page-independent` | PR1 | 7 | `/connect/:token` page, awaiting backend; route-guard awaiting entries | PR1 (anonymous calls, setup-call setting) |
+| 7 | `dev3/independent-onboarding-trial-note` | `main` | 2 | one-trial-per-number note on the onboarding "try it" step | none |
+| 8 | `dev3/independent-docs-audit` | `main` | 1 | this report | none |
 
-Deviations from the planned groups: the template picker is its own PR (it only shares the route-guard test file with Billing); the onboarding note is a seventh code PR because it fitted no planned group.
+The independent branches are cherry-picks of the original commits onto `main`, with identical changed lines. The one conflict was in `frontend/lib/api/backend-routes.test.ts` (PR3): the original sat next to Billing's route-guard line, which is not in PR3's base. It was resolved by keeping only the template-picker line, so PR3 does not carry any Billing entry. PR2 and PR1 were not changed.
 
-Per-branch checks (each run inside its own worktree checkout; exit codes read):
+Checks per branch (each run in its own checkout of the branch; exit codes read; all against mocks):
 
-| Branch | tsc | eslint | vitest | Playwright |
+| Branch | tsc | eslint | vitest | Playwright (targeted) |
 |---|---|---|---|---|
-| pr1 | 0 | 0 (1 warning, existing) | 55 files, 945 passed, 4 todo | booking-setup, booking-service, team, knowledge: 187 passed |
+| pr1 | 0 | 0 (1 existing warning) | 55 files, 945 passed, 4 todo | booking-setup, booking-service, team, knowledge: 187 passed |
 | pr2 | 0 | 0 | 56 files, 963 passed, 4 todo | home-overview, billing, navigation, whatsapp, auth: 211 passed |
-| pr3 | 0 | 0 | 56 files, 963 passed, 4 todo | inbox-template-reply, inbox, inbox-limits: 178 passed, 3 skipped |
-| pr4 | 0 | 0 | 57 files, 966 passed, 4 todo | inbox, inbox-limits, whatsapp, inbox-lead-card: 283 passed, 6 skipped |
-| pr5 | 0 | 0 | 58 files, 989 passed, 4 todo | team, team-takeover, booking-service, booking-setup, features: 133 passed |
-| pr6 | 0 | 0 | 59 files, 996 passed, 4 todo | connect, onboarding: 76 passed |
-| pr7 | 0 | 0 | not rerun (two files, no unit code) | onboarding: 49 passed |
-| pr8 | docs only, no code checks | | | |
+| independent-template-picker | 0 | 0 | 55 files, 942 passed, 4 todo | inbox-template-reply, inbox, inbox-limits: 178 passed, 3 skipped |
+| independent-inbox-wa-refresh | 0 | 0 | 56 files, 945 passed, 4 todo | inbox, inbox-limits, whatsapp, inbox-lead-card: 283 passed, 6 skipped |
+| pr5-...-independent | 0 | 0 | 57 files, 986 passed, 4 todo | team, team-takeover, booking-service, booking-setup, features: 133 passed |
+| pr6-...-independent | 0 | 0 | 56 files, 952 passed, 4 todo | connect, onboarding: 76 passed |
+| independent-onboarding-trial-note | 0 | 0 | 55 files, 942 passed, 4 todo | onboarding: 49 passed |
+| independent-docs-audit | docs only | | | |
 
-The full Playwright suite was NOT run per branch (a run takes about 18 to 24 minutes). The last full run was on the combined working tree: 1234 passed, 2 failed, 13 skipped.
+PR1 and PR2 were checked on the older base (`5fefa4f`) and were not re-run against `99bb5cf`; #149 touches only backend, docs and `supabase/` files.
 
-The two failures are `leads-paging.spec.ts:60` on tablet and mobile. They reproduced on a clean checkout of `5fefa4f` earlier; they have not been re-baselined against the current `origin/main` (`99bb5cf`, backend-only). No Leads code is touched by any branch. `leads-filters.spec.ts:66` is intermittent.
+The full Playwright suite was NOT run per branch. The last full run was on the combined working tree: 1234 passed, 2 failed, 13 skipped. The two failures are `leads-paging.spec.ts:60` on tablet and mobile; they reproduced on a clean `5fefa4f` earlier and have NOT been re-baselined against the current `origin/main`. `leads-filters.spec.ts:66` is intermittent. No branch touches Leads code.
+
+Not verified by any of these: database migrations (0028 to 0033) and `pnpm db:test`, staging, live Realtime, Meta Embedded Signup, Razorpay, the Billing pay flows and the connect routes (not on the API; Dev 2 and Dev 1).
 
 Test harness note: the worktree shares `node_modules` with the main checkout through junctions, so a local-only `turbopack.root` setting was added to the worktree's `next.config.ts` and marked skip-worktree. It is not in any commit.
