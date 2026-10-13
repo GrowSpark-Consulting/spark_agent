@@ -75,12 +75,23 @@ export function isExpiredTokenAnswer(status: number, body: unknown): boolean {
 }
 
 /** 1. The token is valid and carries both WhatsApp permissions (`debug_token`, asked with the token itself). `expired` is set when the number's own read was refused as an expired token. */
-export async function checkToken(args: { token: string; accepted: boolean; expired?: boolean }, call: Graph, now: Date): Promise<Check> {
+export async function checkToken(
+  args: { token: string; accepted: boolean; expired?: boolean; onExpiry?: (expiresAt: Date | null) => void },
+  call: Graph,
+  now: Date,
+): Promise<Check> {
   if (!args.accepted) return make("token_permissions", "fail", args.expired ? SAFE.tokenExpired : SAFE.tokenFail, now);
   const answer = await call("GET", `debug_token?input_token=${encodeURIComponent(args.token)}`, args.token);
   if (answer.state === "answered" && !answer.ok && isExpiredTokenAnswer(answer.status, answer.body)) return make("token_permissions", "fail", SAFE.tokenExpired, now);
   if (answer.state !== "answered" || !answer.ok) return make("token_permissions", "not_verified", SAFE.tokenUnknown, now);
   const data = asRecord(asRecord(answer.body).data);
+  // When the token runs out, if Meta says: `expires_at` in seconds, 0 for a token that never expires. Told even when the token is no longer valid.
+  if (typeof data.expires_at === "number" && Number.isFinite(data.expires_at) && data.expires_at >= 0) {
+    const expiresAt = new Date(data.expires_at * 1000);
+    // A date that is not one (a huge number) is "Meta did not say", never an exception later.
+    if (data.expires_at === 0) args.onExpiry?.(null);
+    else if (!Number.isNaN(expiresAt.getTime()) && expiresAt.getUTCFullYear() <= 2200) args.onExpiry?.(expiresAt);
+  }
   if (data.is_valid === false) {
     const ranOut = typeof data.expires_at === "number" && data.expires_at > 0 && data.expires_at * 1000 <= now.getTime();
     return make("token_permissions", "fail", ranOut || asRecord(data.error).code === 190 ? SAFE.tokenExpired : SAFE.tokenFail, now);
@@ -208,6 +219,10 @@ export interface GraphChecksInput {
   tokenExpired?: boolean;
   /** Told whether an app is subscribed to the account after the webhook check (true, false, or null when Meta did not say). Not called when the check is skipped. */
   onSubscribed?: (subscribed: boolean | null) => void;
+  /** False: never ask Meta to subscribe the app (the daily health check only looks). Default true. */
+  allowSubscribe?: boolean;
+  /** Told when the token runs out (a date), that it never does (null), and not at all when Meta did not say or the token was not looked at. */
+  onTokenExpiry?: (expiresAt: Date | null) => void;
   inAccount: boolean;
   facts: NumberFacts;
   webhookSeen: () => Promise<boolean>;
@@ -216,9 +231,9 @@ export interface GraphChecksInput {
 /** The first five checks, in the contract's order, and the sixth as "not checked yet". The checks are independent: one failing never hides another. */
 export async function runGraphChecks(input: GraphChecksInput, call: Graph, now: Date): Promise<LastCheck> {
   // The token is checked first: the app is only subscribed (a write to the client's account) with a token that has both WhatsApp permissions.
-  const token = await checkToken({ token: input.token, accepted: input.accepted, expired: input.tokenExpired === true }, call, now);
+  const token = await checkToken({ token: input.token, accepted: input.accepted, expired: input.tokenExpired === true, ...(input.onTokenExpiry ? { onExpiry: input.onTokenExpiry } : {}) }, call, now);
   const [webhook, payment] = await Promise.all([
-    input.accepted ? checkWebhook({ wabaId: input.wabaId, token: input.token, method: input.method, webhookSeen: input.webhookSeen, canSubscribe: input.inAccount && token.status === "pass", ...(input.onSubscribed && { onSubscribed: input.onSubscribed }) }, call, now) : Promise.resolve(make("webhook_subscribed", "skipped", SAFE.later, now)),
+    input.accepted ? checkWebhook({ wabaId: input.wabaId, token: input.token, method: input.method, webhookSeen: input.webhookSeen, canSubscribe: input.allowSubscribe !== false && input.inAccount && token.status === "pass", ...(input.onSubscribed && { onSubscribed: input.onSubscribed }) }, call, now) : Promise.resolve(make("webhook_subscribed", "skipped", SAFE.later, now)),
     input.accepted ? checkPayment({ wabaId: input.wabaId, token: input.token }, call, now) : Promise.resolve(make("payment_method", "skipped", SAFE.later, now)),
   ]);
   const checks: Check[] = [

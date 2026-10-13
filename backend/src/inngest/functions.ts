@@ -1,4 +1,5 @@
 import { bookingReminders } from "./booking-reminders";
+import { connectionHealth, connectionHealthCheck } from "./connection-health";
 import { creditAlerts } from "./credit-alerts";
 import { dailyAgenda } from "./daily-agenda";
 import { eventAlerts } from "./event-alerts";
@@ -15,6 +16,7 @@ import { ping } from "./ping";
 import { postVisit } from "./post-visit";
 import { processMessage } from "./process-message";
 import { releaseHolds } from "./release-holds";
+import { tokenExpiry } from "./token-expiry";
 
 // Every Inngest function is registered here and served from the API's /api/inngest (see serve.ts).
 export const functions = [
@@ -35,4 +37,7 @@ export const functions = [
   phoneReplyReturn,
   creditAlerts,
   eventAlerts,
+  connectionHealth,
+  connectionHealthCheck,
+  tokenExpiry,
 ];
