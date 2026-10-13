@@ -48,6 +48,7 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0032_platform_number_fallback` | `notify_target` answers a chat through the active connection on its channel, the business's own or one of our platform numbers (a trial routed through the shared demo number); `notify_staff_target` falls back to the platform number the business's latest chat is on. A test message still needs the business's own number; another business's own number is never used. (after Dev 1's 0029 `demo_visitors` and 0031, which stores a routed chat on the platform number's channel) |
 | `0033_trial_phones` | One free trial per WhatsApp number: `trial_phones` (server-only; a SHA-256 of the number, at most one per trial, kept after an unpaid trial is deleted) and `claim_trial_phone(tenant, phone)` → `claimed` / `other_sender` / `taken` (service_role only; section 4) |
 | `0034_payu_billing` | Billing moves to PayU (decision 20): `plans.razorpay_plan_id` and `subscriptions.razorpay_subscription_id` go; `subscriptions` holds one PayU auto-debit mandate (`billing_cycle`, `amount_paise` with GST, `mandate_id` = PayU authpayuid, `mandate_method`, `next_plan_key`, `pre_debit_for`, `charge_attempts`; status `pending` / `active` / `past_due` / `cancelled`, one live per business); `payments` (one row per PayU transaction, `txnid` unique, base + GST paise; members read, the server writes; its id is the credit grant's ref_id); `tenants.setup_call_paid_at` |
+| `0035_payment_settlement` | `begin_payment` (records a subscribe, top-up or setup-fee payment before PayU; PA409 for a second plan, a top-up without a paid plan, or a setup fee already paid) and `settle_payment(txnid, state, ...)` (applies the result the server verified with PayU, once: a subscribe activates the mandate and the plan and grants the month's credits; a top-up grants its pack; a setup fee flags the business; a failure cancels a pending mandate; PA422 when PayU's amount is not ours; a second plan paid at once is kept cancelled and audited for a refund); `payments.credits`. Service role only |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -790,6 +791,20 @@ Plain lists (leads, conversations, bookings, services) are read directly under R
 
 **Home and shell (built, 12 Oct; types `AccountStatus` and `DashboardSummary` in `@pakka/types` `dashboard.ts`).** Any member.
 
+- **PayU billing (`backend/src/billing/checkout.ts`, decision 20).** Each start route is owner only and answers
+  `PayuCheckout` `{ paymentId, payu: { url, fields } }`, which the browser POSTs to PayU (an auto-submitting form). PayU
+  needs a phone: `phone` (E.164) in the body, else the owner's alert number, else `validation_failed` with `fields.phone`.
+  `not_available` until `PAYU_MERCHANT_KEY`, `PAYU_MERCHANT_SALT` and `API_PUBLIC_URL` are set.
+  - `POST /api/billing/checkout` `{ planKey: starter | growth | pro, cycle: monthly | yearly, phone? }`: the first payment
+    (yearly = 10 months' price) with the auto-debit approval. `conflict` when the business already has a plan.
+  - `POST /api/billing/topup` `{ phone? }` or no body: 1,000 credits for ₹1,199 + GST. `conflict` without a paid plan.
+  - `POST /api/billing/setup-fee` `{ phone? }` or no body: ₹4,999 + GST, once. `conflict` when already paid.
+  - `GET /api/billing/payments/:id` → `PaymentView` `{ id, kind, status: created | pending | success | failed, amountInr,
+    failureReason, createdAt }`. Any member. While not final it asks PayU again (at most every 5 seconds).
+  - `POST /api/billing/payu/return`: PayU's surl and furl (the payer's browser, from PayU's page). Verifies with PayU, then
+    303 to `/dashboard/billing?payment=<id>` (`unknown` when the txnid isn't ours). The Billing screen polls that payment.
+  - `POST /api/webhooks/payu`: PayU's webhook (form or JSON with `txnid`). Verifies with PayU; 200 when handled or not
+    ours, 503 while PayU can't be asked (so PayU retries). Nothing posted to either URL is trusted, only `verify_payment`.
 - `GET /api/billing/balance` → `AccountStatus` (`backend/src/billing/account-status.ts`): `status`, `plan { key, name, monthlyCredits }`,
   `credits { plan, topup, total }` (`credit_balance`), `creditsGranted` (the meter's denominator: grants of plan, trial,
   top-up and admin credits whose bucket is still live), `renewsAt` (the subscription's period end, active businesses only),

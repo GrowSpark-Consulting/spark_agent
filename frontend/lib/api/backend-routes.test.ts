@@ -90,6 +90,13 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   // Not wired yet: built for the inbox's template picker (Dev 3), which still reads whatsapp_templates under RLS and cannot tell a chat's number.
   // When the picker calls it, this line moves to FRONTEND_CALLS.
   "GET /api/conversations/:id/templates": "not called yet: the inbox template picker's list of templates this chat's number can send (Dev 2, #141)",
+  // PayU billing (Dev 2, decision 20). The Billing screen's buttons move these to FRONTEND_CALLS when they call them.
+  "POST /api/billing/checkout": "not called yet: the Billing screen's Choose plan button (PayU checkout with auto-debit)",
+  "POST /api/billing/topup": "not called yet: the Billing screen's top-up button (PayU one-time payment)",
+  "POST /api/billing/setup-fee": "not called yet: the Billing screen's setup add-on (PayU one-time payment)",
+  "GET /api/billing/payments/:id": "not called yet: the Billing screen polls it after PayU sends the payer back with ?payment=<id>",
+  "POST /api/billing/payu/return": "PayU's checkout page posts the payer's browser here (a navigation); it redirects to /dashboard/billing",
+  "POST /api/webhooks/payu": "PayU calls it: payment results (verified with PayU before anything changes)",
 };
 
 function sourceFiles(dir: string): string[] {
