@@ -31,13 +31,13 @@ const PHONE = "+919800000001";
 describe("demo number database access", () => {
   it("counts a message through demo_admit, with the server's time and the business of a valid code", async () => {
     const c = client({ rpc: { data: [row({ message_tenant_id: A })] } });
-    expect(await demoDb(c.db, () => NOW).admit({ phone: PHONE, wamid: "w1", limit: 30, routeTenantId: A })).toEqual({ allowed: true, replay: false, tenantId: A });
+    expect(await demoDb(c.db, () => NOW).admit({ phone: PHONE, wamid: "w1", limit: 30, routeTenantId: A })).toEqual({ allowed: true, replay: false, notifyLimit: false, tenantId: A });
     expect(c.calls[0]).toEqual({ op: "rpc", args: ["demo_admit", { p_phone: PHONE, p_wamid: "w1", p_limit: 30, p_now: NOW.toISOString(), p_route_tenant: A }] });
   });
 
   it("sends no route when the message had no valid code", async () => {
     const c = client({ rpc: { data: [row()] } });
-    expect(await demoDb(c.db, () => NOW).admit({ phone: PHONE, wamid: "w1", limit: 30, routeTenantId: null })).toEqual({ allowed: true, replay: false, tenantId: null });
+    expect(await demoDb(c.db, () => NOW).admit({ phone: PHONE, wamid: "w1", limit: 30, routeTenantId: null })).toEqual({ allowed: true, replay: false, notifyLimit: false, tenantId: null });
     expect(c.calls[0]).toEqual({ op: "rpc", args: ["demo_admit", expect.objectContaining({ p_route_tenant: null })] });
   });
 
@@ -55,15 +55,15 @@ describe("demo number database access", () => {
   });
 
   it("finds the business of a code that has not expired, and of one that never expires", async () => {
-    expect(await demoDb(client({ select: { data: { tenant_id: A, expires_at: "2026-10-14T00:00:00Z" } } }).db, () => NOW).findRoute("TRIAL-7F3K")).toEqual({ tenantId: A });
-    expect(await demoDb(client({ select: { data: { tenant_id: A, expires_at: null } } }).db, () => NOW).findRoute("DEMO-SALON")).toEqual({ tenantId: A });
+    expect(await demoDb(client({ select: { data: { tenant_id: A, kind: "trial", expires_at: "2026-10-14T00:00:00Z" } } }).db, () => NOW).findRoute("TRIAL-7F3K")).toEqual({ tenantId: A, kind: "trial" });
+    expect(await demoDb(client({ select: { data: { tenant_id: A, kind: "demo", expires_at: null } } }).db, () => NOW).findRoute("DEMO-SALON")).toEqual({ tenantId: A, kind: "demo" });
   });
 
   it("finds nothing for an unknown code, an expired one or one with no business", async () => {
     expect(await demoDb(client({ select: { data: null } }).db, () => NOW).findRoute("DEMO-X")).toBeNull();
-    expect(await demoDb(client({ select: { data: { tenant_id: A, expires_at: "2026-10-13T09:59:59Z" } } }).db, () => NOW).findRoute("TRIAL-7F3K")).toBeNull();
-    expect(await demoDb(client({ select: { data: { tenant_id: A, expires_at: "2026-10-13T10:00:00Z" } } }).db, () => NOW).findRoute("TRIAL-7F3K")).toBeNull();
-    expect(await demoDb(client({ select: { data: { tenant_id: null, expires_at: null } } }).db, () => NOW).findRoute("DEMO-X")).toBeNull();
+    expect(await demoDb(client({ select: { data: { tenant_id: A, kind: "trial", expires_at: "2026-10-13T09:59:59Z" } } }).db, () => NOW).findRoute("TRIAL-7F3K")).toBeNull();
+    expect(await demoDb(client({ select: { data: { tenant_id: A, kind: "trial", expires_at: "2026-10-13T10:00:00Z" } } }).db, () => NOW).findRoute("TRIAL-7F3K")).toBeNull();
+    expect(await demoDb(client({ select: { data: { tenant_id: null, kind: "demo", expires_at: null } } }).db, () => NOW).findRoute("DEMO-X")).toBeNull();
   });
 
   it("looks a code up by the code itself", async () => {

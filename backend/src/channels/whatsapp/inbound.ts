@@ -82,7 +82,12 @@ export interface WebhookDeps {
    * the business that owns the number's connection row. Optional: without it (or when no demo number is set) every number
    * behaves as before.
    */
-  demo?: { phoneNumberId: string; route: (message: DemoMessage) => Promise<DemoDecision> };
+  demo?: {
+    phoneNumberId: string;
+    route: (message: DemoMessage) => Promise<DemoDecision>;
+    /** The business whose chat on this channel holds a message: the one a delivery status is for (the connection's own business holds only the front desk's). */
+    messageTenant: (args: { providerMsgId: string; channelId: string }) => Promise<string | null>;
+  };
 }
 
 /** The demo number's id, if one is set. An invalid environment is reported by the handler itself, so here it just means none. */
@@ -107,7 +112,7 @@ const realDeps = (): WebhookDeps => ({
   storeEchoedMessage: (args) => storeEchoedMessage(supabaseAdmin(), args),
   sendEvent: (event) => inngest.send(event),
   noteWebhookSeen: (tenantId, connectionId) => noteWebhookSeen(tenantId, connectionId),
-  ...(demoNumberId() ? { demo: { phoneNumberId: demoNumberId() as string, route: (message: DemoMessage) => routeDemoMessage(message, demoDb()) } } : {}),
+  ...(demoNumberId() ? { demo: { phoneNumberId: demoNumberId() as string, route: (message: DemoMessage) => routeDemoMessage(message, demoDb()), messageTenant: (args: { providerMsgId: string; channelId: string }) => demoDb().messageTenant(args) } } : {}),
 });
 
 export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps = realDeps()): Promise<Response> {
@@ -163,7 +168,7 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
   }
   const parsed = parseWebhook(payload);
 
-  const counts = { echoes: 0, echoesSwitched: 0, echoesSkipped: 0, stored: 0, duplicates: 0, statuses: 0, unknown: 0, inactive: 0, failed: 0, templates: 0, templatesIgnored: 0, templatesNotOurs: 0, ambiguous: 0, health: 0, demoRouted: 0, demoDropped: 0 };
+  const counts = { echoes: 0, echoesSwitched: 0, echoesSkipped: 0, stored: 0, duplicates: 0, statuses: 0, unknown: 0, inactive: 0, failed: 0, templates: 0, templatesIgnored: 0, templatesNotOurs: 0, ambiguous: 0, health: 0, demoRouted: 0, demoDropped: 0, demoReplied: 0 };
   const errorCodes = new Set<string>();
   const fail = (err: unknown) => {
     counts.failed++;
@@ -209,9 +214,34 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
         let tenantId = connection.tenantId;
         let storable = toStorable(message);
         if (deps.demo && connection.method === "platform" && message.phoneNumberId === deps.demo.phoneNumberId) {
-          const decision = await deps.demo.route({ from: message.from, providerMsgId: message.providerMsgId, text: message.type === "text" ? clean(message.text) : undefined });
+          const decision = await deps.demo.route({
+            from: message.from,
+            providerMsgId: message.providerMsgId,
+            channelId: connection.channelId,
+            deskTenantId: connection.tenantId,
+            text: message.type === "text" ? clean(message.text) : undefined,
+          });
           if (decision.action === "drop") {
             counts.demoDropped++;
+            if (decision.reply) {
+              // Nothing is routed, so the visitor's message is kept with the front desk (the business that owns the number's connection, which answers on its
+              // own row) and the answer is started as an event: the assistant is not asked, and the webhook never waits on Meta.
+              const desk = await deps.storeInboundMessage({
+                tenantId: connection.tenantId,
+                channelId: connection.channelId,
+                phone: message.from,
+                contactName: clean(message.contactName),
+                providerMsgId: message.providerMsgId,
+                sentAt: message.timestamp,
+                ...storable,
+              });
+              await deps.sendEvent({
+                id: `demo_reply:${desk.messageId}`,
+                name: "whatsapp/demo.reply",
+                data: { tenantId: connection.tenantId, conversationId: desk.conversationId, messageId: desk.messageId, kind: decision.reply.kind, lang: decision.reply.lang },
+              });
+              counts.demoReplied++;
+            }
             continue;
           }
           counts.demoRouted++;
@@ -279,7 +309,14 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
       const connection = connectionFor(status);
       if (!connection) continue;
       try {
-        await deps.applyMessageStatus({ tenantId: connection.tenantId, providerMsgId: status.providerMsgId, status: status.status });
+        // On the demo number a message belongs to the business whose chat holds it, not to the business that owns the connection.
+        let tenantId = connection.tenantId;
+        if (deps.demo && connection.method === "platform" && status.phoneNumberId === deps.demo.phoneNumberId) {
+          const holder = await deps.demo.messageTenant({ providerMsgId: status.providerMsgId, channelId: connection.channelId });
+          if (!holder) continue;
+          tenantId = holder;
+        }
+        await deps.applyMessageStatus({ tenantId, providerMsgId: status.providerMsgId, status: status.status });
         counts.statuses++;
       } catch (err) {
         fail(err);
@@ -357,7 +394,7 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
   for (const item of parsed.ignored) if (item.reason === "unsupported_field") unknownFields.set(item.field, (unknownFields.get(item.field) ?? 0) + 1);
   const fields = unknownFields.size > 0 ? ` fields=${[...unknownFields].map(([name, n]) => `${name}:${n}`).join(",")}` : "";
 
-  const demo = counts.demoRouted + counts.demoDropped > 0 ? ` demo_routed=${counts.demoRouted} demo_dropped=${counts.demoDropped}` : "";
+  const demo = counts.demoRouted + counts.demoDropped > 0 ? ` demo_routed=${counts.demoRouted} demo_dropped=${counts.demoDropped} demo_replied=${counts.demoReplied}` : "";
   const codes = errorCodes.size > 0 ? ` error_codes=${[...errorCodes].join(",")}` : "";
   console.log(
     `${TAG} messages=${parsed.messages.length} stored=${counts.stored} duplicates=${counts.duplicates} echoes=${parsed.echoes.length} echoes_stored=${counts.echoes} echoes_switched=${counts.echoesSwitched} echoes_skipped=${counts.echoesSkipped} statuses=${counts.statuses} ` +

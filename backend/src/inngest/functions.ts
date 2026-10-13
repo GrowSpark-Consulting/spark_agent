@@ -1,6 +1,7 @@
 import { bookingReminders } from "./booking-reminders";
 import { connectionHealth, connectionHealthCheck } from "./connection-health";
 import { creditAlerts } from "./credit-alerts";
+import { demoReply } from "./demo-reply";
 import { dailyAgenda } from "./daily-agenda";
 import { eventAlerts } from "./event-alerts";
 import { googleCalendarSync } from "./google-calendar-sync";
@@ -40,4 +41,5 @@ export const functions = [
   connectionHealth,
   connectionHealthCheck,
   tokenExpiry,
+  demoReply,
 ];
