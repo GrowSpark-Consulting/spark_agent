@@ -1,8 +1,8 @@
--- 0030: a business routed through one of our platform numbers (a trial on the shared demo number) is answered, and its
+-- 0032: a business routed through one of our platform numbers (a trial on the shared demo number) is answered, and its
 -- staff alerted, through that number; another business's own number is never used. Run: pnpm db:test
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(9);
+select plan(10);
 
 insert into auth.users (id, email) values
   ('0f000000-0000-0000-0000-0000000000a1', 'fallback-trial@test.local'),
@@ -49,6 +49,11 @@ select throws_ok($$select * from public.notify_target('0f100000-0000-0000-0000-0
   'PA409', null, 'another business''s own number is never used, whatever channel a chat points at');
 select throws_ok($$select * from public.notify_target('0f100000-0000-0000-0000-00000000000c', null, '+919800000999')$$,
   'PA409', null, 'a test message still needs the business''s own number');
+-- End to end with Dev 1's 0031: a visitor's message stored for the routed trial on the demo channel is answered there.
+select is((select connection_id from public.notify_target('0f100000-0000-0000-0000-00000000000c',
+            (select conversation_id from public.store_inbound_message('0f100000-0000-0000-0000-00000000000c', '0f200000-0000-0000-0000-00000000000b',
+               '+919800000904', 'Visitor', 'wamid.fallback-1', 'text', 'Hi', null, null, now())))),
+  '0f300000-0000-0000-0000-00000000000b'::uuid, 'a chat stored by the demo routing (0031) is answered through the demo number');
 
 -- notify_staff_target --------------------------------------------------------------------------------------------
 select is((select connection_id from public.notify_staff_target('0f100000-0000-0000-0000-00000000000c', '0f000000-0000-0000-0000-0000000000a1')),

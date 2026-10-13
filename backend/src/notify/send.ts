@@ -247,7 +247,7 @@ export async function send(tenantId: string, kind: NotificationKind, payload: No
   if (chosen) {
     // Only an approved template of the number this message goes out on, with exactly the values its body asks for. By
     // connection alone: notify_target picked it for this business, and a platform number's templates belong to the
-    // platform business (0030).
+    // platform business (0032).
     const found = await db
       .from("whatsapp_templates")
       .select("name, language, category, components")

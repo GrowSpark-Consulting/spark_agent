@@ -66,7 +66,7 @@ describe("loadSendConnection", () => {
     expect(db.calls).toContainEqual({ table: "whatsapp_connections", method: "eq", args: ["id", CONNECTION] });
   });
 
-  it("uses one of our platform numbers for a routed business, decrypting with the number's own business (0030)", async () => {
+  it("uses one of our platform numbers for a routed business, decrypting with the number's own business (0032)", async () => {
     const { client } = fakeSupabase({ whatsapp_connections: { data: [row({ tenant_id: PLATFORM_TENANT, method: "platform" })], error: null } });
     await expect(loadSendConnection(client, ids)).resolves.toMatchObject({ tenantId: PLATFORM_TENANT, connectionId: CONNECTION });
   });

@@ -16,7 +16,7 @@ const ConnectionRow = z.object({ tenant_id: z.string(), method: z.string(), phon
 /**
  * The phone number id and encrypted token of one active connection, read with the service role (whatsapp_connections
  * is closed to every other role): the business's own, or one of our platform numbers (the shared demo number a trial
- * is routed through, which notify_target picks for a chat on its channel; 0030). The returned tenantId is the
+ * is routed through, which notify_target picks for a chat on its channel; 0032). The returned tenantId is the
  * connection's own business, since the adapter decrypts the token with it. A missing or inactive connection, or another
  * business's own number, is whatsapp_not_connected; a database failure is thrown as a plain Error.
  */

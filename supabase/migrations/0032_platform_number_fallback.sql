@@ -1,4 +1,4 @@
--- 0030_platform_number_fallback: a business whose customers write to one of our own numbers (the shared demo number a
+-- 0032_platform_number_fallback: a business whose customers write to one of our own numbers (the shared demo number a
 -- trial is routed through, Dev 1's demo routing; 9-day plan, Day 6) is answered through that number (Dev 2, 13 Oct).
 --
 -- A routed trial has no connection of its own: its customers' conversations are on the platform number's channel, and

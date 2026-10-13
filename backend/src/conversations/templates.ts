@@ -9,7 +9,7 @@ import { templateVariableCount } from "../notify/send";
 // picker. A template belongs to one WhatsApp number (whatsapp_templates.connection_id), and the browser cannot tell which
 // number a chat is on (whatsapp_connections_public has no channel_id), so the server asks notify_target, which notify.send
 // sends through: the business's active number on the chat's channel, or for a routed trial the platform number its
-// customer wrote to (0030). That number's templates belong to whichever business owns the connection, so they are read by
+// customer wrote to (0032). That number's templates belong to whichever business owns the connection, so they are read by
 // connection. Sending one is POST /api/conversations/:id/messages with { template: { name, language, params } }. Any member.
 
 export interface ConversationTemplate {
