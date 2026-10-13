@@ -1,6 +1,6 @@
 "use client";
 
-import type { AccountStatus, Role } from "@pakka/types";
+import { PAID_PLAN_KEYS, SETUP_FEE_INR, TOPUP_PACK, type AccountStatus, type Role } from "@pakka/types";
 import { useCallback, useEffect, useState } from "react";
 import { EmptyState, ErrorState, LoadingState } from "@/components/shared/states";
 import { daysLeft, meterShare, pausedNotice } from "@/features/home/home-api";
@@ -17,11 +17,15 @@ import {
   type LedgerEntry,
   type PlanOption,
 } from "./billing-data";
+import { ActionFeedback, PhonePrompt, sameAction, useBillingActions, type BillingAction, type BillingActions, type BillingCycle } from "./billing-actions";
+import { PaymentReturn } from "./payment-return";
 
-// /dashboard/billing (Day 6, Dev 3). What can be shown truthfully today: the plan and its status, the credit balance, the credit history
-// (credit_ledger under RLS) and the plans on offer (the plans catalogue). What cannot: paying. POST /api/billing/checkout, /topup and
-// /change-plan, the Razorpay webhook and invoices are Dev 2's and are not on the API yet, so this screen has no pay, upgrade, downgrade
-// or top-up button and no invoice list, and says so. Nothing here claims a payment happened. Owners and admins see it; staff do not
+// /dashboard/billing (Day 6, Dev 3). Shows the plan and its status, the credit balance, the credit history (credit_ledger under RLS) and the
+// plans on offer (the plans catalogue). The business owner can also start a payment through PayU (docs/contracts.md, "PayU billing"): choose
+// a first plan, change plan, buy a top-up or the setup fee (billing-actions.tsx). Admins see the same screen without those buttons: the API
+// refuses anyone but the owner, and the screen says so. Paying happens on PayU's page; when PayU sends the payer back with ?payment=<id>
+// the banner (payment-return.tsx) asks the API what happened, and the plan and credits are re-read only once it confirms. Nothing here
+// claims a payment from a button click or from the address. Owners and admins see the screen; staff do not
 // (docs/dashboard-screen-inventory.md, "Billing & credits": owner, admin view only).
 
 export function canViewBilling(role: Role): boolean {
@@ -54,7 +58,7 @@ const number = new Intl.NumberFormat("en-IN");
 const rupees = (n: number) => `₹${number.format(n)}`;
 const STATUS_LABEL: Record<AccountStatus["status"], string> = { trial: "Free trial", active: "Active", paused: "Paused", cancelled: "Cancelled" };
 
-export function BillingScreen({ tenantId, role, timeZone }: { tenantId: string; role: Role; timeZone: string }) {
+export function BillingScreen({ tenantId, role, timeZone, paymentId = null }: { tenantId: string; role: Role; timeZone: string; paymentId?: string | null }) {
   if (!canViewBilling(role)) {
     return (
       <p className="app-notice" role="status" data-testid="billing-no-access" style={{ margin: 0 }}>
@@ -62,19 +66,28 @@ export function BillingScreen({ tenantId, role, timeZone }: { tenantId: string; 
       </p>
     );
   }
-  return <BillingView tenantId={tenantId} timeZone={timeZone} />;
+  return <BillingView tenantId={tenantId} timeZone={timeZone} isOwner={role === "owner"} paymentId={paymentId} />;
 }
 
-function BillingView({ tenantId, timeZone }: { tenantId: string; timeZone: string }) {
+function BillingView({ tenantId, timeZone, isOwner, paymentId }: { tenantId: string; timeZone: string; isOwner: boolean; paymentId: string | null }) {
   const loadStatus = useCallback((): Promise<AccountStatus> => fetchAccountStatus(tenantId), [tenantId]);
   const loadPlans = useCallback((): Promise<PlanOption[]> => fetchPlans(getSupabaseBrowserClient()), []);
   const loadHistory = useCallback((): Promise<LedgerEntry[]> => fetchCreditHistory(getSupabaseBrowserClient(), tenantId), [tenantId]);
   const [status, retryStatus] = useLoad(loadStatus);
   const [plans, retryPlans] = useLoad(loadPlans);
   const [history, retryHistory] = useLoad(loadHistory);
+  const actions = useBillingActions(tenantId, timeZone);
+  const [cycle, setCycle] = useState<BillingCycle>("monthly");
+  // Only a payment the API has confirmed (success or failed) changes what the screen shows: re-read the plan and the credits then.
+  const confirmed = useCallback(() => {
+    retryStatus();
+    retryHistory();
+  }, [retryStatus, retryHistory]);
 
   return (
     <>
+      {paymentId ? <PaymentReturn key={paymentId} tenantId={tenantId} paymentId={paymentId} onConfirmed={confirmed} /> : null}
+
       <Section id="plan" title="Your plan">
         <Body state={status} loading="Loading your plan" missing="Your plan isn't available yet" errorTitle="Couldn't load your plan" onRetry={retryStatus}>
           {(s) => <PlanCard status={s} timeZone={timeZone} />}
@@ -88,13 +101,28 @@ function BillingView({ tenantId, timeZone }: { tenantId: string; timeZone: strin
       </Section>
 
       <Section id="plans" title="Plans">
+        <ActionFeedback actions={actions} />
+        <PhonePrompt actions={actions} />
+        {isOwner && status.status === "ready" && status.data.status !== "active" ? <CycleChoice cycle={cycle} onChange={setCycle} disabled={actions.busy !== null} /> : null}
         <Body state={plans} loading="Loading plans" missing="Plans aren't available yet" errorTitle="Couldn't load the plans" onRetry={retryPlans}>
-          {(list) => <PlanList plans={list} current={status.status === "ready" ? status.data.plan : null} />}
+          {(list) => <PlanList plans={list} status={status.status === "ready" ? status.data : null} isOwner={isOwner} cycle={cycle} actions={actions} />}
         </Body>
-        <p className="app-hint" data-testid="payments-unavailable" style={{ margin: 0 }}>
-          Changing your plan and topping up credits from the dashboard isn&apos;t switched on yet, so there is nothing to buy here. Your plan and credits stay as they are.
-        </p>
+        {isOwner ? (
+          <p className="app-hint" data-testid="payments-note" style={{ margin: 0 }}>
+            Prices are before GST; PayU shows the total before you pay. Yearly is ten months&apos; price for twelve. You pay on PayU&apos;s secure page, and your plan and credits only change once PayU confirms the payment.
+          </p>
+        ) : (
+          <p className="app-hint" data-testid="owner-only-note" style={{ margin: 0 }}>
+            Only the business owner can pay or change the plan. Ask the owner to do it from this page.
+          </p>
+        )}
       </Section>
+
+      {isOwner ? (
+        <Section id="extras" title="Top up and extras">
+          <Extras status={status.status === "ready" ? status.data : null} actions={actions} />
+        </Section>
+      ) : null}
 
       <Section id="history" title="Credit history">
         <Body state={history} loading="Loading credit history" missing="Credit history isn't available yet" errorTitle="Couldn't load credit history" onRetry={retryHistory}>
@@ -103,7 +131,7 @@ function BillingView({ tenantId, timeZone }: { tenantId: string; timeZone: strin
       </Section>
 
       <Section id="invoices" title="Invoices">
-        <EmptyState compact title="Invoices aren't available yet" description="Invoices will be listed here once payments are switched on." />
+        <EmptyState compact title="No invoice list yet" description="The dashboard doesn't list invoices. Each payment you make shows up in the credit history once PayU confirms it." />
       </Section>
     </>
   );
@@ -214,29 +242,97 @@ function CreditCard({ status }: { status: AccountStatus }) {
   );
 }
 
-function PlanList({ plans, current }: { plans: PlanOption[]; current: AccountStatus["plan"] | null }) {
+function CycleChoice({ cycle, onChange, disabled }: { cycle: BillingCycle; onChange: (c: BillingCycle) => void; disabled: boolean }) {
+  return (
+    <fieldset data-testid="cycle-choice" disabled={disabled} style={{ border: 0, margin: 0, padding: 0, display: "flex", gap: 16, flexWrap: "wrap" }}>
+      <legend className="app-card-text" style={{ padding: 0, marginBottom: 6 }}>
+        How do you want to pay?
+      </legend>
+      {(["monthly", "yearly"] as const).map((c) => (
+        <label key={c} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <input type="radio" name="billing-cycle" value={c} checked={cycle === c} onChange={() => onChange(c)} />
+          {c === "monthly" ? "Monthly" : "Yearly (10 months for 12)"}
+        </label>
+      ))}
+    </fieldset>
+  );
+}
+
+function PlanList({ plans, status, isOwner, cycle, actions }: { plans: PlanOption[]; status: AccountStatus | null; isOwner: boolean; cycle: BillingCycle; actions: BillingActions }) {
   if (plans.length === 0) return <EmptyState compact title="No plans to show" description="The plan list is empty." />;
+  const current = status?.plan ?? null;
   const RELATION = { current: "Your plan", upgrade: "Higher plan", downgrade: "Lower plan" } as const;
+  // A live paid plan is changed (change-plan); with none (the trial, paused, cancelled) the first plan is chosen (checkout).
+  const hasPlan = status?.status === "active";
+  const yearly = !hasPlan && cycle === "yearly";
   return (
     <ul className="app-grid" data-testid="plan-list" style={{ listStyle: "none", margin: 0, padding: 0 }}>
       {plans.map((p) => {
         const relation = planRelation(p, current, plans);
+        const planKey = PAID_PLAN_KEYS.find((k) => k === p.key);
+        const action: BillingAction | null = !isOwner || !status || !planKey ? null : hasPlan ? { kind: "change_plan", planKey } : { kind: "checkout", planKey, cycle };
+        const working = action !== null && sameAction(actions.busy, action);
+        const label = hasPlan
+          ? relation === "current"
+            ? "Keep this plan"
+            : relation === "upgrade"
+              ? `Upgrade to ${p.name}`
+              : `Switch to ${p.name} at renewal`
+          : `Choose ${p.name}`;
         return (
           <li key={p.key} className="app-card" data-plan={p.key} data-relation={relation}>
             <span className="app-card-title">{p.name}</span>
             <span style={{ fontSize: "clamp(20px, 3vw, 26px)", fontWeight: 800 }}>
-              {rupees(p.priceInr)}
-              <span style={{ fontSize: 13, fontWeight: 400 }}> / month</span>
+              {rupees(yearly ? p.priceInr * 10 : p.priceInr)}
+              <span style={{ fontSize: 13, fontWeight: 400 }}>{yearly ? " / year" : " / month"}</span>
             </span>
             <span className="app-card-text">{number.format(p.monthlyCredits)} credits each month</span>
             <span className="app-card-text">
               {p.seats} {p.seats === 1 ? "team seat" : "team seats"} · {p.whatsappNumbers} WhatsApp {p.whatsappNumbers === 1 ? "number" : "numbers"}
             </span>
             <span className="app-status">{RELATION[relation]}</span>
+            {action ? (
+              <>
+                <button type="button" className={relation === "current" && hasPlan ? "btn btn-secondary" : "btn btn-primary"} disabled={actions.busy !== null} aria-busy={working} data-testid={`plan-action-${p.key}`} onClick={() => void actions.run(action)}>
+                  {working ? (action.kind === "change_plan" && relation !== "upgrade" ? "Saving…" : "Opening PayU…") : label}
+                </button>
+                {hasPlan && relation === "current" ? <span className="app-hint">Cancels a downgrade you scheduled earlier.</span> : null}
+              </>
+            ) : null}
           </li>
         );
       })}
     </ul>
+  );
+}
+
+function Extras({ status, actions }: { status: AccountStatus | null; actions: BillingActions }) {
+  const topup: BillingAction = { kind: "topup" };
+  const setup: BillingAction = { kind: "setup_fee" };
+  const paid = status?.status === "active";
+  return (
+    <div className="app-grid">
+      <div className="app-card" data-testid="topup-card">
+        <span className="app-card-title">Credit top-up</span>
+        <span style={{ fontSize: "clamp(20px, 3vw, 26px)", fontWeight: 800 }}>{rupees(TOPUP_PACK.priceInr)}</span>
+        <span className="app-card-text">{number.format(TOPUP_PACK.credits)} credits, expiring 90 days after purchase. Before GST.</span>
+        {status && !paid ? (
+          <span className="app-hint">Top-ups are for businesses on a paid plan. Choose a plan first.</span>
+        ) : (
+          <button type="button" className="btn btn-primary" disabled={!status || actions.busy !== null} data-testid="topup-action" onClick={() => void actions.run(topup)}>
+            {sameAction(actions.busy, topup) ? "Opening PayU…" : "Buy credits"}
+          </button>
+        )}
+      </div>
+      <div className="app-card" data-testid="setup-fee-card">
+        <span className="app-card-title">Assisted setup</span>
+        <span style={{ fontSize: "clamp(20px, 3vw, 26px)", fontWeight: 800 }}>{rupees(SETUP_FEE_INR)}</span>
+        <span className="app-card-text">One-time fee, before GST. It adds no credits; we call you to help set things up.</span>
+        <button type="button" className="btn btn-secondary" disabled={actions.busy !== null} data-testid="setup-fee-action" onClick={() => void actions.run(setup)}>
+          {sameAction(actions.busy, setup) ? "Opening PayU…" : "Pay the setup fee"}
+        </button>
+      </div>
+    </div>
   );
 }
 
