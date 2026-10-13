@@ -2,9 +2,9 @@
 
 Dev 1 files: `backend/src/channels/whatsapp/connect/embedded-signup.ts` and its test (new); `manual.ts` (the saved record can now carry `method`, `coexistence`, `messagingLimit`, `tokenExpiresAt`, and a null `appSecretEnc`; a manual connection leaves them out and saves as before; `realDb` is exported) and `checks.ts` (the `Graph` client takes an optional JSON body) edited. Shared files, additive only: one import, one handler and one route entry in `backend/src/server/routes.ts`; `EMBEDDED_SIGNUP_ENABLED` in `backend/src/lib/env.ts` and `backend/.env.example`. Nothing of Dev 2's or Dev 3's changed. Nothing ran against a real Meta account: every Graph call below is UNVERIFIED.
 
-## 0. One thing for Dev 3 before this merges green
+## 0. Dev 3's route-guard test (done, approved by Dev 3)
 
-`frontend/lib/api/backend-routes.test.ts` lists `POST /api/onboarding/whatsapp/embedded-signup` under `AWAITING_BACKEND`. The test is built to fail the moment the API registers a route in that list, so with this PR `pnpm test` fails in the frontend (two tests: "a route the frontend is waiting for is still not registered" and "every backend route is called by the frontend or has a stated reason it is not"). The fix is one line in Dev 3's file: move that entry from `AWAITING_BACKEND` to `FRONTEND_CALLS`. Not done here, because the file is Dev 3's. `GET /api/connect-links/:token` stays in `AWAITING_BACKEND` (PR 3).
+`frontend/lib/api/backend-routes.test.ts` fails the moment the API registers a route listed under `AWAITING_BACKEND`. With Dhatri's approval the entry `POST /api/onboarding/whatsapp/embedded-signup` moved to `FRONTEND_CALLS` in this PR (her wording and call shape, nothing else in her file). `GET /api/connect-links/:token` stays in `AWAITING_BACKEND` until PR 3.
 
 ## 1. The route
 
