@@ -1,8 +1,8 @@
-# 13 Oct (Dev 1): an idempotency key on the AI reply. A DRAFT PR: do not merge until Dev 2's refund_credits migration is on main
+# 13 Oct (Dev 1): an idempotency key on the AI reply
 
 Dev 1 files: `backend/src/agent/pipeline/reply.ts` (about 20 lines) and its tests (`reply.test.ts`, `reply-booking.test.ts`, `reply-voice.test.ts`, `step8-audit.test.ts`). No file, table, function or route of Dev 2 or Dev 3 changed. No migration.
 
-## 0. Must not merge until Dev 2's refund_credits fix is on main
+## 0. The refund_credits hazard this PR depended on is fixed (Dev 2, #163, migration 0034)
 
 `notify.send` derives the message id from the idempotency key (`keyedMessageId`) and uses that id as the credit ref: it calls `spend_credits(..., ref)` before the send and `refund_credits(ref)` if the send fails. `spend_credits` writes new ledger rows on every call, but `refund_credits` (migration 0008) refunds a ref **only once**: a second refund for the same ref returns 0. Today the AI reply is sent without a key, so every attempt gets a random id and every failed attempt is refunded. With a stable key, every attempt of a turn spends under the same ref, so only the first failed attempt is refunded.
 
@@ -15,9 +15,9 @@ Reproduced on the local database (rolled back; the same ref on three attempts of
 | 2 | yes | **0** | **9** |
 | 3 | yes | **0** | **8** |
 
-So a reply whose send keeps failing in a way waiting can fix (the step is tried again, up to 3 retries) would leave up to 3 credits spent for a message that never went out; the buttons followed by the plain-text line (the same key) add at most one more. Every sender that already uses a key (booking reminders, follow-up nudges, the external-notice line, the demo replies, the staff alerts) has the same property.
+That was the behaviour before #163. So a reply whose send keeps failing in a way waiting can fix (the step is tried again, up to 3 retries) would leave up to 3 credits spent for a message that never went out; the buttons followed by the plain-text line (the same key) add at most one more. Every sender that already uses a key (booking reminders, follow-up nudges, the external-notice line, the demo replies, the staff alerts) has the same property.
 
-**Dev 2 confirmed the bug and will fix it in a new migration (the net unrefunded spend per bucket). This PR stays a draft and must not be merged until that migration is on main.** Nothing in Dev 2's files is changed here. The credit behaviour is not tested here: the tests prove the retry behaviour at the sender level only (a fake sender that dedupes on the key, as `notify.send` does).
+**Dev 2 fixed it in #163 (migration 0034, `refund_credits` gives back the net unrefunded spend of the ref per bucket, so a retried keyed send gets every failed attempt's credits back). It is on main and merged into this branch.** Re-running the same reproduction on the local database with 0034 applied: balance 10, then 10, 10, 10 (every failed attempt refunded 1). Nothing in Dev 2's files is changed here. The credit behaviour is Dev 2's and is tested by his migration's tests; the tests in this PR prove the retry behaviour at the sender level only (a fake sender that dedupes on the key, as `notify.send` does).
 
 ## 1. What changes
 
@@ -37,4 +37,4 @@ Written first and run against the old code (12 failed), then against the change;
 
 ## 4. What touches Dev 2's area
 
-Nothing is changed. `notify.send`'s existing `idempotencyKey` is used, as `external-notice.ts`, `lead-nudges.ts` and others do. The refund behaviour above is Dev 2's.
+Nothing is changed. `notify.send`'s existing `idempotencyKey` is used, as `external-notice.ts`, `lead-nudges.ts` and others do. The refund behaviour above was Dev 2's and is fixed in #163.
