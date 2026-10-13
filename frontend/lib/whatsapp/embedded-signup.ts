@@ -13,8 +13,8 @@ import { z } from "zod";
 // Meta's docs before switching the flow on.
 //
 // The payload is shaped like handover module 10, step 3 ({ code, wabaId, phoneNumberId, coexistence }
-// to POST /api/onboarding/whatsapp/embedded-signup). That endpoint doesn't exist yet: nothing here
-// sends anything.
+// to POST /api/onboarding/whatsapp/embedded-signup, which answers not_available while
+// EMBEDDED_SIGNUP_ENABLED is off). Nothing here sends anything; features/connect/connect-link.ts does.
 
 const MESSAGE_TYPE = "WA_EMBEDDED_SIGNUP";
 const META_ID = z.string().regex(/^\d{1,32}$/);
