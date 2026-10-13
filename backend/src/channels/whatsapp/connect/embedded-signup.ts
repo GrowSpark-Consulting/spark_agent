@@ -173,7 +173,7 @@ export async function connectNumber(caller: SignupCaller, input: SignupInput, de
 
   const id = existing?.id ?? deps.newId();
   const run = await runConnectionChecks(
-    { tenantId, connectionId: id, method: caller.method, wabaId: input.wabaId, phoneNumberId: input.phoneNumberId, token },
+    { tenantId, connectionId: id, method: caller.method, wabaId: input.wabaId, phoneNumberId: input.phoneNumberId, token, coexistence: input.coexistence },
     { probe: deps.probe, graph: deps.graph, webhookSeen: deps.webhookSeen, now: deps.now },
   );
   if (run.state === "unreachable") throw new AppError("upstream_failed", UNREACHABLE);

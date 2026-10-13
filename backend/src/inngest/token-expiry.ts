@@ -6,7 +6,7 @@ import { send } from "../notify/send";
 import { staffAlertRecipients } from "../notify/staff-alerts";
 import { inngest } from "./client";
 
-// token-expiry (docs/handover.md, module 10, "Jobs"): once a day, at 04:00 UTC (9:30 in India), the owners and admins of every active manual connection
+// token-expiry (docs/handover.md, module 10, "Jobs"): once a day, at 04:00 UTC (9:30 in India), the owners and admins of every active manual, Embedded Signup or assisted connection
 // whose token runs out within 7 days are warned (a staff_alert through notify.send, free, behind the staff_alerts switch). One step per connection, so a
 // retry repeats only what failed; the key `token_expiring:<connection>:<expiry date>:<person>` keeps it to one warning per expiry date, whatever retries
 // or repeat runs do. The date comes from the daily health check (connection-health), which reads it from Meta.

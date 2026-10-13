@@ -57,6 +57,42 @@ describe("2. the number is in the account and registered for the Cloud API", () 
   it("is skipped when Meta did not accept the token (the first check already says so)", () => {
     expect(checkNumber({ accepted: false, inAccount: false, facts: facts(null) }, NOW).status).toBe("skipped");
   });
+
+  describe("a coexistence number (it also runs in the WhatsApp Business app)", () => {
+    it("can only pass or be not_verified on platform_type, never fail", () => {
+      for (const type of ["CLOUD_API", null, "NOT_APPLICABLE", "ON_PREMISE", "SOMETHING_NEW"]) {
+        const status = checkNumber({ accepted: true, inAccount: true, facts: facts(type), coexistence: true }, NOW).status;
+        expect(["pass", "not_verified"]).toContain(status);
+      }
+    });
+    it("an odd platform_type is not_verified, with its own words, and the number stays out of failure (overall is warn)", () => {
+      const check = checkNumber({ accepted: true, inAccount: true, facts: facts("NOT_APPLICABLE"), coexistence: true }, NOW);
+      expect(check).toMatchObject({ key: "number_registered", status: "not_verified", message: SAFE.numberCoexistence });
+      expect(overallOf([check])).toBe("warn");
+    });
+    it("a CLOUD_API or unlabelled one passes as before", () => {
+      expect(checkNumber({ accepted: true, inAccount: true, facts: facts("CLOUD_API"), coexistence: true }, NOW).status).toBe("pass");
+      expect(checkNumber({ accepted: true, inAccount: true, facts: facts(null), coexistence: true }, NOW).status).toBe("pass");
+    });
+    it("the in-account check still applies: a number that is in another account fails", () => {
+      expect(checkNumber({ accepted: true, inAccount: false, facts: facts("NOT_APPLICABLE"), coexistence: true }, NOW)).toMatchObject({ status: "fail", message: SAFE.numberNotInAccount });
+    });
+    it("a number that is not coexistence (false, or not said) still fails on an odd platform_type", () => {
+      for (const coexistence of [false, undefined]) {
+        expect(checkNumber({ accepted: true, inAccount: true, facts: facts("NOT_APPLICABLE"), ...(coexistence === undefined ? {} : { coexistence }) }, NOW)).toMatchObject({ status: "fail", message: SAFE.numberNotCloud });
+      }
+    });
+    it("runGraphChecks passes the flag on: a coexistence number with an odd platform_type is not failed overall", async () => {
+      const call: Graph = async (_m, path) => {
+        if (path.startsWith("debug_token")) return answered({ data: { is_valid: true, scopes: ["whatsapp_business_management", "whatsapp_business_messaging"] } });
+        if (path.endsWith("/subscribed_apps")) return answered({ data: [{ id: "1" }] });
+        return answered({ primary_funding_id: "1" });
+      };
+      const base = { wabaId: "100", token: "t", method: "embedded_signup", accepted: true, inAccount: true, facts: { nameStatus: "APPROVED", platformType: "NOT_APPLICABLE" }, webhookSeen: async () => false };
+      expect((await runGraphChecks({ ...base, coexistence: true }, call, NOW)).overall).toBe("warn");
+      expect((await runGraphChecks({ ...base, coexistence: false }, call, NOW)).overall).toBe("fail");
+    });
+  });
 });
 
 describe("3. the webhook", () => {

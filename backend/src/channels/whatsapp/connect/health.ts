@@ -9,7 +9,7 @@ import { maskPhone } from "../phone";
 import { runConnectionChecks, type ChecksRun } from "./run-checks";
 import { webhookWasSeen } from "./webhook-seen";
 
-// The daily check of a manual connection (docs/handover.md, module 10, "Jobs": connection-health). The same five Graph checks as a recheck
+// The daily check of a connection whose token is the client's own: manual, Embedded Signup and assisted (docs/handover.md, module 10, "Jobs": connection-health). The same five Graph checks as a recheck
 // (run-checks.ts), run by the system instead of a person, so:
 //   * the number is never put in `validating`: it keeps working while it is looked at, and a crash cannot leave it stuck. The write is a
 //     compare-and-set on `status = 'active'`, so a recheck or a disconnect that came in meanwhile wins and this writes nothing;
@@ -22,8 +22,8 @@ import { webhookWasSeen } from "./webhook-seen";
 // assistants. Only the five Graph checks decide; a stale sixth check never does.
 // The quality rating, messaging limit, display fields and the token's expiry date are refreshed along the way. UNVERIFIED against a live Meta account.
 
-/** The connection methods checked daily. Embedded Signup and assisted connections can be added here when they go live. */
-export const HEALTH_METHODS = ["manual_byo"] as const;
+/** The connection methods checked daily: every method whose token is the client's own. Our own `platform` numbers are not (the team looks after those). */
+export const HEALTH_METHODS = ["manual_byo", "embedded_signup", "assisted"] as const;
 /** A connection checked less than this long ago (by a recheck, or an earlier run) is not checked again. */
 export const RECHECK_AFTER_MS = 20 * 3_600_000;
 /** A failure counts as a repeat only when the earlier failing result is at least this much older (a retried step must not count as a second day). */
@@ -51,8 +51,9 @@ const Row = z.object({
   quality_rating: z.string().nullable(),
   messaging_limit: z.string().nullable(),
   last_check: z.unknown(),
+  coexistence: z.boolean().nullish(),
 });
-const COLUMNS = "id, method, waba_id, phone_number_id, status, token_enc, display_phone, updated_at, quality_rating, messaging_limit, last_check";
+const COLUMNS = "id, method, waba_id, phone_number_id, status, token_enc, display_phone, updated_at, quality_rating, messaging_limit, last_check, coexistence";
 
 export interface HealthDeps {
   db: SupabaseClient;
@@ -94,7 +95,7 @@ export const healthDefaults = (): HealthDeps => {
 
 export type DueConnection = { tenantId: string; connectionId: string };
 
-/** Active manual connections not checked for 20 hours (or never), the longest-waiting first, at most `DUE_LIMIT`. Reads across businesses: it is how the jobs find them. */
+/** Active connections of the methods in `HEALTH_METHODS` not checked for 20 hours (or never), the longest-waiting first, at most `DUE_LIMIT`. Reads across businesses: it is how the jobs find them. */
 export async function dueConnections(deps: Pick<HealthDeps, "db" | "now">): Promise<DueConnection[]> {
   const { data, error } = await deps.db
     .from("whatsapp_connections")
@@ -175,7 +176,7 @@ export async function checkConnectionHealth(ids: DueConnection, deps: HealthDeps
     run = { state: "done", probe: { state: "rejected" }, lastCheck, fresh: {}, subscribed: null, seenBefore: undefined, tokenExpiresAt: undefined };
   } else {
     run = await runConnectionChecks(
-      { tenantId, connectionId, method: row.method, wabaId: row.waba_id, phoneNumberId: row.phone_number_id, token, allowSubscribe: false },
+      { tenantId, connectionId, method: row.method, wabaId: row.waba_id, phoneNumberId: row.phone_number_id, token, allowSubscribe: false, coexistence: row.coexistence === true },
       { probe: deps.probe, graph: deps.graph, webhookSeen: deps.webhookSeen, now: deps.now },
     );
   }

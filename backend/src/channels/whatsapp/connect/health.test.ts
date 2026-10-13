@@ -282,8 +282,8 @@ describe("what is never touched", () => {
 
   it("a connection of another kind: our own platform numbers, and any method that is not listed", async () => {
     await skipped(row({ method: "platform" }), "not_active");
-    await skipped(row({ method: "embedded_signup" }), "not_active");
-    expect(HEALTH_METHODS).toEqual(["manual_byo"]);
+    await skipped(row({ method: "some_future_method" }), "not_active");
+    expect([...HEALTH_METHODS]).toEqual(["manual_byo", "embedded_signup", "assisted"]);
   });
 
   it("an unknown connection, and another business's", async () => {
@@ -410,8 +410,22 @@ describe("which connections are due", () => {
   });
 
   it("not a number that is failed, disconnected, validating or pending, nor one of our own platform numbers", async () => {
-    const rows = ["failed", "disconnected", "validating", "pending"].map((status, i) => row({ id: `c${i}`, status, last_check: {} }));
+    const rows = ["failed", "disconnected", "validating", "pending"].flatMap((status, i) => HEALTH_METHODS.map((method) => row({ id: `c${i}${method}`, status, method, last_check: {} })));
     expect(await due([...rows, row({ id: "cp", method: "platform", last_check: {} })])).toEqual([]);
+  });
+
+  it.each(["manual_byo", "embedded_signup", "assisted"])("an active %s connection that was never checked", async (method) => {
+    expect((await due([row({ id: "c1", method, last_check: {} })])).map((c) => c.connectionId)).toEqual(["c1"]);
+  });
+
+  it("all three methods in one sweep, and a platform number left out of it", async () => {
+    const result = await due([
+      row({ id: "m", method: "manual_byo", last_check: {} }),
+      row({ id: "e", method: "embedded_signup", last_check: {} }),
+      row({ id: "a", method: "assisted", last_check: {} }),
+      row({ id: "p", method: "platform", last_check: {} }),
+    ]);
+    expect(result.map((c) => c.connectionId).sort()).toEqual(["a", "e", "m"]);
   });
 
   it("a stored result that is not the usual shape counts as never checked", async () => {
@@ -459,5 +473,149 @@ describe("reading the messaging limit", () => {
     expect(await read(answered({ messaging_limit_tier: 1000 })).result).toBeNull();
     expect(await read(answered({ messaging_limit_tier: "tier 1k <script>" })).result).toBeNull();
     expect(await read(answered(null)).result).toBeNull();
+  });
+});
+
+// Embedded Signup and assisted connections (Day 6): the same daily check, the same failure rule. They have no app secret of their own (our app signs their
+// webhooks), so no signed webhook is awaited, and the daily check never subscribes the app.
+describe.each(["embedded_signup", "assisted"])("a %s connection", (method) => {
+  const mine = (over: Row = {}) => row({ method, messaging_limit: "TIER_10K", ...over });
+
+  it("is checked: the checks, quality, messaging limit and display fields are refreshed, and it stays active", async () => {
+    const w = world([mine()]);
+    expect(await checkConnectionHealth(ids, w.deps)).toEqual({ status: "checked", overall: "pass", failed: false });
+    expect(w.conn()).toMatchObject({ status: "active", method, quality_rating: "GREEN", messaging_limit: "TIER_10K", display_phone: "+91 98765 43210", verified_name: "Skyline Homes" });
+    expect(lastOf(w.conn()).ran_at).toBe(NOW.toISOString());
+    expect(lastOf(w.conn()).checks.map((c) => `${c.key}:${c.status}`)).toEqual([
+      "token_permissions:pass", "number_registered:pass", "webhook_subscribed:pass", "display_name_approved:pass", "payment_method:pass", "test_message_delivered:pass",
+    ]);
+  });
+
+  it("does not wait for a signed webhook of its own: an app subscribed to the account is a pass, whether or not one was seen", async () => {
+    const w = world([mine()], { webhookSeen: false });
+    await checkConnectionHealth(ids, w.deps);
+    expect(lastOf(w.conn()).checks.find((c) => c.key === "webhook_subscribed")).toMatchObject({ status: "pass", message: SAFE.webhookPassPlatform });
+  });
+
+  it("never asks Meta to subscribe the app: none subscribed is only a warning and nothing is posted", async () => {
+    const noApps: Graph = async (m, p, t) => (p.endsWith("/subscribed_apps") ? answered({ data: [] }) : healthy(m, p, t));
+    const w = world([mine()], { graph: noApps });
+    expect(await checkConnectionHealth(ids, w.deps)).toMatchObject({ failed: false });
+    expect(w.graph.mock.calls.filter(([m]) => m === "POST")).toEqual([]);
+    expect(lastOf(w.conn()).checks.find((c) => c.key === "webhook_subscribed")).toMatchObject({ status: "warn" });
+    expect(w.conn().status).toBe("active");
+  });
+
+  it("stores the token expiry from debug_token, clears it for a token that never expires, and leaves it when Meta does not say", async () => {
+    const at = (expiresAt?: number): Graph => async (m, p, t) =>
+      p.startsWith("debug_token") ? answered({ data: { is_valid: true, scopes: BOTH, ...(expiresAt === undefined ? {} : { expires_at: expiresAt }) } }) : healthy(m, p, t);
+    const dated = world([mine()], { graph: at(1792000000) });
+    await checkConnectionHealth(ids, dated.deps);
+    expect(dated.conn().token_expires_at).toBe(new Date(1792000000 * 1000).toISOString());
+    const never = world([mine({ token_expires_at: "2026-10-20T00:00:00.000Z" })], { graph: at(0) });
+    await checkConnectionHealth(ids, never.deps);
+    expect(never.conn().token_expires_at).toBeNull();
+    const quiet = world([mine({ token_expires_at: "2026-10-20T00:00:00.000Z" })], { graph: at() });
+    await checkConnectionHealth(ids, quiet.deps);
+    expect(quiet.conn().token_expires_at).toBe("2026-10-20T00:00:00.000Z");
+  });
+
+  it("a token Meta says has expired fails the number at once, audited by the system, with the alert facts", async () => {
+    const expired: Graph = async (m, p, t) => (p.startsWith("debug_token") ? answered({ data: { is_valid: false, error: { code: 190 } } }) : healthy(m, p, t));
+    const w = world([mine()], { graph: expired, probe: { state: "rejected", reason: "token_expired" } });
+    const result = await checkConnectionHealth(ids, w.deps);
+    expect(result).toMatchObject({ status: "checked", failed: true, alert: { reason: "token", detail: SAFE.tokenExpired } });
+    expect(w.conn().status).toBe("failed");
+    expect(w.audits).toEqual([expect.objectContaining({ action: "whatsapp_connection.health_failed", actor: "system", diff: { from: "active", to: "failed", reason: "token" } })]);
+  });
+
+  it("a failure that is not the token waits for a repeat on the next day", async () => {
+    const w = world([mine()], { probe: withName("DECLINED") });
+    expect(await checkConnectionHealth(ids, w.deps)).toEqual({ status: "checked", overall: "fail", failed: false });
+    expect(w.conn().status).toBe("active");
+    w.conn().last_check = { ...lastOf(w.conn()), ran_at: "2026-10-12T02:00:00.000Z" };
+    expect(await checkConnectionHealth(ids, w.deps)).toMatchObject({ failed: true, alert: { reason: "checks", detail: SAFE.nameFail } });
+    expect(w.conn().status).toBe("failed");
+  });
+
+  it("a saved token that cannot be read is not Meta's word: one night does not fail the number", async () => {
+    const w = world([mine()], { decrypt: () => { throw new Error("bad key"); } });
+    expect(await checkConnectionHealth(ids, w.deps)).toMatchObject({ failed: false });
+    expect(w.probe).not.toHaveBeenCalled();
+    expect(w.conn().status).toBe("active");
+  });
+
+  it("when Meta cannot be asked nothing is written", async () => {
+    const w = world([mine()], { probe: { state: "unreachable" } });
+    expect(await checkConnectionHealth(ids, w.deps)).toEqual({ status: "skipped", reason: "unreachable" });
+    expect(w.writes()).toEqual([]);
+  });
+
+  it("a number the owner rechecked or disconnected while this ran is not overwritten", async () => {
+    const w = world([mine()]);
+    const racing: Graph = async (m, p, t) => {
+      w.conn().status = "validating";
+      return healthy(m, p, t);
+    };
+    expect(await checkConnectionHealth(ids, { ...w.deps, graph: racing })).toEqual({ status: "skipped", reason: "changed" });
+    expect(w.conn().status).toBe("validating");
+  });
+
+  it("every query and the write name the business", async () => {
+    const w = world([mine()]);
+    await checkConnectionHealth(ids, w.deps);
+    for (const call of w.calls) expect(JSON.stringify(call)).toContain(A);
+  });
+});
+
+// A coexistence number also runs in the WhatsApp Business app. What Meta labels it with is unknown (UNVERIFIED), so the platform_type test can only pass or
+// be not_verified for it, never fail. The in-account check still applies.
+describe("a coexistence connection", () => {
+  const odd: MetaProbe = { ...GOOD, info: { ...GOOD.info, facts: { nameStatus: "APPROVED", platformType: "NOT_APPLICABLE" } } } as MetaProbe;
+  const numberCheck = (r: Row) => lastOf(r).checks.find((c) => c.key === "number_registered");
+
+  it.each(["embedded_signup", "assisted"])("%s with an odd platform_type is not failed, now or on the next day", async (method) => {
+    const w = world([row({ method, coexistence: true, messaging_limit: "TIER_10K" })], { probe: odd });
+    expect(await checkConnectionHealth(ids, w.deps)).toMatchObject({ status: "checked", failed: false });
+    expect(numberCheck(w.conn())).toMatchObject({ status: "not_verified", message: SAFE.numberCoexistence });
+    expect(lastOf(w.conn()).overall).toBe("warn");
+    w.conn().last_check = { ...lastOf(w.conn()), ran_at: "2026-10-12T02:00:00.000Z" };
+    expect(await checkConnectionHealth(ids, w.deps)).toMatchObject({ failed: false });
+    expect(w.conn().status).toBe("active");
+    expect(w.audits.filter((a) => a.action === "whatsapp_connection.health_failed")).toEqual([]);
+  });
+
+  it("the connection is read WITH its coexistence value (the fake database returns whole rows, so the select itself is checked)", async () => {
+    const w = world([row({ method: "embedded_signup", coexistence: true })]);
+    await checkConnectionHealth(ids, w.deps);
+    const reads = w.calls.filter((c) => c.op === "select" && c.table === "whatsapp_connections");
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every((c) => c.select.split(",").map((x) => x.trim()).includes("coexistence"))).toBe(true);
+  });
+
+  it("a non-coexistence row with the same odd platform_type still fails on the repeat", async () => {
+    for (const method of ["embedded_signup", "assisted", "manual_byo"]) {
+      const w = world([row({ method, coexistence: false, messaging_limit: "TIER_10K" })], { probe: odd });
+      expect(await checkConnectionHealth(ids, w.deps)).toEqual({ status: "checked", overall: "fail", failed: false });
+      expect(numberCheck(w.conn())).toMatchObject({ status: "fail", message: SAFE.numberNotCloud });
+      w.conn().last_check = { ...lastOf(w.conn()), ran_at: "2026-10-12T02:00:00.000Z" };
+      expect(await checkConnectionHealth(ids, w.deps)).toMatchObject({ failed: true, alert: { reason: "checks", detail: SAFE.numberNotCloud } });
+      expect(w.conn().status).toBe("failed");
+    }
+  });
+
+  it("a row with no coexistence value counts as not coexistence", async () => {
+    const w = world([row({ method: "embedded_signup", messaging_limit: "TIER_10K" })], { probe: odd });
+    await checkConnectionHealth(ids, w.deps);
+    expect(numberCheck(w.conn())).toMatchObject({ status: "fail" });
+  });
+
+  it("the in-account check still applies: a coexistence number that is not in the account fails on the repeat", async () => {
+    const elsewhere = { ...odd, numberInAccount: false } as MetaProbe;
+    const w = world([row({ method: "embedded_signup", coexistence: true, messaging_limit: "TIER_10K" })], { probe: elsewhere });
+    await checkConnectionHealth(ids, w.deps);
+    expect(numberCheck(w.conn())).toMatchObject({ status: "fail", message: SAFE.numberNotInAccount });
+    w.conn().last_check = { ...lastOf(w.conn()), ran_at: "2026-10-12T02:00:00.000Z" };
+    expect(await checkConnectionHealth(ids, w.deps)).toMatchObject({ failed: true, alert: { detail: SAFE.numberNotInAccount } });
   });
 });

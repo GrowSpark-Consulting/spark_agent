@@ -31,7 +31,7 @@ export type ChecksRun =
     };
 
 export async function runConnectionChecks(
-  args: { tenantId: string; connectionId: string; method: string; wabaId: string; phoneNumberId: string; token: string; allowSubscribe?: boolean },
+  args: { tenantId: string; connectionId: string; method: string; wabaId: string; phoneNumberId: string; token: string; allowSubscribe?: boolean; coexistence?: boolean },
   deps: RunChecksDeps,
 ): Promise<ChecksRun> {
   const probe = await deps.probe({ wabaId: args.wabaId, phoneNumberId: args.phoneNumberId, token: args.token });
@@ -55,6 +55,7 @@ export async function runConnectionChecks(
         tokenExpiresAt = value;
       },
       ...(args.allowSubscribe === false ? { allowSubscribe: false } : {}),
+      ...(args.coexistence === true ? { coexistence: true } : {}),
       inAccount: probe.state === "ok" && probe.numberInAccount,
       facts: { nameStatus: probe.state === "ok" ? (probe.info.facts?.nameStatus ?? null) : null, platformType: probe.state === "ok" ? (probe.info.facts?.platformType ?? null) : null },
       webhookSeen: async () => (seenBefore = await deps.webhookSeen(args.tenantId, args.connectionId)),
