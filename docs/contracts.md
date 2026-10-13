@@ -52,6 +52,7 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0036_payment_settlement` | `begin_payment` (records a subscribe, top-up or setup-fee payment before PayU; PA409 for a second plan, a top-up without a paid plan, or a setup fee already paid) and `settle_payment(txnid, state, ...)` (applies the result the server verified with PayU, once: a subscribe activates the mandate and the plan and grants the month's credits; a top-up grants its pack; a setup fee flags the business; a failure cancels a pending mandate; PA422 when PayU's amount is not ours; a second plan paid at once is kept cancelled and audited for a refund); `payments.credits`. Service role only |
 | `0037_renewals` | Plan renewals by PayU auto-debit: `payments.for_period_end` (one open renewal per subscription and period), `subscriptions.pre_debit_at` (the debit time the notice announced); `begin_renewal`, `renewals_to_notify`, `renewals_to_charge` (period ended, announced time come, none pending or paid, under 3 failed attempts, none in 2 days), `grant_annual_credit_months`, `lapse_overdue_subscriptions` (past due 7 days → cancelled, business paused); `settle_payment` now settles renewals (success moves the period on and grants the month to the end of the next month; failure → `past_due`) and audits a payment that needs a refund as `payment.needs_refund`. Service role only |
 | `0038_plan_change` | `begin_plan_change(tenant, plan, txnid)`: the same plan cancels a scheduled downgrade (`kept`) or does nothing (`unchanged`); a cheaper plan is scheduled for the next renewal (`next_plan_key`; `scheduled`); a dearer one is an upgrade now (`upgrade`): the price difference for the rest of the period (at least ₹1, GST added) and a new mandate at the new full price, as a pending subscription that `replaces_subscription_id` the current one, with the rest of the month's extra credits. PA409 without a plan, PA428 while a renewal is past due. `settle_payment` applies a paid upgrade: old plan cancelled (the server revokes its mandate at PayU), new one active over the same period, extra credits joining the current month's. Service role only |
+| `0039_trial_lifecycle` | The trial's messages and its end: `trial_notices` (server-only; one row per business and day, claimed before sending; `claimed_by` = the job run, so a retry of that run may send again and another run may not); `trial_notices_due(now)` (each trial's latest due day: 3 four days before the end, 5 two days before, 6 one day before, 7 once paused at the end, within 3 days); `claim_trial_notice(tenant, day, run)` → `claimed` / `already` / `superseded` / `not_eligible`, rechecked under the business's row lock (never a business with an active or past_due subscription); `pause_expired_trials(now)` (an ended trial with no live subscription and no subscription payment pending → `paused`, audited `tenant.trial_ended`; a business being paid for is skipped). Service role only |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -152,7 +153,7 @@ type NotificationKind =               // decides toggle, template and credit cos
   | 'ai_reply' | 'consent_notice' | 'booking_confirmation' | 'reminder_24h' | 'reminder_2h'
   | 'followup_nudge' | 'noshow_rebooking' | 'feedback_request' | 'review_request'
   | 'handoff_customer_notice' | 'staff_alert' | 'lead_card' | 'daily_agenda'
-  | 'trial_message' | 'credit_alert' | 'quote_sent' | 'quote_followup' | 'pretrip_info'
+  | 'account_notice' | 'credit_alert' | 'quote_sent' | 'quote_followup' | 'pretrip_info'   // account_notice: was trial_message
   | 'staff_reply' | 'test_message' | 'system_notice';
 
 type SendOutcome =
@@ -228,6 +229,13 @@ Pro). Like `staff_alert` it goes to a member's alert number (`staffUserId`): fre
 morning! Today at {business}: 2 bookings." then one "• 10:00 am, Site visit with Asha (Priya)" line per booking and the
 calendar link), else the approved `daily_agenda_vN` template with {{1}} how many ("2 bookings"), {{2}} the first one and
 {{3}} the calendar link.
+
+**`account_notice` (built, 13 Oct; planned as `trial_message`):** a notice about the account itself (the trial, a plan
+payment) to an owner's or admin's alert number (`staffUserId`; `sendAccountNotice` in `backend/src/notify/account-notices.ts`
+sends one to each). Free. Unlike `staff_alert` it is not gated by `isEnabled`, so it still goes when the business is paused
+or its trial has ended (a `staff_alert` would be skipped then); it respects the business's own `staff_alerts` switch
+(`isSwitchedOn`: the toggle alone, whatever the plan or status). Free text inside the member's window, else the approved
+`staff_alert_vN` template ({{1}} what happened, {{2}} the link). Used by the trial lifecycle and the plan renewals.
 
 `{name}` is the contact's name, else the masked number (`+9198xxxxxx45`). Every parameter is one line with no
 tabs or runs of spaces (Meta refuses them, 132018); customer and business names are cut to 40 characters.
@@ -561,14 +569,32 @@ admin grant starts again. Credits that expire with no spend wake nothing; the ne
 1. **Notices:** each mandate whose period ends within 4 days gets its renewal payment and PayU's pre-debit notice (cards
    and UPI; e-NACH needs none), announcing the job's first run at least 48 hours away and not before the period ends.
 2. **Charges:** at that run the mandate is charged. The payment is marked pending before PayU is asked, so a crash or
-   timeout never charges twice. A failure sends the owners and admins a `staff_alert` ("Your Spark Agent plan payment of
+   timeout never charges twice. A failure sends the owners and admins an `account_notice` ("Your Spark Agent plan payment of
    ₹2,948.82 didn't go through. We'll try again in 2 days." with the billing link; key `renewal_failed:<payment id>`).
    Up to 3 attempts a period, 2 days apart; the subscription is `past_due` meanwhile and the business keeps working.
 3. **Pending:** charges pending over 10 minutes are verified with PayU; one PayU has no record of after an hour is failed.
 4. **Annual months:** an annual plan's credits still come month by month.
-5. **Lapse:** a plan unpaid 7 days after its period ended is cancelled and the business paused; the owners are told
-   (key `subscription_lapsed:<subscription id>`). Choosing a plan in Billing starts again.
+5. **Lapse:** a plan unpaid 7 days after its period ended is cancelled and the business paused; the owners and admins
+   are told (key `subscription_lapsed:<subscription id>`; an `account_notice`, since a `staff_alert` is skipped once the
+   business is paused). Choosing a plan in Billing starts again.
 UNVERIFIED until the PayU test account: whether a retry needs a fresh pre-debit notice (UPI's sequence numbers).
+
+**Trial lifecycle (`trial-lifecycle` and `trial-lifecycle-sweep`, built 13 Oct; `backend/src/billing/trial-lifecycle.ts`).**
+Each notice goes to the trial's owners with an alert number as an `account_notice`, claimed first (0039), so it goes once;
+keys `trial_notice:<business>:<day>:<owner>`. Placeholder wording until Raja's.
+- **Day 0** (`trial-lifecycle`, on `tenant.trial_started`, at once): welcome, the TRIAL code to try the assistant on the demo
+  number, the dashboard link.
+- **Hourly sweep** (`trial-lifecycle-sweep`, at :15, one run at a time): first every trial that has ended with no active or
+  past_due subscription and no subscription payment pending is paused (any hour; the inbox stays readable; a plan bought
+  in Billing makes it active again). Then, between 09:00 and 20:00 in India, each trial's latest due notice: day 3 (four
+  days before the end: replies sent and leads found so far, or how to try it), day 5 (two days before: the plan that fits
+  the credits used so far, scaled to a month), day 6 (it ends tomorrow), day 7 (it ended and the assistant is paused). A
+  trial met late gets only its latest notice, never a burst; days move with an extended `trial_ends_at`.
+- **Never a paid business:** the claim and the pause recheck under the business's row lock (the lock `settle_payment` takes),
+  so a business that pays during or after its trial gets no "trial ending" notice and is not paused.
+- `GET /api/billing/balance` reads a trial paused at its end as `aiPausedReason: trial_ended`.
+- KNOWN LIMIT: a notice reaches an owner only through their alert number (the Team screen; onboarding does not ask for it
+  yet) and, outside their 24-hour window, only once the `staff_alert` template is approved. The pause does not depend on it.
 
 **Event alerts (`event-alerts`, built 12 Oct; `backend/src/inngest/event-alerts.ts`).** Dev 1's events that tell staff
 something become staff alerts (section 2): `lead.hot` → `hot_lead` (with the lead card) and `voice_note.received` →
@@ -830,7 +856,8 @@ Plain lists (leads, conversations, bookings, services) are read directly under R
 - `GET /api/billing/balance` → `AccountStatus` (`backend/src/billing/account-status.ts`): `status`, `plan { key, name, monthlyCredits }`,
   `credits { plan, topup, total }` (`credit_balance`), `creditsGranted` (the meter's denominator: grants of plan, trial,
   top-up and admin credits whose bucket is still live), `renewsAt` (the subscription's period end, active businesses only),
-  `trialEndsAt`, `aiPaused` with `aiPausedReason` (in this order: `paused`, `cancelled`, `trial_ended`,
+  `trialEndsAt`, `aiPaused` with `aiPausedReason` (in this order: `paused` (`trial_ended` for a trial the trial-lifecycle
+  job paused at its end, plan still `trial`), `cancelled`, `trial_ended`,
   `whatsapp_not_connected` (a paying business with no active WhatsApp number, never connected or failed; a trial replies
   through the shared demo number, so never) or `no_credits`), `lowCredits` (a
   fifth or less of the monthly credits left, as the credit alerts use) and `aiAutoReply` (the AI-replies switch, apart from

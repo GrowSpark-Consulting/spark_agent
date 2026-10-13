@@ -18,11 +18,18 @@ export type NotificationKind =
   | "review_request"
   | "system_notice"
   | "staff_alert"
+  | "account_notice"
   | "daily_agenda";
 
 export type KindConfig = {
   /** isEnabled gate; kinds without one are always allowed. */
   feature?: FeatureKey;
+  /**
+   * The business's own switch only (tenant_features, else the default), whatever its plan or status. For notices about the
+   * account itself, which must still reach the owner when the business is paused or its trial has ended (isEnabled is off
+   * then), while an owner who switched the alerts off gets none.
+   */
+  preference?: FeatureKey;
   /** Automated messages cost credits; staff-initiated ones (replies, test messages) never do. */
   charged: boolean;
   /** Credit reason when sent as free text inside the 24-hour window. Template sends use the template's category. */
@@ -62,5 +69,9 @@ export const KINDS: Record<NotificationKind, KindConfig> = {
   // To a staff member's own WhatsApp: free, behind the staff_alerts toggle; outside their 24-hour window the
   // approved staff_alert_vN template ({{1}} what happened, {{2}} the link).
   staff_alert: { feature: "staff_alerts", charged: false, template: "staff_alert", sender: "system", audience: "staff" },
+  // To an owner's or admin's own WhatsApp about the account (the trial, a plan payment): free; sent while the business is
+  // paused or its trial has ended, but not to one that switched staff alerts off. Outside their 24-hour window the approved
+  // staff_alert_vN template, which has the same {{1}} what happened, {{2}} the link.
+  account_notice: { preference: "staff_alerts", charged: false, template: "staff_alert", sender: "system", audience: "staff" },
   daily_agenda: { feature: "daily_agenda", charged: false, template: "daily_agenda", sender: "system", audience: "staff" },
 };

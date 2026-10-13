@@ -29,6 +29,15 @@ export async function isEnabled(tenantId: string, featureKey: FeatureKey): Promi
 }
 
 /**
+ * The business's own switch for a feature (tenant_features, else features.default_on), whatever its plan or status: for
+ * notices about the account, which go even to a paused business (notify KINDS `preference`).
+ */
+export async function isSwitchedOn(tenantId: string, featureKey: FeatureKey): Promise<boolean> {
+  const states = await getFeatureStates(tenantId);
+  return states.find((s) => s.key === featureKey)?.toggledOn ?? false;
+}
+
+/**
  * Every feature with its plan and toggle state. Pass `fresh: true` where a user just changed a
  * toggle (the toggles screen): other server instances may still hold the old state for up to 60 s.
  */
