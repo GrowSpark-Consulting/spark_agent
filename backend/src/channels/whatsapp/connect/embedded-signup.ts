@@ -9,6 +9,7 @@ import { serverEnv } from "../../../lib/env";
 import { AppError, zodFieldErrors } from "../../../lib/errors";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { requireRole } from "../../../lib/tenant";
+import { sendConnectedEvent, type SendConnectedEvent } from "./connected-event";
 import { graph as realGraph, SAFE, subscribeApp, withCheck, withTestMessage, type Check, type Graph } from "./checks";
 import { readMessagingLimit } from "./health";
 import { probeMeta, realDb, type ConnectionRecord, type ManualConnectDb, type MetaProbe } from "./manual";
@@ -63,7 +64,7 @@ export interface EmbeddedSignupDeps {
   audit: (entry: AuditEntry) => Promise<void>;
   /** The plan's WhatsApp numbers (billing/plan-limits.ts); asked before Meta is. */
   numberLimit?: ((tenantId: string, keepConnectionId: string | null) => Promise<void>) | undefined;
-  sendEvent: (event: { name: "whatsapp/connected"; id: string; data: { tenantId: string; connectionId: string } }) => Promise<unknown>;
+  sendEvent: SendConnectedEvent;
 }
 
 /**
@@ -238,12 +239,8 @@ export async function connectNumber(caller: SignupCaller, input: SignupInput, de
   }
   if (saved.data.status !== "active") return saved.data;
 
-  // `whatsapp/connected`: ids only. The id holds the check's time, so a later reconnection of the same row is a new event. A failure is logged with a fixed line.
-  try {
-    await deps.sendEvent({ name: "whatsapp/connected", id: `whatsapp_connected:${saved.data.id}:${lastCheck.ran_at}`, data: { tenantId: saved.data.tenant_id, connectionId: saved.data.id } });
-  } catch {
-    console.error("[whatsapp-connect] the connected event could not be sent");
-  }
+  // `whatsapp/connected` (connected-event.ts): ids only, best effort.
+  await sendConnectedEvent(deps.sendEvent, saved.data, lastCheck.ran_at);
 
   // The sixth check, only for an active number (notify.send refuses any other). It never changes the status.
   try {
