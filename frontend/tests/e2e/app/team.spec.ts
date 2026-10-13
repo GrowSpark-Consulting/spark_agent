@@ -1,5 +1,6 @@
 import type { APIRequestContext, Page, Request } from "@playwright/test";
 import { expect, expectNoHorizontalOverflow, mainNav, MOCK_SUPABASE_URL, SIGNED_OUT, signIn, test } from "../support/app";
+import { stubApi } from "../support/day5";
 
 // /dashboard/team, first slice: the signed-in member's own WhatsApp alert number
 // (memberships.whatsapp_phone), read and updated under RLS as mock-supabase.mjs emulates it (0002
@@ -40,6 +41,14 @@ const toast = (page: Page, text: string) => page.getByRole("status").filter({ ha
 
 test.describe("Team · your WhatsApp alert number", () => {
   test.use({ storageState: SIGNED_OUT });
+
+  // The screen also asks GET /api/features for the own-number entitlement (team-takeover.spec.ts covers that); here it gets a plain answer.
+  test.beforeEach(async ({ page }) => {
+    await stubApi(page, /\/api\/features$/, () => ({
+      status: 200,
+      body: { plan: { key: "growth", name: "Growth", monthlyCredits: 1500 }, estimatedCreditsPerMonth: 0, groups: [] },
+    }));
+  });
 
   test("adds, changes and removes your own number", async ({ page, request }) => {
     const account = await newTeamAccount(request);
