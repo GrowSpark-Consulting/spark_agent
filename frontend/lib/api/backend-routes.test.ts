@@ -70,6 +70,7 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
   { call: "GET /api/billing/balance", file: "features/billing/billing-data.ts" },
   { call: "GET /api/conversations/:id/templates", file: "features/inbox/template-reply.ts" },
   { call: "POST /api/onboarding/whatsapp/embedded-signup", file: "features/connect/connect-link.ts" },
+  { call: "GET /api/connect-links/:token", file: "features/connect/connect-link.ts" },
 ];
 
 /**
@@ -79,7 +80,6 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
  * test below fails and the line moves to FRONTEND_CALLS, so the list can't go stale and the call can't silently stay a stub.
  */
 const AWAITING_BACKEND: { call: string; file: string; where: string }[] = [
-  { call: "GET /api/connect-links/:token", file: "features/connect/connect-link.ts", where: "Dev 1, contract only (docs/whatsapp-connection-contract.md); not in routes.ts on main" },
 ];
 
 /** Backend routes the browser never calls, and why. Anything not here and not in FRONTEND_CALLS fails the test. */
@@ -100,6 +100,7 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   "GET /api/billing/payments/:id": "not called yet: the Billing screen polls it after PayU sends the payer back with ?payment=<id>",
   "POST /api/billing/payu/return": "PayU's checkout page posts the payer's browser here (a navigation); it redirects to /dashboard/billing",
   "POST /api/webhooks/payu": "PayU calls it: payment results (verified with PayU before anything changes)",
+  "POST /api/admin/whatsapp/connect-link": "the platform-admin generator UI is not built yet",
 };
 
 function sourceFiles(dir: string): string[] {

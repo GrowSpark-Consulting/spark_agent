@@ -30,14 +30,13 @@ import { webhookWasSeen } from "./webhook-seen";
 
 const metaId = (message: string) => z.string({ error: message }).regex(/^\d{5,20}$/, message);
 
-/** Other keys (a `tenantId`) are dropped: the business is the caller's. `connectToken` (the assisted flow) is not accepted yet. */
+/** Other keys (a `tenantId`, a `connectToken`) are dropped here: the business is the caller's or the link's (connect-link.ts), never the body's. */
 const Body = z
   .object({
     code: z.string().min(1, "The Facebook sign-in did not give a code.").max(2048, "The Facebook sign-in did not give a code.").regex(/^\S+$/, "The Facebook sign-in did not give a code."),
     wabaId: metaId("The WhatsApp Business Account ID is missing or not digits."),
     phoneNumberId: metaId("Pick or add a phone number in the Facebook sign-in, then try again."),
     coexistence: z.boolean(),
-    connectToken: z.undefined({ error: "The assisted connect link is not available yet." }).optional(),
   });
 
 const NOT_AVAILABLE = "Connecting WhatsApp with Facebook isn't available yet. Ask us to connect your number instead.";
@@ -91,10 +90,16 @@ export async function exchangeCode(code: string, config: { appId: string; appSec
   }
 }
 
-const defaults = (): EmbeddedSignupDeps => {
+/** The flag and our app's credentials, from the environment. Reads nothing else. */
+export const embeddedSignupConfig = (): EmbeddedSignupConfig => {
+  const env = serverEnv();
+  return { enabled: env.EMBEDDED_SIGNUP_ENABLED, appId: env.NEXT_PUBLIC_META_APP_ID, appSecret: env.META_APP_SECRET, registerPin: env.WHATSAPP_REGISTER_PIN };
+};
+
+export const embeddedSignupDefaults = (): EmbeddedSignupDeps => {
   const env = serverEnv();
   return {
-    config: () => ({ enabled: env.EMBEDDED_SIGNUP_ENABLED, appId: env.NEXT_PUBLIC_META_APP_ID, appSecret: env.META_APP_SECRET, registerPin: env.WHATSAPP_REGISTER_PIN }),
+    config: embeddedSignupConfig,
     db: realDb(),
     exchange: (code) => exchangeCode(code, { appId: env.NEXT_PUBLIC_META_APP_ID ?? "", appSecret: env.META_APP_SECRET ?? "" }),
     graph: realGraph,
@@ -111,17 +116,36 @@ const defaults = (): EmbeddedSignupDeps => {
   };
 };
 
-/** Connects (or reconnects) a business's number through Embedded Signup. The business is the caller's own, never the body's. */
-export async function connectEmbeddedSignup(context: TenantContext, rawBody: unknown, deps: EmbeddedSignupDeps = defaults()): Promise<WhatsAppConnectionPublic> {
-  const config = deps.config();
-  if (!config.enabled || !config.appId || !config.appSecret) throw new AppError("not_available", NOT_AVAILABLE);
-  requireRole(context, ["owner", "admin"], "connect WhatsApp");
+export type SignupInput = z.infer<typeof Body>;
 
+/** The flag is on and our app id and secret are set; otherwise not_available. Reads no database and calls no one. */
+export function assertEmbeddedSignupAvailable(config: EmbeddedSignupConfig): void {
+  if (!config.enabled || !config.appId || !config.appSecret) throw new AppError("not_available", NOT_AVAILABLE);
+}
+
+/** The body the browser sends after Meta's popup, or validation_failed with the fields. */
+export function parseSignupBody(rawBody: unknown): SignupInput {
   const parsed = Body.safeParse(rawBody);
   if (!parsed.success) throw new AppError("validation_failed", "Some details need fixing.", zodFieldErrors(parsed.error));
-  const input = parsed.data;
-  const tenantId = context.tenant.id;
-  const actor = context.user.id;
+  return parsed.data;
+}
+
+/** Connects (or reconnects) a business's number through Embedded Signup. The business is the caller's own, never the body's. */
+export async function connectEmbeddedSignup(context: TenantContext, rawBody: unknown, deps?: EmbeddedSignupDeps): Promise<WhatsAppConnectionPublic> {
+  // The flag is read from the environment alone; the database client is only made once the flag, the role and the body are settled.
+  assertEmbeddedSignupAvailable(deps ? deps.config() : embeddedSignupConfig());
+  requireRole(context, ["owner", "admin"], "connect WhatsApp");
+  const input = parseSignupBody(rawBody);
+  return connectNumber({ tenantId: context.tenant.id, actor: context.user.id, method: "embedded_signup" }, input, deps ?? embeddedSignupDefaults());
+}
+
+/** Who the number is connected for: the signed-in member's business, or the business an assisted link names (connect-link.ts). */
+export type SignupCaller = { tenantId: string; actor: string; method: "embedded_signup" | "assisted" };
+
+/** The flow after the flag, the caller and the body are settled. Also used by the assisted link. */
+export async function connectNumber(caller: SignupCaller, input: SignupInput, deps: EmbeddedSignupDeps): Promise<WhatsAppConnectionPublic> {
+  const config = deps.config();
+  const { tenantId, actor } = caller;
 
   // A number is connected to one business at a time. Our own failed, disconnected or pending row (by either method) may be retried in place; an active one is a
   // repeat, and does not spend a second code.
@@ -149,7 +173,7 @@ export async function connectEmbeddedSignup(context: TenantContext, rawBody: unk
 
   const id = existing?.id ?? deps.newId();
   const run = await runConnectionChecks(
-    { tenantId, connectionId: id, method: "embedded_signup", wabaId: input.wabaId, phoneNumberId: input.phoneNumberId, token },
+    { tenantId, connectionId: id, method: caller.method, wabaId: input.wabaId, phoneNumberId: input.phoneNumberId, token },
     { probe: deps.probe, graph: deps.graph, webhookSeen: deps.webhookSeen, now: deps.now },
   );
   if (run.state === "unreachable") throw new AppError("upstream_failed", UNREACHABLE);
@@ -182,7 +206,7 @@ export async function connectEmbeddedSignup(context: TenantContext, rawBody: unk
     lastCheck,
     qualityRating: info.qualityRating,
     connectedBy: actor,
-    method: "embedded_signup",
+    method: caller.method,
     coexistence: input.coexistence,
     messagingLimit,
     tokenExpiresAt: run.tokenExpiresAt ?? null, // unknown clears an expiry kept from the token this one replaces

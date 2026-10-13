@@ -1,99 +1,108 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { fakeSupabase } from "../test-support/fake-supabase";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { hashConnectLinkToken } from "../lib/connect-link-token";
+import { ADMIN_ID, appWith, REALTY } from "../test-support/connect-route-harness";
+import { inMemoryClient } from "../test-support/in-memory-admin";
 import { errorOf } from "../test-support/http";
 
-// How POST /api/onboarding/whatsapp/embedded-signup is wired through the real router: the flag, who may call it, and that a connectToken
-// (the assisted flow, not built yet) is refused. The flow itself is tested in channels/whatsapp/connect/embedded-signup.test.ts.
+// The Embedded Signup route and the two connect-link routes through the REAL router while EMBEDDED_SIGNUP_ENABLED is off (and the signed-in path with it on): they
+// answer not_available before any sign-in check, claim or database read. The service-role client is an in-memory one that counts how often it is asked for, so "no
+// database read" is checked, not assumed. The assisted flow with the flag on is whatsapp-assisted-link-route.test.ts; the flows are in channels/whatsapp/connect/.
 
 // The first import of the whole router is slow on a cold cache.
 vi.setConfig({ testTimeout: 30_000 });
 
-const FRONTEND = "https://app.pakkaagent.in";
-const REALTY = "10000000-0000-0000-0000-000000000001";
-const tenantRow = { id: REALTY, name: "Test Realty", vertical: "real-estate", timezone: "Asia/Kolkata", status: "trial", plan_key: "trial", trial_ends_at: null };
-const ACCOUNTS: Record<string, { email: string; role: string }> = {
-  "owner.token.sig": { email: "owner@test.local", role: "owner" },
-  "staff.token.sig": { email: "staff@test.local", role: "staff" },
-};
+const state = vi.hoisted(() => ({ asked: 0, tables: {} as Record<string, Record<string, unknown>[]> }));
+vi.mock("../lib/supabase-admin", () => ({
+  supabaseAdmin: () => {
+    state.asked += 1;
+    return inMemoryClient(state.tables);
+  },
+}));
+
+const TOKEN = "A".repeat(43);
 const BODY = { code: "AQD-synthetic-code", wabaId: "100000000000001", phoneNumberId: "200000000000001", coexistence: false };
 
-function fakeUserClient(token: string): SupabaseClient {
-  const account = ACCOUNTS[token];
-  const { client } = fakeSupabase({ memberships: { data: account ? [{ tenant_id: REALTY, role: account.role, tenants: tenantRow }] : [], error: null } });
-  const getUser = async (jwt: string) => {
-    const known = ACCOUNTS[jwt];
-    return known
-      ? { data: { user: { id: `user-${known.email}`, email: known.email } }, error: null }
-      : { data: { user: null }, error: { __isAuthError: true, name: "AuthApiError", status: 401, message: "invalid JWT" } };
+beforeEach(() => {
+  state.asked = 0;
+  state.tables = {
+    tenants: [{ id: REALTY, name: "Test Realty" }],
+    platform_admins: [{ user_id: ADMIN_ID }],
+    connect_links: [{ token_hash: hashConnectLinkToken(TOKEN), tenant_id: REALTY, created_by: ADMIN_ID, expires_at: "2999-01-01T00:00:00.000Z", used_at: null }],
   };
-  return Object.assign(client, { auth: { getUser } });
-}
-
-/** The router with a fresh environment: the env is read once and cached, so each flag value needs its own module graph. */
-async function appWith(flag: "true" | "false") {
-  vi.resetModules();
-  vi.stubEnv("NEXT_PUBLIC_APP_URL", FRONTEND);
-  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:54321");
-  vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "synthetic-anon-key");
-  vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "synthetic-service-key");
-  vi.stubEnv("EMBEDDINGS_API_KEY", "synthetic-embeddings-key");
-  vi.stubEnv("ANTHROPIC_API_KEY", "synthetic-anthropic-key");
-  vi.stubEnv("ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
-  vi.stubEnv("EMBEDDED_SIGNUP_ENABLED", flag);
-  vi.stubEnv("NEXT_PUBLIC_META_APP_ID", "111222333444555");
-  vi.stubEnv("META_APP_SECRET", "synthetic0platform0app0secret");
-  const { createApp } = await import("./app");
-  const app = createApp({ userClient: fakeUserClient, inngest: async () => Response.json({}), allowedOrigins: new Set([FRONTEND]) });
-  return (token: string | undefined, body: unknown, origin = FRONTEND) =>
-    app(new Request("http://localhost:4000/api/onboarding/whatsapp/embedded-signup", {
-      method: "POST",
-      headers: { origin, "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify(body),
-    }));
-}
-
+});
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
-describe("POST /api/onboarding/whatsapp/embedded-signup, flag off", () => {
-  it("answers not_available (501) to a signed-in owner, whatever the body", async () => {
-    const post = await appWith("false");
-    for (const body of [BODY, { nonsense: true }, { ...BODY, connectToken: "x".repeat(43) }]) {
-      const res = await post("owner.token.sig", body);
+describe("flag off", () => {
+  it("answers not_available (501) to a signed-in owner on the signed-in Embedded Signup path, whatever the body", async () => {
+    const { signup } = await appWith("false");
+    for (const body of [BODY, { nonsense: true }]) {
+      const res = await signup("owner.token.sig", body);
       expect(res.status).toBe(501);
       expect(await errorOf(res)).toMatchObject({ code: "not_available" });
     }
   });
 
-  it("still needs a signed-in member and the app's origin", async () => {
-    const post = await appWith("false");
-    expect((await post(undefined, BODY)).status).toBe(401);
-    expect((await post("owner.token.sig", BODY, "https://evil.example")).status).toBe(403);
+  it("answers not_available to the assisted path, the public read and the admin route, with no sign-in, no claim and no database read", async () => {
+    const { signup, link, makeLink } = await appWith("false");
+    for (const res of [await signup(undefined, { ...BODY, connectToken: TOKEN }), await link(TOKEN), await makeLink(undefined, { tenantId: REALTY })]) {
+      expect(res.status).toBe(501);
+      expect(await errorOf(res)).toMatchObject({ code: "not_available" });
+    }
+    expect(state.asked).toBe(0);
+    expect(state.tables.connect_links).toHaveLength(1);
+    expect(state.tables.connect_links[0].used_at).toBeNull();
+  });
+
+  it("still needs a signed-in member and the app's origin on the signed-in path", async () => {
+    const { signup } = await appWith("false");
+    expect((await signup(undefined, BODY)).status).toBe(401);
+    expect((await signup("owner.token.sig", BODY, "https://evil.example")).status).toBe(403);
+  });
+
+  it("refuses another origin on the public routes too", async () => {
+    const { signup, link } = await appWith("false");
+    expect((await link(TOKEN, "https://evil.example")).status).toBe(403);
+    expect((await signup(undefined, { ...BODY, connectToken: TOKEN }, "https://evil.example")).status).toBe(403);
   });
 });
 
-describe("POST /api/onboarding/whatsapp/embedded-signup, flag on", () => {
+describe("flag on: the signed-in path (the #167 route)", () => {
   it("refuses staff", async () => {
-    const post = await appWith("true");
-    expect((await post("staff.token.sig", BODY)).status).toBe(403);
-  });
-
-  it("refuses a connectToken with validation_failed on that field (the assisted link is not built yet), before Meta is asked", async () => {
-    const post = await appWith("true");
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const res = await post("owner.token.sig", { ...BODY, connectToken: "x".repeat(43) });
-    expect(res.status).toBe(422);
-    expect(await errorOf(res)).toMatchObject({ code: "validation_failed", fields: { connectToken: expect.any(String) } });
-    expect(fetchSpy).not.toHaveBeenCalled();
+    const { signup } = await appWith("true");
+    expect((await signup("staff.token.sig", BODY)).status).toBe(403);
   });
 
   it("refuses an invalid body with validation_failed and the field", async () => {
-    const post = await appWith("true");
-    const res = await post("owner.token.sig", { ...BODY, phoneNumberId: null });
+    const { signup } = await appWith("true");
+    const res = await signup("owner.token.sig", { ...BODY, phoneNumberId: null });
     expect(res.status).toBe(422);
     expect(await errorOf(res)).toMatchObject({ code: "validation_failed", fields: { phoneNumberId: expect.stringMatching(/Pick or add a phone number/) } });
+  });
+
+  it("without a connectToken it never takes the assisted path: no sign-in is 401 and nothing is read", async () => {
+    const { signup } = await appWith("true");
+    expect((await signup(undefined, BODY)).status).toBe(401);
+    expect(state.asked).toBe(0);
+  });
+});
+
+describe("the request log", () => {
+  it("never shows a connect-link token: the path is logged with *** for it", async () => {
+    await appWith("false");
+    const { logPathFor } = await import("./app");
+    expect(logPathFor(`/api/connect-links/${TOKEN}`)).toBe("/api/connect-links/***");
+    expect(logPathFor("/api/admin/whatsapp/connect-link")).toBe("/api/admin/whatsapp/connect-link");
+  });
+
+  it("masks the token in a mangled address too (a trailing slash, an extra segment), which is answered 404 but still logged", async () => {
+    await appWith("false");
+    const { logPathFor } = await import("./app");
+    expect(logPathFor(`/api/connect-links/${TOKEN}/`)).toBe("/api/connect-links/***/");
+    expect(logPathFor(`/api/connect-links/${TOKEN}/x`)).toBe("/api/connect-links/***/x");
+    expect(logPathFor("/api/connect-links/")).toBe("/api/connect-links/");
+    expect(logPathFor("/api/connect-linksX")).toBe("/api/connect-linksX");
   });
 });
