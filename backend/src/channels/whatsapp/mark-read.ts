@@ -32,7 +32,7 @@ const defaults = (): MarkReadDeps => ({ db: supabaseAdmin(), markRead, now: Date
 
 const Wamid = z.array(z.object({ provider_msg_id: z.string().nullable() })).max(1);
 const Channel = z.array(z.object({ channel_id: z.string() })).max(1);
-const Connection = z.array(z.object({ id: z.string(), phone_number_id: z.string(), token_enc: z.string() })).max(1);
+const Connection = z.array(z.object({ id: z.string(), tenant_id: z.string(), phone_number_id: z.string(), token_enc: z.string() })).max(1);
 
 export async function markCustomerMessageRead(
   turn: { tenantId: string; conversationId: string; messageIds: string[] },
@@ -65,18 +65,32 @@ export async function markCustomerMessageRead(
 
     const connections = await db
       .from("whatsapp_connections")
-      .select("id, phone_number_id, token_enc")
+      .select("id, tenant_id, phone_number_id, token_enc")
       .eq("tenant_id", turn.tenantId)
       .eq("channel_id", channel.channel_id)
       .eq("status", "active")
       .order("created_at", { ascending: true })
       .limit(1);
     if (connections.error) return { status: "skipped", reason: "error" };
-    const [connection] = Connection.parse(connections.data ?? []);
+    let [connection] = Connection.parse(connections.data ?? []);
+    if (!connection) {
+      // No number of its own on this channel: a chat on one of our platform numbers (the shared demo number) is read on that number's connection, which
+      // belongs to our platform business. The same rule as notify_target (0032): the business's own number first, then the platform number of its chat's channel.
+      const platform = await db
+        .from("whatsapp_connections")
+        .select("id, tenant_id, phone_number_id, token_enc")
+        .eq("channel_id", channel.channel_id)
+        .eq("method", "platform")
+        .eq("status", "active")
+        .order("created_at", { ascending: true })
+        .limit(1);
+      if (platform.error) return { status: "skipped", reason: "error" };
+      [connection] = Connection.parse(platform.data ?? []);
+    }
     if (!connection) return { status: "skipped", reason: "no_connection" };
 
-    // The token stays encrypted here; the adapter decrypts it for the call.
-    const loaded: SendConnection = { tenantId: turn.tenantId, connectionId: connection.id, phoneNumberId: connection.phone_number_id, tokenEnc: connection.token_enc };
+    // The token stays encrypted here; the adapter decrypts it for the call, with the business the connection belongs to (a platform row's token was encrypted for it).
+    const loaded: SendConnection = { tenantId: connection.tenant_id, connectionId: connection.id, phoneNumberId: connection.phone_number_id, tokenEnc: connection.token_enc };
     const result = await d.markRead(loaded, message.provider_msg_id, { timeoutMs: MARK_READ_TIMEOUT_MS });
     return result.ok ? { status: "marked" } : { status: "skipped", reason: "refused" };
   } catch {

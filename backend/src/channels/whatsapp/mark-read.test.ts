@@ -123,6 +123,58 @@ describe("markCustomerMessageRead", () => {
   });
 });
 
+describe("a routed chat (the conversation is on one of our own platform numbers' channel)", () => {
+  const P = "e0000000-0000-4000-8000-0000000000f0"; // the platform business that owns the number's connection
+  const PLATFORM = "d4000000-0000-4000-8000-0000000000f1";
+  const platformRow = (over: Row = {}): Row => ({ id: PLATFORM, tenant_id: P, channel_id: CHANNEL, method: "platform", status: "active", phone_number_id: "demo-pn", token_enc: "enc:platform", created_at: "2026-10-01T00:00:00Z", ...over });
+  const routed = (over: Row[] = [platformRow()]) => tables({ whatsapp_connections: over });
+
+  it("is marked read through the platform connection of the channel, with that connection's own business (its token was encrypted for it)", async () => {
+    const s = setup(routed());
+    expect(await markCustomerMessageRead(TURN, s.deps)).toEqual({ status: "marked" });
+    const [connection] = s.read.mock.calls[0] as unknown as [Record<string, string>];
+    expect(connection).toEqual({ tenantId: P, connectionId: PLATFORM, phoneNumberId: "demo-pn", tokenEnc: "enc:platform" });
+  });
+
+  it("the business's own active connection on the channel comes first, as in notify_target", async () => {
+    const own = { id: CONN, tenant_id: A, channel_id: CHANNEL, method: "manual_byo", status: "active", phone_number_id: "200", token_enc: "enc:token", created_at: "2026-10-02T00:00:00Z" };
+    const s = setup(routed([platformRow({ created_at: "2026-09-01T00:00:00Z" }), own]));
+    await markCustomerMessageRead(TURN, s.deps);
+    expect((s.read.mock.calls[0] as unknown as [Record<string, string>])[0]).toMatchObject({ tenantId: A, connectionId: CONN });
+  });
+
+  it("a platform connection that is not active, or is on another channel, is not used", async () => {
+    expect(await markCustomerMessageRead(TURN, setup(routed([platformRow({ status: "disconnected" })])).deps)).toEqual({ status: "skipped", reason: "no_connection" });
+    const s = setup(routed([platformRow({ channel_id: "ca000000-0000-4000-8000-0000000000c9" })]));
+    expect(await markCustomerMessageRead(TURN, s.deps)).toEqual({ status: "skipped", reason: "no_connection" });
+    expect(s.read).not.toHaveBeenCalled();
+  });
+
+  it("another business's own number on the same channel is never used", async () => {
+    const other = platformRow({ method: "manual_byo", tenant_id: B });
+    const s = setup(routed([other]));
+    expect(await markCustomerMessageRead(TURN, s.deps)).toEqual({ status: "skipped", reason: "no_connection" });
+    expect(s.read).not.toHaveBeenCalled();
+  });
+
+  it("the fallback is asked about only the conversation's own channel, and the chat itself is still read by business", async () => {
+    const s = setup(routed());
+    await markCustomerMessageRead(TURN, s.deps);
+    const connectionCalls = s.t.calls.filter((c) => c.table === "whatsapp_connections");
+    expect(connectionCalls).toHaveLength(2);
+    expect(connectionCalls[1].filters).toEqual(expect.arrayContaining([{ column: "channel_id", op: "eq", value: CHANNEL }, { column: "method", op: "eq", value: "platform" }, { column: "status", op: "eq", value: "active" }]));
+    for (const call of s.t.calls.filter((c) => c.table !== "whatsapp_connections")) expect(call.filters).toEqual(expect.arrayContaining([{ column: "tenant_id", op: "eq", value: A }]));
+  });
+
+  it("a database error in the fallback is a skip, never a thrown error", async () => {
+    const s = setup(routed());
+    const failing = fakeTables({ ...(routed() as Record<string, Row[]>) });
+    expect(await markCustomerMessageRead(TURN, { ...s.deps, db: failing.db })).toEqual({ status: "marked" });
+    const broken = fakeTables({ ...tables(), whatsapp_connections: { error: { code: "XX000" } } as never });
+    expect(await markCustomerMessageRead(TURN, { ...s.deps, db: broken.db })).toEqual({ status: "skipped", reason: "error" });
+  });
+});
+
 describe("markReadStep", () => {
   const steps = () => {
     const ids: string[] = [];

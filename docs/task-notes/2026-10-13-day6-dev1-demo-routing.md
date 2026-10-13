@@ -23,7 +23,7 @@ Dev 1 files: `supabase/migrations/0029_demo_routing.sql`, `0031_store_inbound_pl
 ## 3. What touches Dev 2's area (reads only; no file, table, function or route of Dev 2 changed)
 
 1. Reads `route_codes` (the table `create_trial_tenant` writes TRIAL codes to) by code: `tenant_id` and `expires_at`, and `tenants.status` of the named business.
-2. `claim_trial_phone` (one trial per owner phone) does not exist yet. `demo/ports.ts` has a port named `claimTrialPhone` whose default says "claimed"; **nothing calls it**. `route.ts` has a comment where a TRIAL code's claim would go. It needs his function's name and arguments.
+2. `claim_trial_phone` (one trial per owner phone) did not exist yet when this was written. It arrived in Dev 2's 0033 and is called by PR 1b (see `2026-10-13-day6-dev1-demo-menu.md`); the no-op port `demo/ports.ts` is gone.
 3. A routed conversation's connection is on the demo channel, which belongs to the business that owns the connection row, not to the routed business. `notify_target` (0009) finds a connection by the conversation's business and channel, so until his 0030 is merged nothing can be sent for a routed chat.
 4. Not in this PR: abuse controls at trial creation (one trial per owner phone and per WhatsApp business number) stay in `create_trial_tenant`. A `TRIAL-` code has 4 characters of a 31-symbol alphabet (about 923,000 codes); a wrong code costs the guesser one of their 30 messages a day, and nothing counts wrong codes across phones.
 
@@ -35,8 +35,8 @@ Nothing. The inbox reads no `channel_id` or `channels` (checked in `frontend/fea
 
 1. The replay check remembers the last 10 admitted message ids per phone. A redelivery of an older message counts as new. Meta redelivers within minutes, so this is not expected to matter. A redelivery of the one message that got the limit notice (the 31st) is the 32nd, so it gets no second notice.
 2. Two messages from one phone handled at the same moment take turns on the visitor's row. If a codeless message is handled before the message with the code, it finds no route and is dropped (answered 200, so Meta does not retry it).
-3. Delivery statuses and echoes for the demo number are still applied under the business that owns the connection row (`apply_message_status` filters by business), so a status for an outbound message of a routed business is not applied. To change in PR 1b, with the read receipt: `mark-read.ts` looks for the connection by the business's own id and the conversation's channel, so for a routed chat it finds none and skips (it is best effort).
+3. Delivery statuses and the read receipt for routed chats were not handled by PR 1a. They are in PR 1b (`2026-10-13-day6-dev1-demo-menu.md`).
 4. Which connection a routed conversation uses once the routed business also has a number of its own is decided by Dev 2's `notify_target` (0030), not by this PR.
 5. The 30 a day limit is a constant (`DEMO_DAILY_LIMIT` in `demo/route.ts`), not a setting.
-6. The menu and the refusal wording (English and Tamil) are not written: PR 1b.
+6. The menu and the refusal wording are in PR 1b (English, Tamil and Tanglish, the last two a machine draft for a native speaker).
 7. Not verified against a real Meta account or the staging database; the local database was used for the SQL and mocked Meta and database answers everywhere else.
