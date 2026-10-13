@@ -85,3 +85,19 @@ export function metaSignupConfig(): MetaSignupConfig {
     NEXT_PUBLIC_META_ES_CONFIG_ID: process.env.NEXT_PUBLIC_META_ES_CONFIG_ID,
   });
 }
+
+/**
+ * Where "Book a setup call" goes: an https address, optional. Public by design (NEXT_PUBLIC_*). Unset or invalid, the connect page tells the
+ * person to ask whoever sent them the link instead of showing a button that goes nowhere.
+ */
+export function parseSetupCallUrl(value: string | undefined): string | null {
+  const text = value?.trim();
+  if (!text || !URL.canParse(text)) return null;
+  const url = new URL(text);
+  return url.protocol === "https:" ? url.toString() : null;
+}
+
+export function setupCallUrl(): string | null {
+  // Referenced literally so Next.js inlines it into the browser bundle at build time.
+  return parseSetupCallUrl(process.env.NEXT_PUBLIC_SETUP_CALL_URL);
+}

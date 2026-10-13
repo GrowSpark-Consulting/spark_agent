@@ -17,6 +17,8 @@ export interface ApiRequest {
   /** The business from the dashboard's TenantContext. The API checks the user is a member. */
   tenantId?: string;
   signal?: AbortSignal;
+  /** Send no bearer token: for the public routes (the assisted connect page), where a signed-in visitor's token must not ride along. */
+  anonymous?: boolean;
 }
 
 /** The current access token, refreshed by supabase-js when it is close to expiring; null if signed out. */
@@ -26,9 +28,9 @@ async function accessToken(): Promise<string | null> {
 }
 
 /** Calls the API as the signed-in user and returns the raw response. Throws only if fetch fails. */
-export async function apiFetch(path: ApiPath, { method, body, tenantId, signal }: ApiRequest): Promise<Response> {
+export async function apiFetch(path: ApiPath, { method, body, tenantId, signal, anonymous }: ApiRequest): Promise<Response> {
   const headers = new Headers();
-  const token = await accessToken();
+  const token = anonymous ? null : await accessToken();
   // Without a token the API answers 401 unauthenticated, which the UI shows as "signed out".
   if (token) headers.set("authorization", `Bearer ${token}`);
   if (tenantId) headers.set(TENANT_HEADER, tenantId);
@@ -42,7 +44,7 @@ export async function apiFetch(path: ApiPath, { method, body, tenantId, signal }
   });
 }
 
-type CallOptions = { tenantId?: string; signal?: AbortSignal };
+type CallOptions = { tenantId?: string; signal?: AbortSignal; anonymous?: boolean };
 
 /** GETs JSON from the API; throws ApiError on an error response. */
 export async function getJson<T>(path: ApiPath, options: CallOptions = {}): Promise<T> {

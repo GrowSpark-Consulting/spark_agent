@@ -5,7 +5,7 @@ import { ErrorState, LoadingState } from "@/components/shared/states";
 import { formatDuration, listServices, type Service } from "@/features/knowledge/data";
 import { formatError, type FormattedError } from "@/lib/errors";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { describeBookingService, readBookingService, saveBookingService } from "./booking-service";
+import { describeBookingService, isSelectableChoice, readBookingService, saveBookingService } from "./booking-service";
 import { describeSetupWriteError } from "./resources-data";
 import { sectionHead, sectionTitle } from "./section";
 
@@ -55,10 +55,16 @@ export function BookingServiceSection({ tenantId, canWrite, onSaved }: { tenantI
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (state.status !== "ready" || saving || !dirty) return;
+    const choice = draft === NO_CHOICE ? null : draft;
+    if (!isSelectableChoice(state.services, choice)) {
+      setSaveError({ code: "validation_failed", title: "Couldn't save the choice", message: "That service isn't active any more. Pick one from the list.", retryable: false });
+      void refreshServices();
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     try {
-      const saved = await saveBookingService(getSupabaseBrowserClient(), tenantId, draft === NO_CHOICE ? null : draft);
+      const saved = await saveBookingService(getSupabaseBrowserClient(), tenantId, choice);
       setState({ ...state, chosen: saved });
       setDraft(saved ?? NO_CHOICE);
       onSaved("Saved the service the assistant books");
