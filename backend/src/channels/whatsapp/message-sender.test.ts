@@ -29,7 +29,8 @@ const GRAPH_URL = `https://graph.facebook.com/v26.0/${PHONE_NUMBER_ID}/messages`
 const WAMID = "wamid.SYNTHETIC_OUT_0002";
 
 const tokenEnc = () => encryptSecret(TOKEN, connectionSecretContext({ column: "token_enc", tenantId: TENANT, connectionId: CONNECTION }), env);
-const row = (over: Record<string, unknown> = {}) => ({ phone_number_id: PHONE_NUMBER_ID, token_enc: tokenEnc(), status: "active", ...over });
+const row = (over: Record<string, unknown> = {}) => ({ tenant_id: TENANT, method: "manual_byo", phone_number_id: PHONE_NUMBER_ID, token_enc: tokenEnc(), status: "active", ...over });
+const PLATFORM_TENANT = "5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b";
 const ids = { tenantId: TENANT, connectionId: CONNECTION };
 
 const reply = (status: number, body: unknown) => new Response(typeof body === "string" ? body : JSON.stringify(body), { status });
@@ -54,16 +55,20 @@ afterEach(() => {
 });
 
 describe("loadSendConnection", () => {
-  it("reads one active connection of this business, filtered by tenant and id", async () => {
+  it("reads one active connection of this business by its id", async () => {
     await expect(loadSendConnection(db.client, ids)).resolves.toEqual({
       tenantId: TENANT,
       connectionId: CONNECTION,
       phoneNumberId: PHONE_NUMBER_ID,
       tokenEnc: expect.any(String),
     });
-    expect(db.calls).toContainEqual({ table: "whatsapp_connections", method: "select", args: ["phone_number_id, token_enc, status"] });
+    expect(db.calls).toContainEqual({ table: "whatsapp_connections", method: "select", args: ["tenant_id, method, phone_number_id, token_enc, status"] });
     expect(db.calls).toContainEqual({ table: "whatsapp_connections", method: "eq", args: ["id", CONNECTION] });
-    expect(db.calls).toContainEqual({ table: "whatsapp_connections", method: "eq", args: ["tenant_id", TENANT] });
+  });
+
+  it("uses one of our platform numbers for a routed business, decrypting with the number's own business (0032)", async () => {
+    const { client } = fakeSupabase({ whatsapp_connections: { data: [row({ tenant_id: PLATFORM_TENANT, method: "platform" })], error: null } });
+    await expect(loadSendConnection(client, ids)).resolves.toMatchObject({ tenantId: PLATFORM_TENANT, connectionId: CONNECTION });
   });
 
   it.each([
@@ -71,6 +76,8 @@ describe("loadSendConnection", () => {
     ["a pending connection", [row({ status: "pending" })]],
     ["a failed connection", [row({ status: "failed" })]],
     ["a disconnected number", [row({ status: "disconnected" })]],
+    ["another business's own number", [row({ tenant_id: PLATFORM_TENANT })]],
+    ["an inactive platform number", [row({ tenant_id: PLATFORM_TENANT, method: "platform", status: "failed" })]],
   ])("refuses %s as whatsapp_not_connected", async (_why, data) => {
     const { client } = fakeSupabase({ whatsapp_connections: { data, error: null } });
     const err = await loadSendConnection(client, ids).catch((e: unknown) => e);
@@ -132,7 +139,7 @@ describe("registerWhatsAppSender", () => {
     expect(factory).toBeTypeOf("function");
     const sender = await factory!(ids);
     expect(sender).toMatchObject({ sendText: expect.any(Function), sendTemplate: expect.any(Function), sendInteractive: expect.any(Function) });
-    expect(db.calls).toContainEqual({ table: "whatsapp_connections", method: "eq", args: ["tenant_id", TENANT] });
+    expect(db.calls).toContainEqual({ table: "whatsapp_connections", method: "eq", args: ["id", CONNECTION] });
   });
 });
 
