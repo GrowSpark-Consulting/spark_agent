@@ -95,7 +95,7 @@ test.describe("Inbox", () => {
     await expect(ai).toContainText(/^AI/);
     await expect(log.getByText("Handed to team · asked for a person")).toBeVisible();
     await expect(page.getByText("Needs you:")).toBeVisible();
-    await expect(page.getByText("asked to talk to a person.")).toBeVisible();
+    await expect(page.getByText(/Needs you:\s*Asked for a person\./)).toBeVisible();
 
     // The AI has this chat: the switch is live (AI is the pressed one), and there is no reply box until a
     // person takes over.
