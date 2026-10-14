@@ -154,7 +154,7 @@ describe("what redactSecrets already removes from an unexpected error", () => {
   });
 });
 
-describe("KNOWN LEAK 2: an unexpected error's message is logged with only redactSecrets applied (files to change: backend/src/lib/errors.ts:66 and backend/src/server/node.ts:116, Dev 2's; packages/types/src/errors.ts is shared; flip to ordinary tests when fixed)", () => {
+describe("KNOWN LEAK 2: an unexpected error's message is logged with only redactSecrets applied (files to change: backend/src/lib/errors.ts:69 and backend/src/server/node.ts:116, Dev 2's; packages/types/src/errors.ts is shared; flip to ordinary tests when fixed)", () => {
   // Smallest fix: log err.name only in those two lines. Or keep the message and add phone masking (agent/llm/mask.ts maskPersonalData) and an sk-ant- and a
   // 32+ key-run pattern to redactSecrets. redactSecrets knows connection strings, JWTs, Supabase keys, Meta EAA tokens and bearer headers only.
   it("the error envelope logs a phone number, an Anthropic key, an app secret and a text that the message carried", () => {
