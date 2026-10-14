@@ -1,0 +1,28 @@
+name: "A repeat in Tanglish of an unserved area is read from the customer's own words (machine draft)"
+description: "Raja, 14 Oct. 'Adyar dhaan venum' after the options, with no field from the model: the stored place is in the words, so it counts as insisting. MACHINE DRAFT wording in the fixed lines; Tanglish tuning waits for Raja's own chats."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, areas: [Velachery, Tambaram] } }
+  slots: ["2026-10-11T04:30:00.000Z"]
+turns:
+  - customer: "Adyar-la 2BHK venum"
+    mock:
+      extraction: { language: ta-en, intent: give_details, fields: { config: 2BHK, location: Adyar }, question: null }
+    expect:
+      reply: { sent: true, contains: ["ippo engalidam site illa", "Velachery, Tambaram"] }
+      areaReminder: false
+    mockOnly:
+      case: area_options
+  - customer: "Adyar dhaan venum"
+    mock:
+      extraction: { language: ta-en, intent: give_details, fields: {}, question: null }
+    expect:
+      reply: { sent: true, contains: ["ippo engalidam property illa"], notContains: ["Velachery"] }
+      aiReplies: 1
+      handoff: null
+      leadStage: engaged
+      areaReminder: true
+    mockOnly:
+      case: area_unavailable

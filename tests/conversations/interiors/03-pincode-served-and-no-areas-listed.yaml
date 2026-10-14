@@ -1,0 +1,20 @@
+name: An interiors customer in a pincode the business works in is asked for the next details as usual
+description: "Raja, 14 Oct. A pincode in the business's service areas, typed with a space (600 042), changes nothing: the assistant carries on asking for what is missing and says nothing about areas. Nobody is reminded."
+pack: interiors
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { type: service, priceFrom: 1000000, attributes: { price_to: 3000000, areas: ["600042", "600020"] } }
+turns:
+  - customer: "I want interiors for my apartment in 600 042"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { property_type: apartment, pincode: "600 042" }, question: null }
+      reply: "Lovely, that is an area we work in. What is the size of the apartment in sq ft, and what would you like done?"
+    expect:
+      reply: { sent: true, notContains: ["for now", "right now", "update you"] }
+      aiReplies: 1
+      handoff: null
+      leadStage: engaged
+      areaReminder: false
+    mockOnly:
+      case: ask_details

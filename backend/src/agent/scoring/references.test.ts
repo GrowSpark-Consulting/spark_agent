@@ -73,3 +73,14 @@ describe("building the figures a pack's rules need from the business's catalog",
     expect(scoreLead(real, { budget: "10L" }, { references: refs }).temperature).toBe("disqualified");
   });
 });
+
+describe("the places a pack says it works in", () => {
+  it("are built when the pack's coverage names the matcher, though no scoring rule uses it", () => {
+    const covered = PackDefinition.parse(samplePack({ scoring: scoringWith([{ field: "budget", match: "within_project_band", points: 30 }]), coverage: { field: "location", match: "in_branch_areas" } }));
+    expect(buildReferences(covered, rows).branch_areas).toEqual(["Velachery", "OMR", "Sholinganallur"]);
+  });
+
+  it("are not built, as before, when neither the coverage nor a rule asks for them", () => {
+    expect(buildReferences(pack(scoringWith([{ field: "budget", match: "within_project_band", points: 30 }])), rows)).not.toHaveProperty("project_areas");
+  });
+});

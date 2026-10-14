@@ -20,6 +20,7 @@ import type { QualificationSummary, Retrieval, UnderstandResult } from "./unders
 //   the customer has a booking and clearly asks to cancel it                                      | ask whether to cancel (act: ask_cancel): NEVER cancel on a first message
 //   ... and asks to move it                                                                      | look for times for moving it (act: offer)
 //   the lead is certainly not a fit (a hard fail)                                                | nothing here (no NEW booking is offered)
+//   the lead's place is one the business has no sites in                                         | nothing here (no NEW booking is offered; plan.ts answers it)
 //   the lead already has a time booked                                                           | nothing here
 //   the customer asked to book, or the lead is ready and no question is waiting                  | look for times (act: offer), where they said
 //   ... and the business has no single service to book                                           | a person takes over (stuck): the assistant never guesses which
@@ -115,8 +116,12 @@ export function planBooking(args: Args): Plan | null {
 
   // A lead that is certainly not a fit is offered no NEW booking; moving one it already has is still allowed.
   const blocked = qualification.hardFail !== null;
+  // A place the business has no sites in (plan.ts answers it): no NEW time is offered for it, and a customer who has just named such a place
+  // is not booked from times they were offered for another one.
+  const unserved = input.coverage !== undefined;
+  const namesUnserved = input.coverage?.named === true;
 
-  if (s.offer && !(blocked && !s.rescheduleBookingId)) {
+  if (s.offer && !((blocked || namesUnserved) && !s.rescheduleBookingId)) {
     const offer = s.offer;
     const pick = matchSlotChoice(s.customerText, offer, { timeZone: s.timeZone, now: s.now });
     if (pick.kind === "chosen") {
@@ -149,7 +154,7 @@ export function planBooking(args: Args): Plan | null {
     }
   }
 
-  if (blocked || s.hasBooking) return null;
+  if (blocked || unserved || s.hasBooking) return null;
   // Asking to cancel or move a booking the lead does not have is not a reason to offer a new one.
   if (summary.intent === "cancel" || summary.intent === "reschedule") return null;
   const asksToBook = summary.intent === "book";
