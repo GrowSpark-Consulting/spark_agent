@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { AuditEntry } from "../lib/audit";
+import type { InjectableFailure } from "../lib/env";
+import { withLlmFailures, type FailureInjection } from "../lib/failure-injection";
 import type { LlmClient, LlmRequest, LlmResult } from "../agent/llm";
 import { NonRetriableError } from "inngest";
 import { amountsIn } from "../agent/pipeline/postcheck";
@@ -8,6 +10,7 @@ import { HOT_LEAD_ACTION, HOT_LEAD_EVENT, VOICE_NOTE_EVENT } from "../agent/pipe
 import { fixedText } from "../agent/pipeline/fixed-texts";
 import type { StepRunner, TurnContext } from "../agent/pipeline/process-message";
 import { replyTurn, type ReplyDeps, type ReplyOutcome } from "../agent/pipeline/reply";
+import type { AreaReminderInput } from "../agent/handoff/area-reminder";
 import { stopCheck } from "../agent/pipeline/stop";
 import { understandTurn, type UnderstandDeps, type UnderstandResult } from "../agent/pipeline/understand";
 import type { SendOutcome } from "../notify/send";
@@ -169,6 +172,9 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
   let replyScript: string[] = [];
   let kb: string[] = chat.kb;
   let creditsZero = false;
+  // The failures this turn injects (`mock.inject`), through the same wrapper staging uses.
+  let injected: readonly InjectableFailure[] = [];
+  const turnInjection: FailureInjection = { breaks: (_tenantId, failure) => injected.includes(failure) };
   const sends: { kind: string; text: string; buttons: string[] }[] = [];
   const confirmations: string[] = [];
   const audits: AuditEntry[] = [];
@@ -182,13 +188,17 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
       return result(next);
     },
   };
-  const chosenLlm = live ? options.llm : mockLlm;
-  if (!chosenLlm) throw new Error("live mode needs a language-model client");
+  const realOrMock = live ? options.llm : mockLlm;
+  if (!realOrMock) throw new Error("live mode needs a language-model client");
+  const chosenLlm = withLlmFailures(realOrMock, turnInjection);
   const llm: LlmClient = options.probe ? { complete: timed(options.probe, (request: LlmRequest) => `llm:${request.role}`, (request: LlmRequest) => chosenLlm.complete(request)) } : chosenLlm;
 
   const plainSend: ReplyDeps["send"] = async (_tenantId, kind, payload): Promise<SendOutcome> => {
     // Out of credits: notify.send refuses the reply and spends nothing.
     if (creditsZero) return { status: "skipped", reason: "insufficient_credits" };
+    // An injected WhatsApp failure, as notify.send reports the sender's SendError: nothing went out (or, on a timeout, maybe).
+    if (injected.includes("whatsapp_send_timeout")) return { status: "failed", error: { code: "upstream_failed", message: "WhatsApp did not answer (injected failure).", retryable: true, outcomeUnknown: true } };
+    if (injected.includes("whatsapp_send_error")) return { status: "failed", error: { code: "upstream_failed", message: "WhatsApp refused the message (injected failure).", retryable: true, outcomeUnknown: false } };
     const interactive = payload.interactive;
     const text = interactive ? interactive.body : (payload.text ?? "");
     sends.push({ kind, text, buttons: interactive?.type === "buttons" ? interactive.buttons.map((b) => b.title) : [] });
@@ -211,6 +221,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
   const handoffEvents: string[] = [];
   const hotLeadEvents: string[] = [];
   const voiceEvents: string[] = [];
+  const areaReminders: AreaReminderInput[] = [];
   const sendEvent: ReplyDeps["sendEvent"] = async (event) => {
     handoffEvents.push(event.id);
     if (event.name === HOT_LEAD_EVENT) hotLeadEvents.push(event.id);
@@ -224,6 +235,10 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
     sendEvent,
     systemNotice,
     privacyPolicyUrl: PRIVACY_URL,
+    areaReminder: async (input) => {
+      areaReminders.push(input);
+      return { recipients: 1, sent: 1, skipped: 0, failed: 0 };
+    },
     now: clock,
     ...(setup && calendar
       ? {
@@ -252,12 +267,14 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
     replyScript = turnSpec.mock?.reply === undefined ? [] : [...(Array.isArray(turnSpec.mock.reply) ? turnSpec.mock.reply : [turnSpec.mock.reply])];
     kb = turnSpec.mock?.kb ?? chat.kb;
     creditsZero = turnSpec.mock?.credits === "zero";
+    injected = turnSpec.mock?.inject ?? [];
     const sendsBefore = sends.length;
     const confirmationsBefore = confirmations.length;
     const logsBefore = fake.consentLogs.length;
     const handoffsBefore = fake.handoffs.length;
     const hotLeadBefore = hotLeadEvents.length;
     const voiceBefore = voiceEvents.length;
+    const areaRemindersBefore = areaReminders.length;
 
     const id = messageId("in", index + 1);
     fake.messages.set(id, { id, tenantId: A, conversationId: CONV, direction: "in", sender: "customer", kind: turnSpec.voice ? "audio" : turnSpec.tap ? "interactive" : "text", createdAt: new Date(base + index * 60_000).toISOString(), body: turnSpec.voice ? null : turnSpec.customer, meta: turnSpec.tap ? { buttonId: turnSpec.tap } : {} } as FakeMessage);
@@ -356,6 +373,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
       if (expect.leadFields) for (const problem of subset(fake.leads.get(LEAD)?.fields as Record<string, unknown> | undefined, expect.leadFields)) fail(`lead field ${problem}`);
       if (expect.hotLead !== undefined && hotLeadEvents.length - hotLeadBefore > 0 !== expect.hotLead) fail(`hot lead alert this turn: wanted ${expect.hotLead}, got ${hotLeadEvents.length - hotLeadBefore > 0}`);
       if (expect.voiceNoteAlert !== undefined && voiceEvents.length - voiceBefore > 0 !== expect.voiceNoteAlert) fail(`voice note alert this turn: wanted ${expect.voiceNoteAlert}, got ${voiceEvents.length - voiceBefore > 0}`);
+      if (expect.areaReminder !== undefined && areaReminders.length - areaRemindersBefore > 0 !== expect.areaReminder) fail(`area reminder this turn: wanted ${expect.areaReminder}, got ${areaReminders.length - areaRemindersBefore > 0}`);
       if (expect.leadTemperature !== undefined && fake.leads.get(LEAD)?.temperature !== expect.leadTemperature) fail(`lead temperature: wanted ${expect.leadTemperature}, got ${fake.leads.get(LEAD)?.temperature}`);
       if (expect.leadScore !== undefined && fake.leads.get(LEAD)?.score !== expect.leadScore) fail(`lead score: wanted ${expect.leadScore}, got ${fake.leads.get(LEAD)?.score}`);
       if (expect.calendar) {

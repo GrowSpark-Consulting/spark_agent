@@ -94,21 +94,18 @@ test.describe("trial signup from onboarding", () => {
 
     // The rest of the wizard shows the real trial instead of the prototype's sample code and credits.
     await next(page, "Continue").click();
-    await next(page, "Import").click();
-    for (let i = 0; i < 6; i++) {
-      await page.clock.runFor(600);
-      await page.waitForTimeout(30);
-    }
-    await next(page, "Looks good").click();
+    await next(page, "Continue").click();
     await expect(page.getByText(`Your code is ${routeCode}.`)).toBeVisible();
-    await expect(page.getByRole("link", { name: "Open WhatsApp test chat" })).toHaveAttribute("href", new RegExp(`\\?text=${routeCode}$`));
-    await expect(page.getByText("TRIAL-7F3K")).toHaveCount(0);
+    // The link uses the configured demo number (the e2e build's fictional one) and this business's own code, nothing hardcoded.
+    await expect(page.getByRole("link", { name: "Open WhatsApp test chat" })).toHaveAttribute("href", `https://wa.me/15555550100?text=${routeCode}`);
+    await expect(page.locator('a[href*="919000000000"]')).toHaveCount(0);
     await next(page, "I’ve tried it").click();
     await next(page, "Do this later").click();
     await next(page, "Go live").click();
     await expect(page.getByText(`Test number · code ${routeCode}`)).toBeVisible();
     await expect(page.getByText("7 days · 300 credits")).toBeVisible();
     await expect(page.getByText("150 credits")).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "You’re set up." })).toBeVisible();
 
     // Into the dashboard as the new business's owner, with the real Day 1 screens.
     await page.getByRole("link", { name: "Go to my dashboard" }).click();

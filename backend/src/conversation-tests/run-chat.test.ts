@@ -50,6 +50,39 @@ describe("runChat", () => {
     expect(report.failures[0]).toMatch(/should match \/\\bcallback\\b\/i, but got "We can arrange a call or a visit\."/);
   });
 
+  // mock.inject (Day 7 failure injection, lib/failure-injection.ts): the failure happens as it would for real, and the
+  // runner's own check (never more than one AI reply a turn) still applies. Dev 1's failure chats build on these.
+  describe("mock.inject", () => {
+    const injecting = (inject: string[], expect: Record<string, unknown>) =>
+      chat({ mock: { extraction: { intent: "question", question: "price of a 2BHK?" }, inject }, expect });
+
+    it("llm_timeout: the customer gets the one fixed reply for a model that is unavailable", async () => {
+      const report = await runChat(injecting(["llm_timeout"], { aiReplies: 1 }), { mode: "mock" });
+      expect(report.failures).toEqual([]);
+      expect(report.transcript[0]).toMatchObject({ planCase: "model_unavailable", extraction: null });
+    });
+
+    it("llm_bad_json: the extraction never parses, so the customer gets the one clarifying reply", async () => {
+      const report = await runChat(injecting(["llm_bad_json"], { aiReplies: 1 }), { mode: "mock" });
+      expect(report.failures).toEqual([]);
+      expect(report.transcript[0]).toMatchObject({ planCase: "clarify_invalid_output" });
+    });
+
+    it("whatsapp_send_timeout: nothing counts as sent, and the turn is not retried (it may have gone out)", async () => {
+      const report = await runChat(chat({ mock: { extraction: { intent: "question", question: "price of a 2BHK?" }, reply: "A 2BHK starts at ₹78 lakh. Shall we visit?", inject: ["whatsapp_send_timeout"] }, expect: { aiReplies: 0 } }), { mode: "mock" });
+      expect(report.failures).toEqual([]);
+    });
+
+    it("whatsapp_send_error: the step throws, so Inngest retries it (nothing went out)", async () => {
+      const report = await runChat(chat({ mock: { extraction: { intent: "question", question: "price of a 2BHK?" }, reply: "A 2BHK starts at ₹78 lakh. Shall we visit?", inject: ["whatsapp_send_error"] }, expect: { aiReplies: 0 } }), { mode: "mock" });
+      expect(report.failures).toEqual([expect.stringContaining("the pipeline threw: the reply could not be sent (upstream_failed)")]);
+    });
+
+    it("refuses a failure it does not know", () => {
+      expect(() => injecting(["db_down"], { aiReplies: 0 })).toThrow();
+    });
+  });
+
   it("matches: a pattern that is not a valid regular expression is refused when the chat is loaded", () => {
     expect(() => chat({ expect: { reply: { matches: ["("] } } })).toThrow(/regular expression/);
   });
@@ -171,5 +204,28 @@ describe("loadChats", () => {
 
   it("refuses a chat that says another pack than its folder", () => {
     expect(() => loadChats(dirWith({ "x.yaml": "name: x\npack: salon\nturns:\n  - customer: hi\n    expect: { aiReplies: 1 }\n" }))).toThrow(/folder/);
+  });
+});
+
+describe("runChat with an area the business has no sites in", () => {
+  const unserved = (second: Record<string, unknown>) =>
+    Chat.parse({
+      name: "an unserved area",
+      booking: { now: "2026-10-10T04:30:00.000Z", slots: ["2026-10-11T04:30:00.000Z"], catalog: [{ priceFrom: 6000000, attributes: { price_to: 8000000, area: "Velachery" } }] },
+      turns: [
+        { customer: "2BHK in Adyar", mock: { extraction: { intent: "give_details", fields: { config: "2BHK", location: "Adyar" } } }, expect: { case: "area_options", reply: { contains: ["Velachery"] }, areaReminder: false, aiReplies: 1 } },
+        { customer: "only Adyar", mock: { extraction: { intent: "give_details", fields: { location: "Adyar" } } }, ...second },
+      ],
+    });
+
+  it("passes: the options, then 'nothing there' with one staff reminder, the lead still open", async () => {
+    const report = await runChat(unserved({ expect: { case: "area_unavailable", reply: { contains: ["don't have any property in Adyar"] }, areaReminder: true, leadStage: "engaged", handoff: null, calendar: { confirmed: [] } } }), { mode: "mock" });
+    expect(report.failures).toEqual([]);
+    expect(report.transcript.map((t) => t.planCase)).toEqual(["area_options", "area_unavailable"]);
+  });
+
+  it("fails an expectation that says nobody is reminded when staff were", async () => {
+    const report = await runChat(unserved({ expect: { areaReminder: false } }), { mode: "mock" });
+    expect(report.failures.join("\n")).toMatch(/area reminder this turn: wanted false, got true/);
   });
 });

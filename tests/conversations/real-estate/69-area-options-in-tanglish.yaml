@@ -1,0 +1,29 @@
+name: An unserved area is answered in Tanglish, first with the areas the business has, then with nothing there for now (machine draft)
+description: "Raja, 14 Oct. The two fixed area lines in Tamil written in English letters. MACHINE DRAFT: the Tanglish wording waits for Raja's own chats (pnpm triage:chats) before it is tuned. The behaviour is the same as chat 66."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, areas: [Velachery, Tambaram] } }
+  slots: ["2026-10-11T04:30:00.000Z"]
+turns:
+  - customer: "Adyar-la 2BHK venum"
+    mock:
+      extraction: { language: ta-en, intent: give_details, fields: { config: 2BHK, location: Adyar }, question: null }
+    expect:
+      reply: { sent: true, contains: ["Adyar-la ippo engalidam site illa", "Velachery, Tambaram"] }
+      aiReplies: 1
+      areaReminder: false
+    mockOnly:
+      case: area_options
+  - customer: "Illa, enakku Adyar dhaan venum"
+    mock:
+      extraction: { language: ta-en, intent: give_details, fields: { location: Adyar }, question: null }
+    expect:
+      reply: { sent: true, contains: ["Adyar-la ippo engalidam property illa"], notContains: ["Velachery"] }
+      aiReplies: 1
+      handoff: null
+      leadStage: engaged
+      areaReminder: true
+    mockOnly:
+      case: area_unavailable

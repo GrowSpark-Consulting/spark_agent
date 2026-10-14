@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { INDUSTRIES, PROFILES } from "@/features/onboarding/data";
 import type { OfferedTrade } from "@/features/onboarding/packs";
-import { DEFAULT_FAQ, type OnboardingState, type SetState } from "@/features/onboarding/state";
+import { type OnboardingState, type SetState } from "@/features/onboarding/state";
 import { StepIntro } from "@/components/onboarding/primitives";
 
 /**
@@ -25,18 +25,7 @@ export function StepBusiness({
 }) {
   // The trade's sample business name is only a placeholder: the name becomes the real business's.
   const pickIndustry = (i: number) =>
-    set(() => {
-      const profile = PROFILES[INDUSTRIES[i].key];
-      return {
-        ind: i,
-        imp: "idle",
-        impStep: 0,
-        faq: [...DEFAULT_FAQ],
-        staff: profile.staff.map((p) => ({ ...p })),
-        site: profile.site,
-        trialError: null,
-      };
-    });
+    set({ ind: i, trialError: null });
   const trialOpen = trades.some((t) => t.index === s.ind);
 
   return (
