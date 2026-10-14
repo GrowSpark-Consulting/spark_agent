@@ -59,6 +59,31 @@ test.describe("Admin: billing", () => {
     await expect(unpaid).not.toContainText("owed");
   });
 
+  test("an empty business list says so, and an empty refund list says nothing is owed", async ({ page }) => {
+    await stubApi(page, LIST, () => ({ status: 200, body: [] }));
+    await stubApi(page, REFUNDS, () => ({ status: 200, body: [] }));
+    await page.goto("/dashboard/admin/billing");
+    await expect(page.getByText("No businesses yet.")).toBeVisible();
+    await expect(page.getByTestId("tenant-row")).toHaveCount(0);
+    await expect(page.getByTestId("no-refunds")).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test("while the lists are on their way the screen says it is loading, and shows no rows or empty message", async ({ page }) => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    await stubApi(page, LIST, async () => (await gate, { status: 200, body: [tenant()] }));
+    await stubApi(page, REFUNDS, async () => (await gate, { status: 200, body: [] }));
+    await page.goto("/dashboard/admin/billing");
+    await expect(page.getByText("Loading businesses…")).toBeVisible();
+    await expect(page.getByText("Loading refunds…")).toBeVisible();
+    await expect(page.getByTestId("tenant-row")).toHaveCount(0);
+    await expect(page.getByText("No businesses yet.")).toHaveCount(0);
+    release();
+    await expect(page.getByTestId("tenant-row")).toBeVisible();
+    await expect(page.getByText("Loading businesses…")).toHaveCount(0);
+  });
+
   test("a non-admin is told so and sees no data", async ({ page }) => {
     await stubApi(page, LIST, () => refusal(403, "forbidden", "no"));
     await stubApi(page, REFUNDS, () => refusal(403, "forbidden", "no"));
