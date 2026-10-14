@@ -128,7 +128,8 @@ describe("the lines about an area the business has no sites in (machine drafts: 
     expect(areaText("area_unavailable", "en", where)).toMatch(/don't have any property in Adyar for now/);
   });
 
-  it("puts what it is given in as plain text, whatever characters it has", () => {
-    expect(areaText("area_unavailable", "en", { area: "$& $1 {areas}", areas: [] })).toContain("$& $1 {areas}");
+  it("puts what it is given in as plain text (a replacement pattern is never read as one), and shows fixed words for anything outside the cleaner's characters", () => {
+    expect(areaText("area_unavailable", "en", { area: "A&B (1) Nagar", areas: [] })).toContain("property in A&B (1) Nagar for now");
+    expect(areaText("area_unavailable", "en", { area: "$& $1 {areas}", areas: [] })).toContain("property in the area you mentioned for now");
   });
 });

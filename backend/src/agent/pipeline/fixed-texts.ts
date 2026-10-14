@@ -1,4 +1,5 @@
 import type { Extraction } from "@pakka/types";
+import { AREA_NOT_SHOWN, cleanAreaText } from "../scoring/area-text";
 
 // The lines the assistant sends without asking the model: when it has nothing safe to say, when it did not understand,
 // when a person takes over, and the hint about STOP. Fixed words, so they cannot be wrong about a price, cannot
@@ -153,6 +154,7 @@ export interface AreaWords {
 
 /** An area line with the customer's place and the business's places put in, in one pass (what is put in is never read as a place to fill). */
 export function areaText(key: "area_options" | "area_unavailable", language: TextLanguage, words: AreaWords): string {
-  const values: Record<string, string> = { area: words.area, areas: words.areas.join(", ") };
+  // The customer's place is shown only if it passes the cleaner (it also covers a place kept on an earlier turn, before the cleaner existed); else fixed words in their language.
+  const values: Record<string, string> = { area: cleanAreaText(words.area) ?? AREA_NOT_SHOWN[language], areas: words.areas.join(", ") };
   return FIXED_TEXTS[key][language].replace(/\{(areas?)\}/g, (_match, name: string) => values[name]);
 }

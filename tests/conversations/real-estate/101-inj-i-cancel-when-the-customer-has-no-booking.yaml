@@ -13,6 +13,7 @@ turns:
       extraction: {"language": "en", "intent": "cancel", "fields": {}, "question": null, "confidence": 0.9}
       reply: "I do not see a booking for you to cancel. Would you like to book a visit?"
     expect:
-      reply: {"sent": true, "notContains": ["Kavya", "has been cancelled"]}
+      reply: {"sent": true, "notContains": ["+91", "9800000001", "40000000-0000-0000-0000-000000000099", "I have cancelled", "I've cancelled", "is now cancelled", "is cancelled", "was cancelled"]}
+      noInventedPrice: true
       aiReplies: 1
       calendar: {"confirmed": [], "cancelled": 0}
