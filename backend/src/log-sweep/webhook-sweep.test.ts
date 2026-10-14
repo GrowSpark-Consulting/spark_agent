@@ -9,7 +9,7 @@ import { captureLogs, describeLeaks, poison, type Fixtures, type LogCapture } fr
 // kind: texts, a button reply, an image, a voice-less batch, echoes, statuses, template and account events, an unknown field) re-signed with the sweep's own
 // secrets, the numbers and names changed to the sweep's own, and every dependency made to fail with an error whose message carries the poison.
 // All values are synthetic. NOT PROVED: the real database functions behind the dependencies (inbound-db.ts), Meta, staging logs, and the route's error
-// envelope: an error that escapes the handler is caught by the test, whereas in production lib/errors.ts logs it (KNOWN LEAK 2 in request-logger.test.ts).
+// envelope: an error that escapes the handler is caught by the test, whereas in production lib/errors.ts logs the error's kind only (request-logger.test.ts).
 
 const APP_SECRET = "synthetic-meta-app-secret"; // the value the environment below is stubbed with
 const BYO_SECRET = "synthetic-byo-app-secret-0001";

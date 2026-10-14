@@ -13,7 +13,7 @@ import { captureLogs, describeLeaks, findLeaks, poison, type Fixtures, type LogC
 //
 // CLOSED 14 Oct (Dev 2, #202): logPathFor masks any run of 32+ key characters wherever a mangled path puts it (server/app.ts); the two
 // "unexpected error" lines log the error's name and a short code only, never the message (lib/errors.ts errorKind, server/node.ts). The
-// tests below, flipped from KNOWN LEAK to ordinary assertions of no leak, are the record of that.
+// tests below are ordinary assertions of no leak (they were pinned as known leaks before #202).
 
 const TOKEN = "Zm9vYmFyLXN5bnRoZXRpYy10b2tlbi1mb3ItdGVzdHM"; // 43 characters, the shape of a connect-link token
 const PHONE = "+919812345621";
@@ -41,8 +41,8 @@ const MASKED: [string, string][] = [
   ["the hand-over link with two extra segments", `/h/${TOKEN}/a/b`],
 ];
 
-// Paths whose token is written to the log today (see the KNOWN LEAK tests below).
-const LEAKING: [string, string][] = [
+// Mangled paths a client can send (a double slash, another letter case, an encoded slash, a ;param): each used to put its token in the log, and each is masked now.
+const MANGLED: [string, string][] = [
   ["a double slash in front (a trailing slash in the API address the browser was given)", `//api/connect-links/${TOKEN}`],
   ["a double slash inside", `/api//connect-links/${TOKEN}`],
   ["a double slash in front of the hand-over link (API_PUBLIC_URL with a trailing slash)", `//h/${TOKEN}`],
@@ -66,7 +66,7 @@ describe("logPathFor: a path with a secret in it is masked", () => {
 });
 
 describe("logPathFor: a mangled path (double slash, letter case, an encoded slash, a ;param) is masked too", () => {
-  it.each(LEAKING)("%s", (_name, address) => {
+  it.each(MANGLED)("%s", (_name, address) => {
     const shown = logPathFor(address);
     expect(findLeaks([shown], FX), `logged as ${shown}`).toEqual([]);
   });

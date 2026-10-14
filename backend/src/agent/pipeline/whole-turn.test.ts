@@ -117,6 +117,18 @@ describe("the mirror of inngest/process-message.ts (drift guard)", () => {
     expect(flat).toContain('stop.status === "opted_out"');
   });
 
+  it("still asks the rate limits and the daily AI spend cap in the gate, before any model call, and tells the owners (Day 7: the world's `aiLimit` mirrors it; whole-turn-limit.test.ts)", () => {
+    const flat = code.replace(/\s+/g, " ");
+    expect(flat).toContain("aiLimit: (tenantId, conversationId) => aiLimitFor(tenantId, conversationId)");
+    expect(flat).toContain("tellOwnersAboutLimit(");
+    expect(flat).toContain('steps.run("started"');
+    const world = readFileSync(fileURLToPath(new URL("../../test-support/whole-turn-world.ts", import.meta.url)), "utf8").replace(/\s+/g, " ");
+    expect(world).toContain("aiLimit: async () => options.aiLimit ?? null");
+    const gate = readFileSync(fileURLToPath(new URL("./process-message.ts", import.meta.url)), "utf8").replace(/\s+/g, " ");
+    // the limit is only asked when the assistant would answer: not for an opted-out contact, a chat a person has, or the feature off
+    expect(gate).toContain("needsFeature && featureEnabled && deps.aiLimit");
+  });
+
   it("still runs one conversation at a time", () => {
     expect(code).toMatch(/concurrency:\s*\{\s*key:\s*"event\.data\.conversationId",\s*limit:\s*1\s*\}/);
   });
