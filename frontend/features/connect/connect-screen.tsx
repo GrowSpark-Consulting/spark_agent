@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { metaSignupConfig, setupCallUrl } from "@/lib/env";
 import { runEmbeddedSignup } from "@/lib/whatsapp/facebook-sdk";
-import { fetchConnectLink, isLinkToken, linkProblem, submitEmbeddedSignup, submitProblem, type ConnectLink, type LinkProblem, type SubmitProblem } from "./connect-link";
+import { fetchConnectLink, isLinkToken, linkProblem, sendSignup, type ConnectLink, type LinkProblem, type SubmitProblem } from "./connect-link";
 
 // /connect/:token: the assisted connection page. Public: the link is the only credential. It reads who the link is for, then runs Meta's
 // Embedded Signup and sends the result to the API. "Connected" is shown only when the API answers 201; a closed window, a Meta error, an
@@ -21,19 +21,25 @@ type Attempt =
   | { status: "idle" }
   | { status: "working"; step: "meta" | "saving" }
   | { status: "cancelled" }
-  | { status: "failed"; problem: SubmitProblem | "meta_error" | "incomplete" | "script" }
-  | { status: "connected"; connectionStatus: string };
+  | { status: "failed"; problem: SubmitProblem | "meta_error" | "incomplete" | "script" | "check_failed"; fields?: Record<string, string> }
+  /** Saved, but not live yet: the server is still checking it. */
+  | { status: "checking" }
+  /** Only ever set from a 201 whose connection is `active`. */
+  | { status: "connected" };
 
 const PROBLEM_COPY: Record<Exclude<LinkProblem, "invalid">, { title: string; body: string }> = {
-  not_available: { title: "Connecting through Facebook isn’t switched on yet", body: "Nothing was changed. Use the setup call below, and we’ll connect your number with you." },
+  not_available: { title: "Connecting with Facebook isn't switched on yet.", body: "Nothing was changed. Use the setup call below, and we’ll connect your number with you." },
   rate_limited: { title: "Too many tries", body: "Wait a minute, then try again." },
   failed: { title: "We couldn’t check this link", body: "Check your connection and try again." },
 };
 
 const ATTEMPT_COPY: Record<Extract<Attempt, { status: "failed" }>["problem"], { title: string; body: string }> = {
-  invalid: { title: "This link can’t be used any more", body: "It has expired or was already used. Ask for a new one." },
+  invalid: { title: "This link isn't valid or has expired.", body: "Ask for a new one." },
   conflict: { title: "That number is already connected", body: "If you didn’t expect this, ask us to check it with you." },
-  not_available: { title: "Connecting through Facebook isn’t switched on yet", body: "Nothing was changed. Use the setup call below." },
+  not_available: { title: "Connecting with Facebook isn't switched on yet.", body: "Nothing was changed. Use the setup call below." },
+  rate_limited: { title: "Too many tries", body: "Nothing was changed. Wait a minute, then try again with the same link." },
+  validation: { title: "Some details need fixing", body: "Nothing was changed. Try the Facebook sign-in again with the same link." },
+  check_failed: { title: "Your number was saved, but it isn’t connected", body: "It didn’t pass Meta’s checks, so no messages will arrive. Nothing is live. Try again with this same link, or use the setup call below." },
   meta_failed: { title: "Meta didn’t accept the connection", body: "Nothing was changed. Try again, or use the setup call below." },
   failed: { title: "We couldn’t finish connecting", body: "Nothing was changed. Try again, or use the setup call below." },
   meta_error: { title: "Meta reported a problem", body: "Nothing was changed. Try again, or use the setup call below." },
@@ -73,12 +79,10 @@ export function ConnectScreen({ token }: { token: string }) {
       if (outcome.status === "cancelled") return setAttempt({ status: "cancelled" });
       if (outcome.status === "failed") return setAttempt({ status: "failed", problem: outcome.reason === "error" ? "meta_error" : "incomplete" });
       setAttempt({ status: "working", step: "saving" });
-      try {
-        const connected = await submitEmbeddedSignup(token, outcome.payload);
-        setAttempt({ status: "connected", connectionStatus: connected.status });
-      } catch (err) {
-        setAttempt({ status: "failed", problem: submitProblem(err) });
-      }
+      const sent = await sendSignup(token, outcome.payload);
+      // A used or expired link cannot be tried again: the page becomes the invalid-link page.
+      if (sent.kind === "invalid") return setLink({ status: "invalid" });
+      setAttempt(sent.kind === "failed" ? { status: "failed", problem: sent.problem, fields: sent.fields } : { status: sent.kind });
     } catch {
       setAttempt({ status: "failed", problem: "script" });
     } finally {
@@ -100,7 +104,7 @@ export function ConnectScreen({ token }: { token: string }) {
       ) : null}
 
       {link.status === "invalid" ? (
-        <Notice id="connect-heading" tone="error" title="This link isn’t valid" body="It may have expired, been used already, or be mistyped. Ask for a new link." testId="connect-invalid" />
+        <Notice id="connect-heading" tone="error" title="This link isn't valid or has expired." body="It may have been used already or be mistyped. Ask for a new link." testId="connect-invalid" />
       ) : null}
 
       {link.status === "problem" ? (
@@ -127,7 +131,9 @@ export function ConnectScreen({ token }: { token: string }) {
           </div>
 
           {attempt.status === "connected" ? (
-            <Notice tone="ok" title="Your number was sent to Spark Agent" body={`Spark Agent confirmed it (status: ${attempt.connectionStatus}). You can close this page; we’ll be in touch if anything else is needed.`} testId="connect-done" />
+            <Notice tone="ok" title="Your number is connected" body="Spark Agent confirmed that WhatsApp is active for this number. You can close this page; we’ll be in touch if anything else is needed." testId="connect-done" />
+          ) : attempt.status === "checking" ? (
+            <Notice tone="info" title="Your number was sent, but it isn’t connected yet" body="Spark Agent is still checking it with Meta. Nothing is live until that finishes, and we’ll tell you if it needs anything." testId="connect-checking" />
           ) : (
             <>
               <fieldset className="m-0 flex flex-col gap-2 border-0 p-0" disabled={working}>
@@ -147,7 +153,9 @@ export function ConnectScreen({ token }: { token: string }) {
               </fieldset>
 
               {attempt.status === "cancelled" ? <Notice tone="info" title="You closed the Meta window" body="Nothing was changed. Try again when you’re ready." testId="connect-cancelled" /> : null}
-              {attempt.status === "failed" ? <Notice tone="error" title={ATTEMPT_COPY[attempt.problem].title} body={ATTEMPT_COPY[attempt.problem].body} testId="connect-failed" /> : null}
+              {attempt.status === "failed" ? (
+                <Notice tone="error" title={ATTEMPT_COPY[attempt.problem].title} body={ATTEMPT_COPY[attempt.problem].body} testId="connect-failed" details={fieldDetails(attempt.problem, attempt.fields)} />
+              ) : null}
               {working ? (
                 <p role="status" className="m-0 text-sm text-neutral-700">
                   {attempt.step === "meta" ? "Waiting for the Meta window…" : "Sending your number to Spark Agent…"}
@@ -167,18 +175,36 @@ export function ConnectScreen({ token }: { token: string }) {
   );
 }
 
-function Notice({ id, tone, title, body, testId }: { id?: string; tone: "ok" | "error" | "info"; title: string; body: string; testId: string }) {
+/** The server's own words for each field it named (it writes them for the person); a number that Meta never returned is the one that matters here. */
+function fieldDetails(problem: string, fields: Record<string, string> | undefined): string[] {
+  if (problem !== "validation") return [];
+  return Object.values(fields ?? {});
+}
+
+function Notice({ id, tone, title, body, testId, details = [] }: { id?: string; tone: "ok" | "error" | "info"; title: string; body: string; testId: string; details?: string[] }) {
   return (
     <div role={tone === "error" ? "alert" : "status"} data-testid={testId} className="border-2 border-foreground px-4 py-3 text-sm">
       <strong id={id} className="block text-base">
         {title}
       </strong>
       <span className="text-neutral-700">{body}</span>
+      {details.map((line) => (
+        <span key={line} className="mt-1 block text-neutral-900">
+          {line}
+        </span>
+      ))}
     </div>
   );
 }
 
-function SetupCall({ url }: { url: string | null }) {
+/** `fallback` is what is said when no valid setup-call address is configured (the button is never shown without one). */
+export function SetupCall({
+  url,
+  fallback = "Reply to the person who sent you this link and we’ll set it up with you on a call.",
+}: {
+  url: string | null;
+  fallback?: string;
+}) {
   return (
     <div className="flex flex-col gap-1 text-sm" data-testid="setup-call">
       <strong>Prefer to do it with us?</strong>
@@ -187,7 +213,7 @@ function SetupCall({ url }: { url: string | null }) {
           Book a setup call
         </a>
       ) : (
-        <span className="text-neutral-700">Reply to the person who sent you this link and we’ll set it up with you on a call.</span>
+        <span className="text-neutral-700">{fallback}</span>
       )}
     </div>
   );

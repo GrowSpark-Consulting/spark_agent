@@ -1,7 +1,9 @@
 import type { HandoffTrigger } from "@pakka/types";
 import { NonRetriableError } from "inngest";
+import { z } from "zod";
 import { normaliseQuestion } from "../../kb/question";
 import type { AuditEntry } from "../../lib/audit";
+import type { AreaReminderInput } from "../handoff/area-reminder";
 import { recordAnswered } from "./answered";
 import { HOT_LEAD_ACTION, HOT_LEAD_EVENT, VOICE_NOTE_EVENT } from "./events";
 import { recordHandoff } from "./handoff";
@@ -11,7 +13,8 @@ import type { NotifyPayload, SendOutcome } from "../../notify/send";
 import type { LlmClient, LlmMessage } from "../llm/anthropic";
 import { LlmError } from "../llm/anthropic";
 import { buildReplyMessages, buildReplySystem, REPLY_PROMPT } from "../prompts/reply_v2";
-import { consentNotice, EXIT_BUTTON_IDS, exitQuestionButtons, fixedText, textLanguage } from "./fixed-texts";
+import { mentionsArea, normaliseArea } from "../scoring/coverage";
+import { areaText, consentNotice, EXIT_BUTTON_IDS, exitQuestionButtons, fixedText, textLanguage } from "./fixed-texts";
 import { parseReplySettings, type ReplySettings } from "./persona";
 import { runAct, ActResultSchema, type ActResult } from "../scheduling/act";
 import { slotLabel } from "../../booking/time";
@@ -60,6 +63,11 @@ export interface ReplyDeps {
    * happens and every turn runs as before.
    */
   scheduling?: SchedulingDeps;
+  /**
+   * Reminds the owners and admins, once, to record in their CRM that a customer wants an area the business has no sites in (agent/handoff/area-reminder.ts:
+   * a staff_alert through notify.send with our own text). Without it nobody is reminded and the customer's reply is the same. Never needed for the reply.
+   */
+  areaReminder?: (input: AreaReminderInput) => Promise<unknown>;
   /** The link in the privacy notice (PRIVACY_POLICY_URL, https). */
   privacyPolicyUrl: string;
   now?: () => number;
@@ -89,6 +97,8 @@ export interface ReplyOutcome {
   handoff: HandoffSummary | null;
   /** Staff were told that this lead turned hot ("announced"), or already had been ("already"). Absent when the lead did not just turn hot. */
   hotLead?: "announced" | "already";
+  /** Staff were reminded to record an area the business has nothing in ("sent"), or the reminder could not be sent ("failed"). Absent when the turn did not call for one. */
+  areaReminder?: "sent" | "failed";
   /** Staff were told a voice note is waiting. Absent when the turn was not a voice note. */
   voiceNote?: "alerted";
 }
@@ -107,6 +117,8 @@ interface PlanSummary {
   needsAct: boolean;
   /** The lead has just turned hot and staff have not been told: announce it once, after the reply. */
   hotLead: boolean;
+  /** A customer who keeps asking for an area the business has nothing in was told so: remind the staff, after the reply. */
+  areaReminder: boolean;
   /** A voice note was answered with the request to type: tell staff one is waiting, after the reply. */
   voiceNote: boolean;
 }
@@ -118,6 +130,9 @@ interface Loaded {
   businessName: string | null;
   lastAt: string;
 }
+
+/** What the understanding step kept about where the customer wants to be (understand.ts): not trusted, read here, and ignored when it is not in the shape it writes. */
+const CoverageReading = z.object({ served: z.boolean(), area: z.string().min(1), shown: z.string(), areas: z.array(z.string()), known: z.array(z.string()).default([]), named: z.boolean() });
 
 async function loadPlanInput(turn: TurnContext, understood: UnderstandResult, deadlineExceeded: boolean, deps: ReplyDeps): Promise<Loaded> {
   const { store } = deps;
@@ -139,12 +154,23 @@ async function loadPlanInput(turn: TurnContext, understood: UnderstandResult, de
   const hotLeadAlerted = understood.status === "understood" && understood.qualification?.temperature === "hot" ? await store.hasHotLeadAlert(turn.tenantId, turn.leadId) : undefined;
   // A voice note has no words: every message of the burst is audio. Only then is it a voice note, and only a repeat if the last turn was one too.
   const voiceNote = texts.length > 0 && texts.every((t) => t.kind === "audio");
+  // A place the business has no sites in: what this chat has already said about it is read only when there is one to talk about.
+  const area = CoverageReading.safeParse(agent?.coverageReading);
+  const unserved = area.success && !area.data.served ? area.data : null;
+  const previous = unserved ? await store.getPreviousCoverage(turn.tenantId, turn.conversationId, firstAt) : null;
+  const stage = unserved && previous && previous.area === unserved.area ? previous.stage : null;
+  // The model names the place only when a message adds it, and a repeat adds nothing (the place is already on the lead): a customer who repeats it is
+  // read from their own words. Only against the place this chat already answered (never before the options were shown), as a whole word, and not when
+  // the same message also names a place the business has (they may be weighing the two).
+  const words = texts.map((t) => t.body ?? "").join(" ");
+  const repeated = unserved !== null && !unserved.named && stage !== null && mentionsArea(words, unserved.area) && ![...unserved.known, ...unserved.areas.map(normaliseArea)].some((a) => mentionsArea(words, a));
+  const coverage = unserved ? { area: unserved.area, shown: unserved.shown, areas: unserved.areas, named: unserved.named || repeated, stage } : null;
   return {
     agent,
     settings,
     businessName: info?.name ?? null,
     lastAt,
-    input: { ...(scheduling ? { scheduling } : {}), ...(hotLeadAlerted === undefined ? {} : { hotLeadAlerted }), ...(voiceNote ? { voiceNote, voiceNoteRepeat: previousCase === "voice_note" } : {}), understood, question: typeof asked === "string" ? asked : null, contactLanguage: contact?.language ?? null, previousMisses, settings, deadlineExceeded, exitQuestionPending: previousCase === "exit_unclear", customerSaidOne: texts.some((t) => isJustOne(t.body)), talkButtonTapped: texts.some((t) => t.buttonId === EXIT_BUTTON_IDS.talk) },
+    input: { ...(scheduling ? { scheduling } : {}), ...(hotLeadAlerted === undefined ? {} : { hotLeadAlerted }), ...(voiceNote ? { voiceNote, voiceNoteRepeat: previousCase === "voice_note" } : {}), ...(coverage ? { coverage } : {}), ...(area.success && area.data.served && area.data.named ? { areaServedNamed: true } : {}), understood, question: typeof asked === "string" ? asked : null, contactLanguage: contact?.language ?? null, previousMisses, settings, deadlineExceeded, exitQuestionPending: previousCase === "exit_unclear", customerSaidOne: texts.some((t) => isJustOne(t.body)), talkButtonTapped: texts.some((t) => t.buttonId === EXIT_BUTTON_IDS.talk) },
   };
 }
 
@@ -162,6 +188,29 @@ async function announceHotLead(turn: TurnContext, deps: ReplyDeps): Promise<"ann
     console.error(`${TAG} could not record the hot lead alert (business ${turn.tenantId})`);
   }
   return "announced";
+}
+
+/**
+ * Reminds the owners and admins to record the area (agent/handoff/area-reminder.ts). The place is read from the message's meta, where the understanding
+ * step kept it (a step's result holds no words). The reminder carries an idempotency key per lead and place, so a repeat of this step sends nothing
+ * again. A reminder that cannot be sent is logged without a word of the customer's and never fails the turn: the reply has gone.
+ */
+async function announceAreaReminder(turn: TurnContext, deps: ReplyDeps): Promise<"sent" | "failed" | "skipped"> {
+  const lastMessageId = turn.messageIds[turn.messageIds.length - 1];
+  const reading = CoverageReading.safeParse((await deps.store.getAgentMeta(turn.tenantId, turn.conversationId, lastMessageId))?.coverageReading);
+  if (!reading.success || reading.data.served || !deps.areaReminder) return "skipped";
+  try {
+    const counts = (await deps.areaReminder({ tenantId: turn.tenantId, conversationId: turn.conversationId, leadId: turn.leadId, area: reading.data.shown, areaKey: reading.data.area })) as { sent?: unknown; failed?: unknown } | undefined;
+    // sendToAdmins counts instead of throwing: a reminder that reached nobody because every send or the lookup failed is not "sent". (Best effort: the reply has gone.)
+    if (counts && counts.sent === 0 && typeof counts.failed === "number" && counts.failed > 0) {
+      console.error(`${TAG} the area reminder reached nobody (business ${turn.tenantId})`);
+      return "failed";
+    }
+    return "sent";
+  } catch {
+    console.error(`${TAG} the area reminder could not be sent (business ${turn.tenantId})`);
+    return "failed";
+  }
 }
 
 /** Tells whoever sends staff alerts that a voice note is waiting (an event with ids only). A repeat is dropped by its id. */
@@ -267,8 +316,8 @@ async function replan(turn: TurnContext, understood: UnderstandResult, startedAt
   const clock = turnClock(startedAt, (deps.now ?? Date.now)());
   const loaded = await loadPlanInput(turn, understood, clock.exceeded, deps);
   const plan = planReply(loaded.input);
-  await keep(deps, turn, { kbMisses: plan.kbMisses, planCase: plan.case });
-  return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null, needsAct: false, hotLead: plan.hotLead === true, voiceNote: plan.voiceNote === true };
+  await keep(deps, turn, planMeta(plan));
+  return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null, needsAct: false, hotLead: plan.hotLead === true, areaReminder: plan.areaReminder === true, voiceNote: plan.voiceNote === true };
 }
 
 /** The customer's answer "1" to the question we asked ("Reply 1 to talk to the team"): the digit alone, in any of the usual forms, with or without a full stop. */
@@ -281,6 +330,9 @@ function isJustOne(body: string | null): boolean {
  * turn, and a turn is its newest customer message, so that message names it.
  */
 export const replyKey = (lastMessageId: string): string => `reply:${lastMessageId}`;
+
+/** What a plan leaves on the message for the next turn: the miss count, the case, and, when it changed, what was said about an unserved place. */
+const planMeta = (plan: Plan): Record<string, unknown> => ({ kbMisses: plan.kbMisses, planCase: plan.case, ...(plan.coverage !== undefined ? { coverage: plan.coverage } : {}) });
 
 /** Keeps something on the newest message's meta; a message that is not found is a bug, not retried. */
 async function keep(deps: ReplyDeps, turn: TurnContext, agent: Record<string, unknown>): Promise<void> {
@@ -306,8 +358,8 @@ export async function replyTurn(step: StepRunner, turn: TurnContext, understood:
         await keep(deps, turn, { gapRecorded: true });
       }
     }
-    await keep(deps, turn, { kbMisses: plan.kbMisses, planCase: plan.case });
-    return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null, needsAct: plan.act !== undefined, hotLead: plan.hotLead === true, voiceNote: plan.voiceNote === true };
+    await keep(deps, turn, planMeta(plan));
+    return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null, needsAct: plan.act !== undefined, hotLead: plan.hotLead === true, areaReminder: plan.areaReminder === true, voiceNote: plan.voiceNote === true };
   });
 
   // The calendar is looked at or changed once (step 6), its result kept on the message, and the plan made again with it in hand.
@@ -337,10 +389,13 @@ export async function replyTurn(step: StepRunner, turn: TurnContext, understood:
   const answered = reply.status === "sent" || reply.status === "sent_unknown" || reply.status === "already_answered";
   const hotLead = planned.hotLead && answered ? await step.run<"announced" | "already">("hot-lead", () => announceHotLead(turn, deps)) : null;
 
+  // A customer who keeps asking for an area the business has nothing in, and has been told so: the staff are reminded, once. Never blocks or fails the turn.
+  const areaAlert = planned.areaReminder && answered && deps.areaReminder ? await step.run<"sent" | "failed" | "skipped">("area-reminder", () => announceAreaReminder(turn, deps)) : null;
+
   // A voice note that was answered: staff are told one is waiting, so someone can listen to it. One event per message (its id), ids only.
   const voiceAlert = planned.voiceNote && answered ? await step.run<"alerted">("voice-alert", () => announceVoiceNote(turn, deps)) : null;
 
-  return { case: planned.case, reply, handoff, ...(hotLead ? { hotLead } : {}), ...(voiceAlert ? { voiceNote: voiceAlert } : {}) };
+  return { case: planned.case, reply, handoff, ...(hotLead ? { hotLead } : {}), ...(areaAlert && areaAlert !== "skipped" ? { areaReminder: areaAlert } : {}), ...(voiceAlert ? { voiceNote: voiceAlert } : {}) };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -350,7 +405,10 @@ export async function replyTurn(step: StepRunner, turn: TurnContext, understood:
 async function compose(plan: Plan, loaded: Loaded, turn: TurnContext, exceeded: boolean, signal: AbortSignal, deps: ReplyDeps): Promise<{ text: string; source: "model" | "fixed" }> {
   const fixedPlan = (reply: ReplyPlan) => (reply.mode === "fixed" ? reply : null);
   const fixedOf = fixedPlan(plan.reply);
-  if (fixedOf) return { text: fixedText(fixedOf.text, fixedOf.language), source: "fixed" };
+  if (fixedOf) {
+    const areaLine = fixedOf.vars && (fixedOf.text === "area_options" || fixedOf.text === "area_unavailable") ? areaText(fixedOf.text, fixedOf.language, fixedOf.vars) : null;
+    return { text: areaLine ?? fixedText(fixedOf.text, fixedOf.language), source: "fixed" };
+  }
 
   const model = plan.reply as Extract<ReplyPlan, { mode: "model" }>;
   const fallback = { text: fixedText("fallback", textLanguage(model.language, loaded.input.contactLanguage)), source: "fixed" as const };

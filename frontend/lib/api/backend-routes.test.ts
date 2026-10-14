@@ -58,6 +58,7 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
   { call: "POST /api/whatsapp/connections/:id/disconnect", file: "lib/whatsapp/connection-actions.ts" },
   { call: "GET /api/calendar/google/connect", file: "features/settings/google-calendar.ts" },
   { call: "POST /api/admin/whatsapp/manual", file: "lib/whatsapp/admin-connect.ts" },
+  { call: "POST /api/admin/whatsapp/connect-link", file: "lib/whatsapp/admin-connect-link.ts" },
   { call: "GET /api/features", file: "features/toggles/feature-api.ts" },
   { call: "PATCH /api/features/:key", file: "features/toggles/feature-api.ts" },
   { call: "POST /api/bookings/:id/reschedule", file: "features/calendar/booking-actions.ts" },
@@ -109,7 +110,6 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   // PayU billing (Dev 2, decision 20): the routes PayU itself calls. The ones the Billing screen calls are in FRONTEND_CALLS.
   "POST /api/billing/payu/return": "PayU's checkout page posts the payer's browser here (a navigation); it redirects to /dashboard/billing",
   "POST /api/webhooks/payu": "PayU calls it: payment results (verified with PayU before anything changes)",
-  "POST /api/admin/whatsapp/connect-link": "the platform-admin generator UI is not built yet",
   "POST /api/billing/cancel": "the Billing screen's Cancel plan button is not built yet (Dhatri)",
   "POST /api/billing/resume": "the Billing screen's Keep my plan button is not built yet (Dhatri)",
 };

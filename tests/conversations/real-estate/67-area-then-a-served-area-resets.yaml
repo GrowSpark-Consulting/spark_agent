@@ -1,0 +1,38 @@
+name: A customer who picks an area the business has is offered times, and an unserved area named later gets the options first again
+description: "Raja, 14 Oct. Adyar is not served, so the first reply lists Velachery and Tambaram. The customer chooses Velachery: the normal flow resumes and three times are offered (nothing is said about the earlier area, and nobody is reminded). The state about Adyar is ended by that, so if the customer names Adyar again later they get the options first, never 'nothing there' straight away."
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, areas: [Velachery, Tambaram] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+turns:
+  - customer: "I want a 2BHK in Adyar, my budget is around 60 lakh and I plan to buy within 3 months"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { config: 2BHK, location: Adyar, budget: 60L, timeline: 0-3m }, question: null }
+    expect:
+      reply: { sent: true, contains: ["Velachery, Tambaram"] }
+      aiReplies: 1
+      areaReminder: false
+    mockOnly:
+      case: area_options
+  - customer: "Velachery is fine then"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { location: Velachery }, question: null }
+      reply: "Great, Velachery it is. I can do Sunday at 10:00 am, Sunday at 3:00 pm or Monday at 5:30 pm for a site visit. Which suits you?"
+    expect:
+      reply: { sent: true, buttons: [], matches: ['\b10(:00)?\s?am\b', '\b3(:00)?\s?pm\b', '\b5:30\s?pm\b'], notContains: ["Adyar"] }
+      aiReplies: 1
+      handoff: null
+      areaReminder: false
+    mockOnly:
+      case: offer_slots
+      leadTemperature: hot
+  - customer: "Actually, what about Adyar?"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { location: Adyar }, question: null }
+    expect:
+      reply: { sent: true, contains: ["Adyar", "Velachery, Tambaram"], notContains: ["for now"] }
+      aiReplies: 1
+      areaReminder: false
+    mockOnly:
+      case: area_options

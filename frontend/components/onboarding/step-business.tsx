@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { INDUSTRIES, PROFILES } from "@/features/onboarding/data";
 import type { OfferedTrade } from "@/features/onboarding/packs";
-import { DEFAULT_FAQ, type OnboardingState, type SetState } from "@/features/onboarding/state";
+import { type OnboardingState, type SetState } from "@/features/onboarding/state";
 import { StepIntro } from "@/components/onboarding/primitives";
 
 /**
@@ -29,11 +29,7 @@ export function StepBusiness({
       const profile = PROFILES[INDUSTRIES[i].key];
       return {
         ind: i,
-        imp: "idle",
-        impStep: 0,
-        faq: [...DEFAULT_FAQ],
         staff: profile.staff.map((p) => ({ ...p })),
-        site: profile.site,
         trialError: null,
       };
     });
