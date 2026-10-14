@@ -34,6 +34,21 @@ describe("handleGoogleCalendarSync", () => {
     expect(remove).not.toHaveBeenCalled();
   });
 
+  // Exit test 1 (Day 7; inngest/replay-coverage.test.ts). The event's id in Google is the booking's own (googleEventId), so a second add
+  // finds it ("already_there") and a second removal finds it gone ("already_gone"): booking/google-sync.test.ts.
+  it("replay: the same event twice asks Google for the same booking's fixed event, which is then already there or already gone", async () => {
+    const confirmed = { event: { name: "booking.confirmed", data: { tenantId: TENANT, bookingId: BOOKING } }, step };
+    add.mockResolvedValueOnce("created").mockResolvedValueOnce("already_there");
+    await expect(handleGoogleCalendarSync(confirmed, deps())).resolves.toEqual({ added: "created" });
+    await expect(handleGoogleCalendarSync(confirmed, deps())).resolves.toEqual({ added: "already_there" });
+    expect(add.mock.calls).toEqual([[TENANT, BOOKING], [TENANT, BOOKING]]);
+
+    const cancelled = { event: { name: "booking.changed", data: { tenantId: TENANT, bookingId: BOOKING, change: "cancelled" } }, step };
+    remove.mockResolvedValueOnce("removed").mockResolvedValueOnce("already_gone");
+    await handleGoogleCalendarSync(cancelled, deps());
+    await expect(handleGoogleCalendarSync(cancelled, deps())).resolves.toEqual({ removed: "already_gone" });
+  });
+
   it("lets a Google error through so Inngest retries, and refuses an event without ids", async () => {
     add.mockRejectedValue(new Error("google sync: adding the event failed (503)"));
     await expect(handleGoogleCalendarSync({ event: { name: "booking.confirmed", data: { tenantId: TENANT, bookingId: BOOKING } }, step }, deps())).rejects.toThrow("503");

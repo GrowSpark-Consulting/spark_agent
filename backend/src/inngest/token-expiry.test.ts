@@ -28,6 +28,16 @@ describe("the daily token-expiry run", () => {
     expect(result).toEqual({ due: 2, warned: { recipients: 2, sent: 2, skipped: 0, failed: 0 } });
   });
 
+  // Exit test 1 (Day 7; inngest/replay-coverage.test.ts): each warning is named by the connection, the expiry date and the person, so the
+  // same date is never warned twice (channels/whatsapp/connect/token-expiry.test.ts).
+  it("replay: the same run twice warns about the same connections and expiry dates, so nobody is warned twice", async () => {
+    const d = deps();
+    await handleTokenExpiry({ step: stepper().step }, d);
+    await handleTokenExpiry({ step: stepper().step }, d);
+    const warned = vi.mocked(d.warn).mock.calls.map(([c]) => `${c.connectionId}:${c.expiresAt.toISOString()}`);
+    expect(warned.slice(2)).toEqual(warned.slice(0, 2));
+  });
+
   it("with nothing expiring, does nothing", async () => {
     const d = deps({ due: vi.fn(async () => []) });
     expect(await handleTokenExpiry({ step: stepper().step }, d)).toEqual({ due: 0, warned: { recipients: 0, sent: 0, skipped: 0, failed: 0 } });

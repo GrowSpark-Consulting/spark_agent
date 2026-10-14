@@ -47,6 +47,13 @@ describe("handleOwnNumberOutcome", () => {
     });
   });
 
+  // Exit test 1 (Day 7; inngest/replay-coverage.test.ts): notify.send keeps one message per key (notify/send.test.ts).
+  it("replay: the same event twice asks under the same key, so the staff member is asked once", async () => {
+    await handleOwnNumberOutcome({ event, step }, deps());
+    await handleOwnNumberOutcome({ event, step }, deps());
+    expect(send.mock.calls.map((c) => c[2].idempotencyKey)).toEqual([`own_number_outcome:${HANDOFF}`, `own_number_outcome:${HANDOFF}`]);
+  });
+
   it("does not ask about a handoff that has an answer, has no staff member, or is gone", async () => {
     for (const [now, reason] of [
       [{ conversationId: CONVERSATION, staffUserId: STAFF, outcome: "booked" }, "already_answered"],

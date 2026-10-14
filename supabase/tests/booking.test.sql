@@ -3,7 +3,7 @@
 -- scripts/db/hold-slot-concurrency.sh. A lead holds one time at a time, so each scenario uses its own lead.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(42);
+select plan(43);
 
 -- Times relative to now(), which is fixed for the whole transaction: base is the day after tomorrow, 10:00 UTC.
 create function pg_temp.at(p_hours numeric) returns timestamptz language sql stable as $$
@@ -183,6 +183,7 @@ select results_eq(
   $$select (select status from public.bookings where id = (select id from second_hold)),
            (select status from public.bookings where id = (select id from rehold))$$,
   $$values ('expired'::text, 'held'::text)$$, 'and leaves live holds alone');
+select is(public.release_expired_holds(), 0, 'a second run (a replay of the minute) expires nothing more');
 
 -- Constraints and access --------------------------------------------------------------------------------
 

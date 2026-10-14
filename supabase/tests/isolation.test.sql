@@ -117,6 +117,7 @@ begin
     insert into public.trial_phones (phone_hash, tenant_id) values (repeat((n + 4)::text, 64), t);
     insert into public.trial_notices (tenant_id, day, claimed_by) values (t, 0, 'iso-fixture');
     insert into public.ai_spend_daily (tenant_id, day, cost_usd, calls) values (t, current_date, 0.5, 10);
+    insert into public.notify_attempts (message_id, tenant_id, kind, status) values (gen_random_uuid(), t, 'ai_reply', 'sending');
   end loop;
 end
 $$;

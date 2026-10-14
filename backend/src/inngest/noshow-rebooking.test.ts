@@ -58,6 +58,13 @@ describe("handleNoShowRebooking", () => {
     });
   });
 
+  // Exit test 1 (Day 7; inngest/replay-coverage.test.ts): notify.send keeps one message per key (notify/send.test.ts).
+  it("replay: the same event twice offers under the same key, so the customer is asked once", async () => {
+    await handleNoShowRebooking({ event, step }, deps());
+    await handleNoShowRebooking({ event, step }, deps());
+    expect(send.mock.calls.map((c) => c[2].idempotencyKey)).toEqual([`noshow_rebooking:${BOOKING}`, `noshow_rebooking:${BOOKING}`]);
+  });
+
   it("sends nothing when the no-show was corrected, the booking is gone, or there is no chat", async () => {
     for (const [now, reason] of [
       [booking({ status: "completed" }), "not_a_no_show"],
