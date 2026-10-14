@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseApiUrl, parseMetaSignupEnv, parsePublicEnv, parseSetupCallUrl } from "./env";
+import { parseApiUrl, parseDemoWhatsAppNumber, parseMetaSignupEnv, parsePublicEnv, parseSetupCallUrl } from "./env";
 
 describe("parseApiUrl", () => {
   it("accepts the API's origin, with or without a trailing slash", () => {
@@ -75,6 +75,19 @@ describe("parseSetupCallUrl", () => {
   it("is null when unset, blank, not https or not an address, so the page falls back to its text instead of a dead button", () => {
     for (const bad of [undefined, "", "   ", "http://cal.example.com", "javascript:alert(1)", "cal.example.com", "ftp://x.test"]) {
       expect(parseSetupCallUrl(bad), String(bad)).toBeNull();
+    }
+  });
+});
+
+describe("parseDemoWhatsAppNumber", () => {
+  it("keeps the digits of a valid number and drops the formatting", () => {
+    expect(parseDemoWhatsAppNumber("919812345678")).toBe("919812345678");
+    expect(parseDemoWhatsAppNumber(" +91 98123-45678 ")).toBe("919812345678");
+  });
+
+  it("is null when unset, blank, not a number, too short or too long, or starts with 0", () => {
+    for (const bad of [undefined, "", "   ", "abc", "91981234567x", "12345", "0981234567890", "1234567890123456", "wa.me/919812345678", "++919812345678"]) {
+      expect(parseDemoWhatsAppNumber(bad), String(bad)).toBeNull();
     }
   });
 });

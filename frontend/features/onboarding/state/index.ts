@@ -8,11 +8,10 @@ import {
   type StaffMember,
   type WaMethod,
   INDUSTRIES,
-  TRIAL_CODE,
+  trialChatUrl,
 } from "@/features/onboarding/data";
 import type { TrialInfo } from "@pakka/types";
 
-export type ImportState = "idle" | "run" | "done";
 /** `pending` is kept from the prototype's state model (“Waiting for Meta approval”). */
 export type WaState = "idle" | "checking" | "pending" | "live";
 
@@ -33,12 +32,6 @@ export interface OnboardingState {
   trialError: string | null;
   /** The account already belongs to a business, so the Business step created nothing. */
   hasBusiness: boolean;
-
-  /* step 2 — teach */
-  site: string;
-  imp: ImportState;
-  impStep: number;
-  faq: boolean[];
 
   /* step 4 — WhatsApp */
   wa: WaState;
@@ -65,8 +58,6 @@ export interface OnboardingState {
   feats: boolean[];
 }
 
-export const DEFAULT_FAQ = [true, true, true, true, true, false];
-
 export const initialState: OnboardingState = {
   step: 0,
   phone: "98400 12345",
@@ -78,10 +69,6 @@ export const initialState: OnboardingState = {
   trial: null,
   trialError: null,
   hasBusiness: false,
-  site: "skylinehomes.in",
-  imp: "idle",
-  impStep: 0,
-  faq: [...DEFAULT_FAQ],
   wa: "idle",
   waMethod: "meta",
   coex: "yes",
@@ -115,9 +102,26 @@ export function profileOf(state: OnboardingState) {
   return PROFILES[industryKey(state)];
 }
 
-/** The real trial code once the trial exists; the prototype's sample code before that. */
-export function trialCodeOf(state: OnboardingState) {
-  return state.trial?.routeCode ?? TRIAL_CODE;
+/** The route code the backend returned when it created the trial; null when there is no trial (never a sample code). */
+export function trialCodeOf(state: OnboardingState): string | null {
+  return state.trial?.routeCode ?? null;
+}
+
+/**
+ * What the "Try it" step can honestly offer: no trial (the account already had a business, or the API made none) means no test chat;
+ * a trial without a configured demo number shows the real code but no link; otherwise the link, built from the backend's route code.
+ */
+export type TestChat =
+  | { kind: "none"; reason: "has_business" | "no_trial" }
+  | { kind: "unavailable"; code: string }
+  | { kind: "ready"; code: string; url: string };
+
+export function testChatOf(state: OnboardingState, demoNumber: string | null): TestChat {
+  // A trial this wizard created stays real even if a repeat submit then finds the business (hasBusiness); only the lack of one matters.
+  const code = trialCodeOf(state);
+  if (!code) return { kind: "none", reason: state.hasBusiness ? "has_business" : "no_trial" };
+  const url = trialChatUrl(demoNumber, code);
+  return url ? { kind: "ready", code, url } : { kind: "unavailable", code };
 }
 
 /** Display fallback used in copy (“It already knows your business.”). */
