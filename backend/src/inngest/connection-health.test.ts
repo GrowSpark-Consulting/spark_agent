@@ -47,6 +47,15 @@ describe("the daily sweep", () => {
     ]);
   });
 
+  // Exit test 1 (Day 7; inngest/replay-coverage.test.ts): Inngest drops an event whose id it has seen, so a repeated sweep starts no check twice.
+  it("replay: the same sweep twice starts the same events (named by connection and day), so each connection is checked once", async () => {
+    const first = stepper();
+    const second = stepper();
+    await handleHealthSweep({ step: first.step }, deps());
+    await handleHealthSweep({ step: second.step }, deps());
+    expect(second.events.flatMap((e) => e.payload.map((p) => p.id))).toEqual(first.events.flatMap((e) => e.payload.map((p) => p.id)));
+  });
+
   it("with nothing due, starts nothing", async () => {
     const s = stepper();
     expect(await handleHealthSweep({ step: s.step }, deps({ due: vi.fn(async () => []) }))).toEqual({ due: 0 });
@@ -85,6 +94,18 @@ describe("one check", () => {
     expect(s.ran).toEqual(["check", "alert"]);
     expect(result).toEqual({ status: "checked", overall: "fail", failed: true, alerts: { recipients: 1, sent: 1, skipped: 0, failed: 0 } });
     expect(JSON.stringify(result)).not.toContain("919876543210");
+  });
+
+  // Exit test 1: the failure's key (connection_health/health.ts) names this failure, and account notices send once per key and person.
+  it("replay: the same check twice reports the same failure under the same key, so the owners hear once", async () => {
+    const alert = { reason: "token" as const, detail: "expired", phoneMasked: "+9198xxxxxx10", key: "connection_failed:c1:never" };
+    const d = deps({ check: vi.fn(async () => ({ status: "checked" as const, overall: "fail" as const, failed: true as const, alert })) });
+    await handleHealthCheck({ event, step: stepper().step }, d);
+    await handleHealthCheck({ event, step: stepper().step }, d);
+    expect(vi.mocked(d.alert).mock.calls).toEqual([
+      [A, alert],
+      [A, alert],
+    ]);
   });
 
   it("a check that was skipped (Meta not reached, not active any more) sends nothing", async () => {

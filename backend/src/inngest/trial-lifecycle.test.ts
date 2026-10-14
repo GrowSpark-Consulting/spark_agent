@@ -38,6 +38,14 @@ describe("trial-lifecycle: the welcome", () => {
     expect(notify).toHaveBeenCalledWith(TENANT, expect.objectContaining({ text: expect.stringContaining("TRIAL-7KQ2") }), `trial_notice:${TENANT}:0`);
   });
 
+  // Exit test 1 (Day 7; inngest/replay-coverage.test.ts): day 0 is claimed by the first run (claim_trial_notice, 0039), so a replay is another
+  // run that finds it taken.
+  it("replay: the same event in another run finds day 0 claimed and sends nothing", async () => {
+    const { d, notify } = deps({ "rpc:claim_trial_notice": { data: "already", error: null }, ...facts });
+    expect(await handleTrialStarted({ event: { data: { tenantId: TENANT } }, runId: "run-1", step: stepper().step }, () => d)).toMatchObject({ status: "already" });
+    expect(notify).not.toHaveBeenCalled();
+  });
+
   it("refuses an event without a business", async () => {
     await expect(handleTrialStarted({ event: { data: {} }, runId: "run-0", step: stepper().step }, () => deps({}).d)).rejects.toThrow();
   });
