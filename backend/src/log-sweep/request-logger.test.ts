@@ -11,9 +11,9 @@ import { captureLogs, describeLeaks, findLeaks, poison, type Fixtures, type LogC
 // letter case, an encoded slash), query strings, a phone number in a path, and a route handler that throws an error whose message carries secrets.
 // Every value is synthetic.
 //
-// KNOWN LEAKS. The tests labelled KNOWN LEAK pin a leak that EXISTS today in files that are not Dev 1's (server/app.ts, server/node.ts, lib/errors.ts,
-// packages/types/src/errors.ts: Dev 2's / shared). They pass while the leak exists. Each says which file must change; when it is fixed the test fails,
-// and it must be flipped to an ordinary test (the same address, expecting no leak). Nothing in those files was edited here.
+// CLOSED 14 Oct (Dev 2, #202): logPathFor masks any run of 32+ key characters wherever a mangled path puts it (server/app.ts); the two
+// "unexpected error" lines log the error's name and a short code only, never the message (lib/errors.ts errorKind, server/node.ts). The
+// tests below, flipped from KNOWN LEAK to ordinary assertions of no leak, are the record of that.
 
 const TOKEN = "Zm9vYmFyLXN5bnRoZXRpYy10b2tlbi1mb3ItdGVzdHM"; // 43 characters, the shape of a connect-link token
 const PHONE = "+919812345621";
@@ -65,14 +65,10 @@ describe("logPathFor: a path with a secret in it is masked", () => {
   });
 });
 
-describe("KNOWN LEAK 1: logPathFor does not mask a mangled path (file to change: backend/src/server/app.ts, Dev 2's; flip to an ordinary test when fixed)", () => {
-  // The prefix test in logPathFor is exact (case, slashes, encoding). Smallest fix: finish logPathFor with
-  //   .replace(/[A-Za-z0-9_-]{32,}/g, (m) => (UUID.test(m) ? m : "***"))
-  // in every branch. Reachable today: API_PUBLIC_URL passes its schema with a trailing slash (lib/env.ts), so a hand-over link built from it was //h/<token>
-  // (agent/handoff/token.ts, fixed on our side in this PR); other callers of API_PUBLIC_URL are listed in the task note.
-  it.each(LEAKING)("the token is logged: %s", (_name, address) => {
+describe("logPathFor: a mangled path (double slash, letter case, an encoded slash, a ;param) is masked too", () => {
+  it.each(LEAKING)("%s", (_name, address) => {
     const shown = logPathFor(address);
-    expect(shown, `logged as ${shown}`).toContain(TOKEN); // THE LEAK. Flip: expect(findLeaks([shown], FX)).toEqual([])
+    expect(findLeaks([shown], FX), `logged as ${shown}`).toEqual([]);
   });
 });
 
@@ -116,14 +112,14 @@ describe("the request logger, through a real server", () => {
     expect(capture.leaks(FX), describeLeaks(capture.leaks(FX))).toEqual([]);
   });
 
-  it("KNOWN LEAK 1 through the real server: a double slash in front of the hand-over link writes the token to the access log (server/app.ts; flip to expect no leak when fixed)", async () => {
+  it("through a real server: a double slash in front of the hand-over link no longer writes the token to the access log", async () => {
     await logged(`//h/${TOKEN}`);
-    expect(capture.lines().join("\n")).toContain(TOKEN); // THE LEAK
+    expect(capture.leaks(FX), describeLeaks(capture.leaks(FX))).toEqual([]);
   });
 
-  it("KNOWN LEAK 1 through the real server: another letter case writes the token to the access log (server/app.ts; flip when fixed)", async () => {
+  it("through a real server: another letter case no longer writes the token to the access log", async () => {
     await logged(`/API/connect-links/${TOKEN}`);
-    expect(capture.lines().join("\n")).toContain(TOKEN); // THE LEAK
+    expect(capture.leaks(FX), describeLeaks(capture.leaks(FX))).toEqual([]);
   });
 
   it("KNOWN LIMIT: the logger prints whatever path a client asks for, so a phone number in an address no route of ours takes is logged (no route takes one; recorded, not a leak of ours)", async () => {
@@ -154,38 +150,35 @@ describe("what redactSecrets already removes from an unexpected error", () => {
   });
 });
 
-describe("KNOWN LEAK 2: an unexpected error's message is logged with only redactSecrets applied (files to change: backend/src/lib/errors.ts:69 and backend/src/server/node.ts:116, Dev 2's; packages/types/src/errors.ts is shared; flip to ordinary tests when fixed)", () => {
-  // Smallest fix: log err.name only in those two lines. Or keep the message and add phone masking (agent/llm/mask.ts maskPersonalData) and an sk-ant- and a
-  // 32+ key-run pattern to redactSecrets. redactSecrets knows connection strings, JWTs, Supabase keys, Meta EAA tokens and bearer headers only.
-  it("the error envelope logs a phone number, an Anthropic key, an app secret and a text that the message carried", () => {
+describe("an unexpected error's message no longer reaches the log (errorKind: the error's name and a short code only)", () => {
+  it("the error envelope logs no phone number, key, secret or text the message carried", () => {
     const out: string[] = [];
     const { status } = toErrorResponse(new Error(poison(FX)), (line) => void out.push(line));
     expect(status).toBe(500);
-    const kinds = new Set(findLeaks(out, FX).map((l) => l.kind));
-    expect(kinds).toEqual(new Set(["phone", "secret", "text", "token"])); // THE LEAK. Flip: expect(findLeaks(out, FX)).toEqual([])
-    expect(out[0]).toContain(PHONE);
-    expect(out[0]).toContain(ANTHROPIC_KEY);
+    expect(findLeaks(out, FX), describeLeaks(findLeaks(out, FX))).toEqual([]);
+    expect(out[0]).not.toContain(PHONE);
+    expect(out[0]).not.toContain(ANTHROPIC_KEY);
   });
 
   it("the same for a database-style message with a phone in the detail (what a unique violation says)", () => {
     const out: string[] = [];
     toErrorResponse(new Error(`duplicate key value violates unique constraint "contacts_tenant_phone_key" Key (tenant_id, phone)=(e0000000, ${PHONE}) already exists.`), (line) => void out.push(line));
-    expect(out[0]).toContain(PHONE); // THE LEAK
+    expect(out[0]).not.toContain(PHONE);
   });
 
-  it("an error that is not an Error object (a string a library threw) is logged whole", () => {
+  it("an error that is not an Error object (a string a library threw) is logged whole, but names its kind only, nothing it carried", () => {
     const out: string[] = [];
     toErrorResponse(poison(FX), (line) => void out.push(line));
-    expect(findLeaks(out, FX).length).toBeGreaterThan(0); // THE LEAK
+    expect(findLeaks(out, FX)).toEqual([]);
   });
 
-  it("a route handler that throws: the server's own line carries the message too (server/node.ts:116)", async () => {
+  it("a route handler that throws: the server's own line carries no secret either (server/node.ts)", async () => {
     await logged("/api/billing/balance", () => {
       throw new Error(poison(FX));
     });
     const line = capture.lines().find((l) => l.startsWith("[server] unexpected error"));
     expect(line).toBeDefined();
-    expect(line).toContain(PHONE); // THE LEAK
-    expect(line).toContain(ANTHROPIC_KEY);
+    expect(line).not.toContain(PHONE);
+    expect(line).not.toContain(ANTHROPIC_KEY);
   });
 });
