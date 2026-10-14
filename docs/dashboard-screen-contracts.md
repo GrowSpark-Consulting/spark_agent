@@ -467,6 +467,8 @@ UI sections: My profile · Business · Services & slots · WhatsApp number · No
         POST /api/whatsapp/connections/:id/recheck       HANDOVER · Dev 1
         POST /api/whatsapp/connections/:id/disconnect    HANDOVER · Dev 1 (owner)
         GET  /api/calendar/google/connect                HANDOVER · Dev 2
+        GET  /api/contacts/:id/deletion                  BUILT 14 Oct · Dev 2 (Data & privacy: what a deletion removes)
+        POST /api/contacts/:id/deletion                  BUILT 14 Oct · Dev 2 (owner/admin; ContactDeletionResult)
   ↓ permission: profile = self; rest owner/admin; disconnect + close account = owner
   ↓ plan: extra numbers = Pro
 ```
