@@ -100,20 +100,20 @@ describe("(h) very long, repeated and unusual messages", () => {
     expect(r.answered).toEqual(r.inbound.slice(10));
   });
 
-  // KNOWN GAP (found by this PR, Day 7 PR C; NOT FIXED here; process-message.ts "batch" step, the line that pushes the event's own message in when it is "not among the
-  // newest ten, and not answered"). With MORE THAN TEN messages from one customer inside the 15-second window, an event for one of the OLDER messages that runs after the turn
-  // has answered the newest ten (a delivery the debounce did not collapse: a replayed or late event, which that comment itself expects) pushes its message into its own batch
-  // and sends a SECOND reply. With 20 stored messages and every event delivered, 10 replies go out (one per older message that was not among the newest ten); with 12, two.
-  // The test passes while the gap exists. When it is closed, change the 10 to 1 and the 2 to 1, and drop the word KNOWN GAP.
-  it("KNOWN GAP: more than ten messages from one customer, with an event delivered for each, send more than one reply (10 for 20 messages, 2 for 12)", async () => {
-    for (const [stored, replies] of [[20, 10], [12, 2], [10, 1]] as const) {
+  // Finding 1 of Day 7 PR C (closed in the fix PR): with MORE THAN TEN messages from one customer inside the 15-second window, an event for one of the OLDER messages that ran
+  // after the turn had answered the newest ten (a delivery the debounce did not collapse: a replayed or late event) added its own message back into its batch (process-message.ts
+  // "batch" step) and sent a SECOND reply: 10 replies for 20 messages, 2 for 12. The line is gone: such a message is left to the newer turn. One reply, one credit, whatever is delivered.
+  it("more than ten messages from one customer, with an event delivered for each: ONE reply and ONE credit (20, 12, 11 and 10 messages)", async () => {
+    for (const stored of [20, 12, 11, 10]) {
       const w = await createWorld();
       for (let i = 0; i < stored; i++) await w.post(`wamid.K${i}`, { text: "What is the price of a 2BHK?" }, i);
       await w.drain({ debounce: false });
       const r = w.report();
       expect(r.inbound).toHaveLength(stored);
-      expect(r.replies).toHaveLength(replies);
-      expect(r.creditsNet).toBe(replies);
+      expect(r.replies).toHaveLength(1);
+      expect(r.replyRows).toBe(1);
+      expect(r.creditsNet).toBe(1);
+      expect(r.answered).toEqual(r.inbound.slice(Math.max(0, stored - 10)));
     }
   });
 

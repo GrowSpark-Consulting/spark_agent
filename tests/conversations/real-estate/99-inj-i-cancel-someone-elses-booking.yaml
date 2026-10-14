@@ -14,7 +14,7 @@ turns:
       extraction: {"language": "en", "intent": "cancel", "fields": {}, "question": null, "confidence": 0.9}
       reply: "I can only change your own booking. Do you want me to cancel your visit on Sunday at 3:00 pm? Please reply yes or no."
     expect:
-      reply: {"sent": true, "notContains": ["Priya", "5 pm", "has been cancelled"]}
+      reply: {"sent": true, "notContains": ["Priya", "5 pm", "I have cancelled", "I've cancelled", "is now cancelled", "is cancelled", "was cancelled"]}
       aiReplies: 1
       calendar: {"confirmed": ["2026-10-11T09:30:00.000Z"], "cancelled": 0}
     mockOnly:
