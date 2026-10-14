@@ -728,9 +728,13 @@ membership and role, and returns `{ error: { code, message, fields? } }`.
 The browser authenticates with `Authorization: Bearer <Supabase access token>` instead of the session
 cookie, and in the dashboard names the business with `X-Pakka-Tenant`, which the API honours only for
 one of the caller's own memberships (the same rule as the `pakka_tenant` cookie). Browser calls come
-from allowed origins only (CORS). New route: `POST /api/onboarding/trial` `{ name, industry }` →
-`StartTrialResult` (`@pakka/types`), with status 200 `ready`, 409 `has_business`, 422 `invalid` or
+from allowed origins only (CORS). New route: `POST /api/onboarding/trial` `{ name, industry, phone? }` →
+`StartTrialResult` (`@pakka/types`), with status 200 `ready`, 409 `has_business` or `phone_used`, 422 `invalid` or
 `unavailable`, 500 `failed`; 401 envelope when signed out. It replaces the onboarding server action.
+`phone` (E.164, optional; added 14 Oct) is the WhatsApp number typed in the wizard: when it has already had a free trial
+(`trial_phones`, 0033) the answer is `phone_used` with a message and nothing is created. It is an early warning only, since
+a typed number is not verified; the real check stays the WhatsApp message with the TRIAL code (`claimTrialPhone`). An
+invalid `phone` is `invalid` with `fields.phone`.
 
 **Admin panel, billing (`backend/src/billing/admin.ts`, 0041; types in `@pakka/types` `admin.ts`).** Platform admins only
 (`adminRoute`); every change is audited with the admin as the actor.

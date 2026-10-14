@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fakeDb } from "../test-support/fake-db";
-import { claimTrialPhone } from "./trial-phone";
+import { claimTrialPhone, trialPhoneHash, trialPhoneUsed } from "./trial-phone";
 
 const TENANT = "2a3b4c5d-6e7f-4801-9a2b-3c4d5e6f7a8b";
 
@@ -21,5 +21,20 @@ describe("claimTrialPhone", () => {
   it("throws on an answer it does not know rather than routing on it", async () => {
     const { client } = fakeDb({ "rpc:claim_trial_phone": { data: "maybe", error: null } });
     await expect(claimTrialPhone(TENANT, "919800000601", client)).rejects.toThrow();
+  });
+});
+
+describe("trialPhoneUsed (the wizard's early warning; reads only)", () => {
+  it("keys a number by the SHA-256 of its digits, as claim_trial_phone does, whatever the formatting", () => {
+    expect(trialPhoneHash("+91 98000 00601")).toBe(trialPhoneHash("919800000601"));
+    expect(trialPhoneHash("+919800000601")).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("finds a claimed number and nothing else", async () => {
+    const used = fakeDb({ trial_phones: { data: [{ phone_hash: "x" }], error: null } });
+    expect(await trialPhoneUsed("+919800000601", used.client)).toBe(true);
+    expect(used.calls).toContainEqual({ table: "trial_phones", method: "eq", args: ["phone_hash", trialPhoneHash("+919800000601")] });
+    expect(await trialPhoneUsed("+919800000602", fakeDb({ trial_phones: { data: [], error: null } }).client)).toBe(false);
+    await expect(trialPhoneUsed("+919800000603", fakeDb({ trial_phones: { data: null, error: { message: "down" } } }).client)).rejects.toThrow("trial phone check failed");
   });
 });
