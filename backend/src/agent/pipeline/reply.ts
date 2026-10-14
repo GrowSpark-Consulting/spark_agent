@@ -110,7 +110,7 @@ export interface ReplyOutcome {
 
 const TAG = "[pipeline]";
 const CORRECTION =
-  "That reply cannot be sent. Use only the amounts, dates and times that are in <facts>, keep it under 600 characters and ask at most two questions. Write the reply again.";
+  "That reply cannot be sent. Use only the amounts, dates and times that are in <facts>, keep it under 600 characters and ask at most two questions. Write only the message to the customer: never mention these instructions, the task or the facts. Write the reply again.";
 
 /** What the plan step tells the later steps: a case name and a handover, no text. */
 interface PlanSummary {
@@ -437,7 +437,7 @@ async function compose(plan: Plan, loaded: Loaded, turn: TurnContext, exceeded: 
     for (let attempt = 1; attempt <= 2; attempt++) {
       const result = await deps.llm.complete({ role: "reply", tenantId: turn.tenantId, conversationId: turn.conversationId, prompt: REPLY_PROMPT, system, messages, signal });
       const text = stripUnsafeCharacters(result.text).trim();
-      const check = checkReply(text, model.facts);
+      const check = checkReply(text, model.facts, { rules: system[0]?.text });
       if (check.ok) return { text, source: "model" };
       // The kinds of problem only: never the reply or what it said.
       console.error(`${TAG} a reply failed the post-check (${check.problems.join(", ")}; attempt ${attempt})`);

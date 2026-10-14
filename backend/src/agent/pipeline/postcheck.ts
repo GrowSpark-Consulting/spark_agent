@@ -16,13 +16,19 @@
 // Month names in Tamil or Hindi are not read: a date written that way is not checked (the facts for slots come from
 // code, in English labels).
 //
+// A reply that talks ABOUT the prompt is a "leak" (Day 7, Finding 4, found by the live run: a reply that began "The task says the customer writes in a language other than
+// English..."): meta-commentary such as "the task", "my instructions", "the system prompt", "according to the facts", "the customer writes", or one of the prompt's own tag names
+// (ENGLISH ONLY: a leak in Tamil, Hindi or any other language is not caught), or a run of 8 or more consecutive words copied from the FIXED RULES text the model was given. The
+// run is compared with the rules ONLY, never with the business block, the facts or a knowledge-base chunk: a correct reply may quote the business's own FAQ or price text.
+// A paraphrase of the rules is not caught either.
+//
 // The check is strict on purpose: a reply that repeats a figure the customer gave ("your ₹80L budget") but that is not in
 // the facts fails too. The reply is then written again once, and then the safe fallback is sent.
 
 export const REPLY_MAX_CHARS = 600;
 export const MAX_QUESTIONS = 2;
 
-export type PostCheckProblem = "amount" | "date" | "time" | "length" | "questions" | "empty";
+export type PostCheckProblem = "amount" | "date" | "time" | "length" | "questions" | "empty" | "leak";
 export interface PostCheck {
   ok: boolean;
   problems: PostCheckProblem[];
@@ -155,8 +161,42 @@ export function timesIn(rawText: string): TimeValue[] {
 const sameDate = (a: DateValue, b: DateValue) => a.month === b.month && a.day === b.day && (a.year === undefined || b.year === undefined || a.year === b.year);
 const sameTime = (a: TimeValue, b: TimeValue) => a.hour12 === b.hour12 && a.minute === b.minute && (a.period === null || b.period === null || a.period === b.period);
 
-/** Whether the reply is fit to send, and if not, what is wrong with it. */
-export function checkReply(reply: string, facts: readonly string[]): PostCheck {
+/** How many consecutive words copied from the fixed rules make a leak. */
+export const LEAK_RUN_WORDS = 8;
+
+/** Phrases about the prompt itself, in English. Word-bounded, any letter case. A reply written TO the customer has no reason to say any of them. */
+const META_COMMENTARY: RegExp[] = [
+  /<\/?(?:task|facts|conversation|message|ask|customer_message|recent_messages|already_collected)\b/i,
+  // Narrow on purpose: "task lighting", "follow these instructions to reach the site", "the facts sheet" and "the society's guidelines" are ordinary replies.
+  /\b(?:the|this|per the) task (?:says|is|asks|tells|states|was|here)\b/i,
+  /\bper the task\b/i,
+  /\bmy (?:instructions?|guidelines|system prompt|prompt|rules)\b/i,
+  /\bsystem (?:prompt|message)\b/i,
+  /\bthe (?:prompt|instructions?) (?:says?|tells?|states?)\b/i,
+  /\b(?:according to|per) the facts\b/i,
+  /\bthe facts (?:say|state|show|given|provided)\b/i,
+  /\bI(?:'m|’m| am| was|'ve been|’ve been| have been) (?:told|instructed|programmed|configured) (?:to|not to)\b/i,
+  /\bthe (?:customer|user)(?:'s|’s)? (?:writes|wrote|is asking|says|latest)\b/i,
+];
+
+const wordsOf = (text: string): string[] => text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+const runsOf = (words: string[]): string[] => (words.length < LEAK_RUN_WORDS ? [] : Array.from({ length: words.length - LEAK_RUN_WORDS + 1 }, (_, i) => words.slice(i, i + LEAK_RUN_WORDS).join(" ")));
+/** The rules text is the same for every reply: its runs are worked out once. */
+const rulesRuns = new Map<string, Set<string>>();
+
+function leaks(reply: string, rules: string | undefined): boolean {
+  if (META_COMMENTARY.some((pattern) => pattern.test(reply))) return true;
+  if (!rules) return false;
+  let known = rulesRuns.get(rules);
+  if (!known) {
+    known = new Set(runsOf(wordsOf(rules)));
+    rulesRuns.set(rules, known);
+  }
+  return runsOf(wordsOf(reply)).some((run) => known.has(run));
+}
+
+/** Whether the reply is fit to send, and if not, what is wrong with it. `rules` is the fixed rules text the model was given (the first system block), for the copied-run check. */
+export function checkReply(reply: string, facts: readonly string[], options: { rules?: string } = {}): PostCheck {
   const problems: PostCheckProblem[] = [];
   if (reply.trim() === "") problems.push("empty");
   if ([...reply].length > REPLY_MAX_CHARS) problems.push("length");
@@ -169,5 +209,6 @@ export function checkReply(reply: string, facts: readonly string[]): PostCheck {
   if (datesIn(reply).some((d) => !factDates.some((f) => sameDate(d, f)))) problems.push("date");
   const factTimes = timesIn(factText);
   if (timesIn(reply).some((t) => !factTimes.some((f) => sameTime(t, f)))) problems.push("time");
+  if (leaks(reply, options.rules)) problems.push("leak");
   return { ok: problems.length === 0, problems };
 }

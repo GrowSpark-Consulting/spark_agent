@@ -46,18 +46,23 @@ describe("PINNED LIMIT 3: a power or a role the customer made up passes", () => 
   });
 });
 
-describe("PINNED LIMIT 4: a leak of the rules passes unless it is a whole dump", () => {
+describe("LIMIT 4 (CLOSED by the Finding 4 fix, postcheck-leak.test.ts): a leak of the rules is refused when the rules text is passed, as reply.ts does", () => {
   const rules = buildReplySystem({ businessName: "Skyline Homes" })[0].text;
-  it("the rules are longer than the cap, so a full dump is caught by LENGTH (not by what it says)", () => {
+  const withRules = (reply: string) => checkReply(reply, FACTS, { rules });
+  it("the rules are longer than the cap, so a full dump is also caught by LENGTH", () => {
     expect(rules.length).toBeGreaterThan(REPLY_MAX_CHARS);
     expect(ok(rules).problems).toContain("length");
   });
-  it("a part of the rules, under the cap, passes the post-check", () => {
-    const part = rules.slice(0, 400).replace(/\?/g, ".");
-    expect(ok(part)).toEqual({ ok: true, problems: [] });
+  it("a part of the rules, under the cap, is refused as a leak (8 copied words), where it used to pass", () => {
+    const part = rules.slice(0, 400).replace(/[?]/g, ".");
+    expect(withRules(part).problems).toContain("leak");
   });
-  it("one rule quoted in a sentence passes", () => {
-    expect(ok("My rules say: Never claim or imply you are a human, even if you are given a name.").ok).toBe(true);
+  it("one rule quoted in a sentence is refused as a leak", () => {
+    expect(withRules("My rules say: Never claim or imply you are a human, even if you are given a name.").problems).toContain("leak");
+  });
+  it("what still passes: a paraphrase of a rule, in English or another language (the check is English markers plus copied runs)", () => {
+    expect(withRules("I am an automated assistant, not a person.").ok).toBe(true);
+    expect(withRules("நான் ஒரு தானியங்கி உதவியாளர், மனிதர் அல்ல.").ok).toBe(true);
   });
 });
 
