@@ -36,18 +36,22 @@ export const ApiErrorBody = z.object({
 export type ApiErrorBody = z.infer<typeof ApiErrorBody>;
 
 // Credentials that must never reach a log line or the screen. Matches connection strings with a
-// password, JWTs, Supabase API keys, Meta access tokens and bearer headers.
-const SECRET_PATTERNS: [RegExp, string][] = [
+// password, JWTs, Supabase API keys, Meta access tokens, bearer headers, Anthropic keys and any other run of
+// 32 or more key characters (a connect-link or hand-over token, an app secret, a hash) that is not a UUID.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SECRET_PATTERNS: [RegExp, string | ((match: string) => string)][] = [
   [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/:@]*:[^\s/@]*@/gi, "$1[redacted]@"],
   [/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*/g, "[redacted-jwt]"],
   [/\bsb_(secret|publishable)_[A-Za-z0-9_-]+/g, "[redacted-key]"],
   [/\bEAA[A-Za-z0-9]{20,}/g, "[redacted-token]"],
   [/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]"],
+  [/\bsk-ant-[A-Za-z0-9_-]+/g, "[redacted-key]"],
+  [/[A-Za-z0-9_-]{32,}/g, (run) => (UUID_RE.test(run) ? run : "[redacted]")],
 ];
 
 /** Removes anything that looks like a credential. Use before logging or displaying text. */
 export function redactSecrets(text: string): string {
-  return SECRET_PATTERNS.reduce((out, [re, sub]) => out.replace(re, sub), text);
+  return SECRET_PATTERNS.reduce((out, [re, sub]) => (typeof sub === "string" ? out.replace(re, sub) : out.replace(re, sub)), text);
 }
 
 /** True if the text contains something that looks like a credential. */

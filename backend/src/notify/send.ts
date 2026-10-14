@@ -1,4 +1,3 @@
-import { redactSecrets } from "@pakka/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -10,6 +9,7 @@ import { supabaseAdmin } from "../lib/supabase-admin";
 import { Interactive, interactiveSummary } from "./interactive";
 import { KINDS, type MessageCreditReason, type NotificationKind } from "./kinds";
 import { OutsideWindowError, SendError, senderFactory, type MessageSender } from "./sender";
+import { errorTextForLog } from "../lib/redact";
 
 // notify.send (docs/handover.md, module 5; docs/contracts.md, section 4): every outbound message goes
 // through here. Order: feature toggle → recipient and connection → opt-out → test-message limit →
@@ -194,7 +194,7 @@ export function templateQuickReplyCount(components: unknown): number | null {
 /** A sender's SendError keeps its code and flags; anything else is unexpected, so it is logged and generic. */
 function senderFailure(err: unknown, message: string): SendOutcome {
   if (err instanceof SendError) return failed(err.code, err.message, { retryable: err.retryable, outcomeUnknown: err.outcomeUnknown });
-  console.error(`[notify] unexpected sender error: ${redactSecrets(err instanceof Error ? `${err.name}: ${err.message}` : String(err))}`);
+  console.error(`[notify] unexpected sender error: ${err instanceof Error ? `${err.name}: ${errorTextForLog(err)}` : errorTextForLog(err)}`);
   return failed("upstream_failed", message);
 }
 

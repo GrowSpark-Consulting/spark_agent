@@ -206,7 +206,7 @@ Both routes resolve the tenant from the session, never from the body.
 | `CreateTemplateResult` | `whatsapp.ts` | TypeScript interface: `{ id, name, language, status: "pending" \| "draft" }` |
 | `ERROR_CODES`, `ErrorCode` | `errors.ts` | The codes in the table below |
 | `ApiErrorBody` | `errors.ts` | Zod for every API error: `{ error: { code, message, fields? } }`. `fields` (messages keyed by input field) is an addition to the handover's `{ code, message }` |
-| `redactSecrets`, `containsSecret` | `errors.ts` | Strip or detect credentials (connection-string passwords, JWTs, Supabase keys, Meta `EAA…` tokens, bearer headers) before logging or showing text |
+| `redactSecrets`, `containsSecret` | `errors.ts` | Strip or detect credentials (connection-string passwords, JWTs, Supabase keys, Meta `EAA…` tokens, bearer headers, Anthropic `sk-ant-` keys, and any other run of 32+ key characters that is not a UUID) before logging or showing text. Phone numbers are not credentials and are not removed here (what the dashboard shows depends on it); the backend's log lines also mask them (`backend/src/lib/redact.ts` `redactForLog`), and an unexpected error is logged by its name and code only (`errorKind`, Day 7) |
 
 ### Error codes
 

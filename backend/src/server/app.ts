@@ -52,7 +52,19 @@ export function bodyLimitFor(pathname: string, routes: readonly Route[] = ROUTES
 }
 
 /** The path as the request log shows it: the route's secret params (a connect-link token) become `***`. */
+/** A run of 32 or more key characters (a connect-link or hand-over token, a key): masked in a logged path wherever it sits, unless it is a UUID. */
+const KEY_RUN = /[A-Za-z0-9_-]{32,}/g;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The path as the request log shows it: a route's secret segments masked, and, whatever the route matching made of the path (a double slash, another
+ * letter case, an encoded slash or a ;parameter in front of a token), any token-like run as well.
+ */
 export function logPathFor(pathname: string, routes: readonly Route[] = ROUTES): string {
+  return maskedSegments(pathname, routes).replace(KEY_RUN, (run) => (UUID.test(run) ? run : "***"));
+}
+
+function maskedSegments(pathname: string, routes: readonly Route[]): string {
   const match = matchRoute(pathname, routes);
   if (!match) {
     // A mangled address (a trailing slash, an extra segment) matches no route and is answered 404, but it is still logged: the segment where a secret would sit is masked too.

@@ -1,10 +1,11 @@
-import { redactSecrets, type ContactDeletionPreview, type ContactDeletionResult, type TenantContext } from "@pakka/types";
+import { type ContactDeletionPreview, type ContactDeletionResult, type TenantContext } from "@pakka/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { removeGoogleEvent, type RemoveResult } from "../booking/google-sync";
 import { AppError } from "../lib/errors";
 import { supabaseAdmin } from "../lib/supabase-admin";
 import { requireRole } from "../lib/tenant";
+import { errorTextForLog } from "../lib/redact";
 
 // A customer's request to delete their data (DPDP; migration 0043), from the dashboard's Data & privacy settings. Owner
 // or admin; the business is the caller's own (TenantContext), so another business's contact is just "not found".
@@ -94,7 +95,7 @@ export async function deleteContactData(context: TenantContext, id: string, deps
       }
     } catch (e) {
       calendarEvents.left++;
-      console.error(`[deletion] contact ${id}: a Google Calendar event was not taken down: ${redactSecrets(e instanceof Error ? e.message : String(e))}`);
+      console.error(`[deletion] contact ${id}: a Google Calendar event was not taken down: ${errorTextForLog(e)}`);
     }
   }
   return {

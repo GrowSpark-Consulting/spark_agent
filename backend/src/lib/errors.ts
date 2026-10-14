@@ -1,5 +1,15 @@
-import { redactSecrets, type ApiErrorBody, type ErrorCode } from "@pakka/types";
+import type { ApiErrorBody, ErrorCode } from "@pakka/types";
 import { ZodError } from "zod";
+
+/**
+ * What kind of error it was, for a log line: its name, and a short code when it has one (a Postgres SQLSTATE, a Node
+ * error code). Never its message, which can carry a phone number, a key or a customer's words.
+ */
+export function errorKind(err: unknown): string {
+  if (!(err instanceof Error)) return `a thrown ${err === null ? "null" : typeof err}`;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === "string" && /^[A-Za-z0-9_]{1,32}$/.test(code) ? `${err.name} (${code})` : err.name;
+}
 
 const STATUS: Record<ErrorCode, number> = {
   unauthenticated: 401,
@@ -64,9 +74,8 @@ export function toErrorResponse(err: unknown, log: (line: string) => void = cons
       body: { error: { code: "validation_failed", message: "Check the highlighted fields.", fields: zodFieldErrors(err) } },
     };
   }
-  // Unexpected: keep the detail for developers (with credentials stripped), never for the user.
-  const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-  log(`[api] unexpected error: ${redactSecrets(detail)}`);
+  // Unexpected: what kind of error it was, never its message (it can carry a phone number, a key or a customer's words). Never for the user.
+  log(`[api] unexpected error: ${errorKind(err)}`);
   return {
     status: 500,
     body: { error: { code: "internal", message: "Something went wrong on our side. Try again in a moment." } },

@@ -105,6 +105,12 @@ describe("parseServerEnv", () => {
     });
   });
 
+  it("takes API_PUBLIC_URL with or without a trailing slash, and drops it, so \`${url}/api/...\` has one slash (Day 7 log sweep)", () => {
+    expect(parseServerEnv({ ...base, API_PUBLIC_URL: "https://api.example.com/" }).API_PUBLIC_URL).toBe("https://api.example.com");
+    expect(parseServerEnv({ ...base, API_PUBLIC_URL: "https://api.example.com" }).API_PUBLIC_URL).toBe("https://api.example.com");
+    expect(() => parseServerEnv({ ...base, API_PUBLIC_URL: "https://api.example.com/api" })).toThrow(/API_PUBLIC_URL/);
+  });
+
   it("names the bad variable without echoing its value", () => {
     try {
       parseServerEnv({ ...base, WHATSAPP_REGISTER_PIN: "12ab-secret" });

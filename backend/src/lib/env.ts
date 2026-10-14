@@ -92,6 +92,8 @@ const serverEnvSchema = z
   API_PUBLIC_URL: z
     .url({ protocol: /^https$/, error: "must be the API's https origin" })
     .refine((v) => new URL(v).pathname === "/" && !new URL(v).search && !new URL(v).hash, "must be an origin only, no path")
+    // https://api.example.com/ and https://api.example.com are the same origin; callers append "/api/...".
+    .transform((v) => v.replace(/\/+$/, ""))
     .optional(),
   // Spark Agent's Business Portfolio ID, shown for partner access. Not a secret. Unset: the screen says it isn't available.
   META_PARTNER_BUSINESS_ID: z.string().regex(/^\d{5,20}$/, "must be digits only").optional(),

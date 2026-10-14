@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
-import { redactSecrets } from "@pakka/types";
+import { errorKind } from "../lib/errors";
 
 // Node's http server on the outside, Web Request/Response on the inside: every route (and Inngest's
 // edge adapter) takes a Request and returns a Response, so routes are tested without a socket.
@@ -113,7 +113,7 @@ async function respond(req: IncomingMessage, handle: FetchHandler, options: Requ
   try {
     return await handle(request);
   } catch (err) {
-    options.log(`[server] unexpected error: ${redactSecrets(err instanceof Error ? `${err.name}: ${err.message}` : String(err))}`);
+    options.log(`[server] unexpected error: ${errorKind(err)}`);
     return Response.json(errorBody("internal", "Something went wrong on our side. Try again in a moment."), { status: 500 });
   }
 }

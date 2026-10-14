@@ -4,7 +4,6 @@ import {
   OneTimePaymentInput,
   SETUP_FEE_INR,
   TOPUP_PACK,
-  redactSecrets,
   type CancelPlanResult,
   type ChangePlanResult,
   type PaymentView,
@@ -19,6 +18,7 @@ import { serverEnv } from "../lib/env";
 import { AppError } from "../lib/errors";
 import { supabaseAdmin } from "../lib/supabase-admin";
 import { indiaDate, newTxnid, payuConfig, paymentRequest, PayuError, revokeMandate, verifyPayment, withGst, type FetchLike, type PayuConfig } from "./payu";
+import { errorTextForLog, redactForLog } from "../lib/redact";
 
 // Paying Spark Agent through PayU (decision 20; migrations 0035 and 0036). The owner starts a payment here, the browser
 // POSTs the returned fields to PayU's hosted checkout, and PayU sends the payer back to our return URL. Whatever PayU
@@ -97,8 +97,9 @@ async function begin(deps: BillingDeps, args: Record<string, unknown>, refusal: 
 const Plan = z.object({ key: z.string(), name: z.string(), price_inr: z.number().int(), monthly_credits: z.number().int() });
 
 export async function startCheckout(context: TenantContext, rawInput: unknown, deps: BillingDeps = billingDeps()): Promise<PayuCheckout> {
-  const { payu, returnUrl } = ready(deps);
+  // Who first: a member who may not pay is told so whatever the configuration.
   requireOwner(context, "choose a plan");
+  const { payu, returnUrl } = ready(deps);
   const input = CheckoutInput.parse(rawInput);
   const { data, error } = await deps.db.from("plans").select("key, name, price_inr, monthly_credits").eq("key", input.planKey).maybeSingle();
   if (error) throw new Error(`billing: plan read failed: ${error.message}`);
@@ -147,8 +148,8 @@ async function startOneTime(
   deps: BillingDeps,
   item: { kind: "topup" | "setup_fee"; priceInr: number; credits: number | null; productinfo: string; refusal: string },
 ): Promise<PayuCheckout> {
-  const { payu, returnUrl } = ready(deps);
   requireOwner(context, "make a payment");
+  const { payu, returnUrl } = ready(deps);
   const input = OneTimePaymentInput.parse(rawInput ?? {});
   const amounts = withGst(item.priceInr * 100);
   const who = await payer(context, deps, input.phone);
@@ -285,7 +286,7 @@ export async function revokeQuietly(mandateId: string, method: string | null, de
   try {
     await revokeMandate(deps.payu, { mandateId, method, requestId: newTxnid("plan_change") }, deps.fetch);
   } catch (e) {
-    console.error(`[billing] ${what}: the mandate was not revoked at PayU: ${redactSecrets(e instanceof Error ? e.message : String(e))}`);
+    console.error(`[billing] ${what}: the mandate was not revoked at PayU: ${errorTextForLog(e)}`);
   }
 }
 
@@ -304,7 +305,7 @@ async function revokeReplacedMandate(paymentId: string, deps: BillingDeps): Prom
     await revokeMandate(deps.payu, { mandateId: mandate.mandate_id, method: mandate.mandate_method, requestId: newTxnid("plan_change") }, deps.fetch);
   } catch (e) {
     // The old subscription is cancelled, so the renewal job never charges it; revoking at PayU can be done by hand.
-    console.error(`[billing] payment ${paymentId}: the replaced mandate was not revoked at PayU: ${redactSecrets(e instanceof Error ? e.message : String(e))}`);
+    console.error(`[billing] payment ${paymentId}: the replaced mandate was not revoked at PayU: ${errorTextForLog(e)}`);
   }
 }
 
@@ -336,7 +337,7 @@ export async function syncPayment(txnid: string, deps: BillingDeps): Promise<Syn
   });
   if (error) {
     if (error.code === "PA422") {
-      console.error(`[billing] payment ${payment.id}: PayU's amount does not match ours; nothing applied (${redactSecrets(error.message)})`);
+      console.error(`[billing] payment ${payment.id}: PayU's amount does not match ours; nothing applied (${redactForLog(error.message)})`);
       return { paymentId: payment.id, status: payment.status };
     }
     throw new Error(`settle_payment failed: ${error.message}`);
@@ -375,7 +376,7 @@ export async function handlePayuReturn(request: Request, deps: BillingDeps = bil
       paymentId = (await syncPayment(txnid, deps))?.paymentId ?? null;
     } catch (e) {
       // PayU is slow to answer: the Billing screen polls, and polling asks PayU again.
-      console.error(`[billing] return: could not verify a payment yet: ${redactSecrets(e instanceof Error ? e.message : String(e))}`);
+      console.error(`[billing] return: could not verify a payment yet: ${errorTextForLog(e)}`);
       const known = await deps.db.from("payments").select("id").eq("txnid", txnid).maybeSingle();
       paymentId = known.data ? z.object({ id: z.string() }).parse(known.data).id : null;
     }
@@ -392,7 +393,7 @@ export async function handlePayuWebhook(request: Request, deps: BillingDeps = bi
     await syncPayment(txnid, deps);
     return Response.json({ ok: true });
   } catch (e) {
-    console.error(`[billing] webhook: could not verify a payment yet: ${redactSecrets(e instanceof Error ? e.message : String(e))}`);
+    console.error(`[billing] webhook: could not verify a payment yet: ${errorTextForLog(e)}`);
     return Response.json({ ok: false }, { status: e instanceof PayuError ? 503 : 500 });
   }
 }
@@ -426,7 +427,7 @@ export async function paymentStatus(context: TenantContext, id: string, deps: Bi
       await syncPayment(row.txnid, deps);
       row = await readPayment(context, id, deps);
     } catch (e) {
-      console.error(`[billing] status: could not verify payment ${id} yet: ${redactSecrets(e instanceof Error ? e.message : String(e))}`);
+      console.error(`[billing] status: could not verify payment ${id} yet: ${errorTextForLog(e)}`);
     }
   }
   return {

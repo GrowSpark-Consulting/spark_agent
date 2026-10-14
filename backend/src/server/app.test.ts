@@ -423,6 +423,26 @@ describe("logPathFor", () => {
     expect(logPathFor("/api/templates")).toBe("/api/templates");
     expect(logPathFor("/api/nope/anything", routes)).toBe("/api/nope/anything");
   });
+
+  // Day 7 log sweep (Dev 1): a token in a path the route matching does not recognise was logged whole.
+  const TOKEN = "7Hk2_mQ9xLp4Rt8Vb1Nc6Zd3Fg5Js0Wy-aEuI";
+  it.each([
+    ["a double slash in front", `//api/connect-links/${TOKEN}`],
+    ["a double slash inside", `/api//connect-links/${TOKEN}`],
+    ["a double slash in front of the hand-over link", `//h/${TOKEN}`],
+    ["a double slash after the hand-over prefix", `/h//${TOKEN}`],
+    ["another letter case", `/API/connect-links/${TOKEN}`],
+    ["an encoded slash", `/api/connect-links%2F${TOKEN}`],
+    ["a semicolon parameter", `/api/connect-links;v=1/${TOKEN}`],
+    ["a trailing segment", `/api/connect-links/${TOKEN}/x`],
+  ])("masks a token wherever the path puts it: %s", (_name, path) => {
+    expect(logPathFor(path)).not.toContain(TOKEN);
+    expect(logPathFor(path)).toContain("***");
+  });
+
+  it("keeps ids readable: a UUID is not a token", () => {
+    expect(logPathFor("/api/conversations/3f2a1b4c-5d6e-4f70-8a91-b2c3d4e5f601/lead-card")).toBe("/api/conversations/3f2a1b4c-5d6e-4f70-8a91-b2c3d4e5f601/lead-card");
+  });
 });
 
 describe("/api/inngest", () => {
