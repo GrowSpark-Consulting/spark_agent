@@ -65,7 +65,7 @@ function DialogContent({
         data-slot="dialog-content"
         className={cn(
           "fixed top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2",
-          "w-[min(440px,calc(100%-32px))] flex flex-col gap-3 p-4",
+          "w-[min(440px,calc(100%-32px))] max-h-[calc(100dvh-32px)] overflow-y-auto overscroll-contain flex flex-col gap-3 p-4",
           "bg-surface shadow-lg rounded-none outline-none",
           "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 duration-150",
           className
