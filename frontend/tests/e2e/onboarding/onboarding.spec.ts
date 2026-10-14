@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 // `test` fails on any console or page error, except the browser's own line for an API answer that
 // isn't 2xx: the owner's Business step gets 409 has_business from POST /api/onboarding/trial.
-import { PASSWORD, SIGNED_OUT, expect, signUp, test, uniqueEmail } from "../support/app";
+import { PASSWORD, SIGNED_OUT, expect, signIn, signUp, test, uniqueEmail } from "../support/app";
 
 /** The wizard's footer button that moves to the next step (label changes per step). */
 const next = (page: Page, label: string | RegExp) => page.getByRole("button", { name: label });

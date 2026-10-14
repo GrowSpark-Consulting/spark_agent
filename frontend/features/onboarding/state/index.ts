@@ -40,8 +40,11 @@ export interface OnboardingState {
   mWaba: string;
   mPhoneId: string;
   copied: string | null;
-  /** The connection the API returned for Connect with Facebook, if any. Connected only when `status` is `active`. */
-  waConnection: { status: string; displayPhone: string | null } | null;
+  /**
+   * The saved connection as the database reports it (read when the WhatsApp step opens) or as the API just returned it. Connected only when
+   * `status` is `active`. `messagesReach` is false when the webhook check does not prove customers' messages arrive; absent means not known.
+   */
+  waConnection: { status: string; displayPhone: string | null; messagesReach?: boolean } | null;
   chkKind: CheckKind;
   chkStep: number;
   chkFail: number;
