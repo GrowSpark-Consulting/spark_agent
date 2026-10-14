@@ -194,8 +194,8 @@ describe("a reply went out, its records were lost, and the run then gives up (wa
   });
 });
 
-describe("KNOWN LIMIT 2b (what remains after this PR; the root cause is KNOWN GAP 1, inside Dev 2's notify.send): the reply was delivered but NOTHING of ours recorded it", () => {
-  it("notify_record failed (the send is reported as sent, no row), the marker and the audit rows are lost, and the step fails on every attempt: no signal exists, so the retries resend (the notify gap) and the handler adds one safe line. Passes while this exists; it needs a pending record from notify.send to close", async () => {
+describe("KNOWN LIMIT 2b (the reply was delivered but NOTHING of ours recorded it; half closed on Day 7 by Dev 2's notify.send claim, 0045)", () => {
+  it("notify_record failed (the send is reported as sent, no row), the marker and the audit rows are lost, and the step fails on every attempt: the retries no longer resend (the claim answers them 'unknown'), but the handler, which cannot see the claim yet, adds one safe line. Passes while this exists; reading the claim (notify_attempts) in reply-record.ts would close it", async () => {
     const w = await createWorld({ sends: ["ok_unrecorded", "ok_unrecorded", "ok_unrecorded", "ok_unrecorded"] });
     w.notify.afterDelivered = () => {
       w.failAudits(999);
@@ -207,7 +207,7 @@ describe("KNOWN LIMIT 2b (what remains after this PR; the root cause is KNOWN GA
     expect(report.giveUp).toBe("sent");
     const r = w.report();
     expect(w.notify.rows.filter((d) => d.key?.startsWith("reply:"))).toHaveLength(0); // none of the replies was recorded anywhere (only the safe line was)
-    expect(r.replies.filter((d) => d.key?.startsWith("reply:"))).toHaveLength(4); // the notify gap: an unrecorded key cannot dedupe
+    expect(r.replies.filter((d) => d.key?.startsWith("reply:"))).toHaveLength(1); // was 4 before the claim: the retries are answered "unknown"
     expect(r.replies.filter((d) => d.key?.startsWith("gave_up:"))).toHaveLength(1); // and the safe line on top
   });
 });

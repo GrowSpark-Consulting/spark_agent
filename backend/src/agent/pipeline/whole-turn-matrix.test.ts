@@ -477,15 +477,15 @@ describe("the other ways a turn ends", () => {
   });
 });
 
-describe("KNOWN GAP (Day 6 note on the reply idempotency key, section 3.1; it is inside Dev 2's notify.send)", () => {
-  it("a crash after WhatsApp accepted the reply and before notify.send records it sends the reply TWICE: the key was never recorded, so the retry sends again. Passes while the gap exists; when notify.send closes it, change 2 to 1", async () => {
+describe("CLOSED GAP (Day 6 note on the reply idempotency key, section 3.1; closed on Day 7 by Dev 2's notify.send claim, migration 0045)", () => {
+  it("a crash after WhatsApp accepted the reply and before notify.send records it: the retry finds the claim and does not send again, so the reply goes ONCE", async () => {
     const { w, reports } = await oneMessage({ sends: ["crash_after_accept"] });
     expect(reports[0]).toMatchObject({ status: "completed" });
     expect(reports[0].attempts.reply).toBe(2);
     const r = w.report();
-    expect(r.replies).toHaveLength(2); // THE GAP: two deliveries for one turn
-    expect(r.replyRows).toBe(1);
-    expect(r.creditsNet).toBe(2); // and the first attempt's credit was never refunded
+    expect(r.replies).toHaveLength(1); // was 2 while the gap existed
+    expect(r.replyRows).toBe(0); // nothing recorded it: the retry was answered "unknown"
+    expect(r.creditsNet).toBe(1); // the delivered reply's credit stays spent
     expect(r.answered).toEqual(r.inbound);
   });
 });

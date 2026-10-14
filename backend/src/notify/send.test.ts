@@ -48,6 +48,8 @@ beforeEach(() => {
   rpcHandlers.notify_staff_target = () => ok([target({ to_phone: "+919800011111" })]);
   rpcHandlers.notify_template = () => ok([{ name: "reminder_24h_v2", language: "en", category: "utility" }]);
   rpcHandlers.notify_record = () => ok(null);
+  rpcHandlers.claim_notify_attempt = () => ok("claimed");
+  rpcHandlers.release_notify_attempt = () => ok(null);
   rpcHandlers.spend_credits = () => ok(true);
   rpcHandlers.refund_credits = () => ok(1);
   tables.messages = { data: [], error: null };
@@ -191,6 +193,76 @@ describe("idempotencyKey", () => {
       messageId: keyedMessageId(TENANT, "reminder_24h", `${KEY}#template`),
     });
     expect(calls("refund_credits")[0]).toMatchObject({ p_ref_id: keyedMessageId(TENANT, "reminder_24h", KEY) });
+  });
+
+  // Day 7 (0045): a keyed message is claimed before WhatsApp is asked, so a repeat after an attempt that died or lost its record
+  // never sends it twice (docs/task-notes/2026-10-13-day6-dev1-reply-idempotency-key.md, section 3.1).
+  describe("the claim before sending", () => {
+    const ID = keyedMessageId(TENANT, "reminder_24h", KEY);
+
+    it("claims the keyed id before spending or sending; an unkeyed send claims nothing", async () => {
+      await send(TENANT, "reminder_24h", reminder);
+      expect(calls("claim_notify_attempt")).toEqual([{ p_tenant_id: TENANT, p_message_id: ID, p_kind: "reminder_24h" }]);
+      const order = rpc.mock.calls.map(([name]) => name);
+      expect(order.indexOf("claim_notify_attempt")).toBeLessThan(order.indexOf("spend_credits"));
+      expect(calls("release_notify_attempt")).toHaveLength(0);
+      rpc.mockClear();
+      await send(TENANT, "reminder_24h", { ...reminder, idempotencyKey: undefined });
+      expect(calls("claim_notify_attempt")).toHaveLength(0);
+    });
+
+    it("an earlier attempt that never recorded or released its claim: nothing is sent or charged, and the outcome is unknown", async () => {
+      rpcHandlers.claim_notify_attempt = () => ok("in_doubt");
+      await expect(send(TENANT, "reminder_24h", reminder)).resolves.toMatchObject({ status: "failed", error: { code: "upstream_failed", outcomeUnknown: true } });
+      expect(sender.sendText).not.toHaveBeenCalled();
+      expect(calls("spend_credits")).toHaveLength(0);
+      expect(calls("refund_credits")).toHaveLength(0); // the earlier attempt's credit stays: it most likely went out
+    });
+
+    it("a send recorded between the first look and the claim is returned, not sent again", async () => {
+      rpcHandlers.claim_notify_attempt = () => ok("sent");
+      tables.messages = { data: [], error: null };
+      const reads = [{ data: [], error: null }, { data: [{ id: ID, provider_msg_id: "wamid.first", credits_charged: 1, template_name: null }], error: null }];
+      const from = db.client.from.bind(db.client);
+      vi.spyOn(db.client, "from").mockImplementation((table: string) => {
+        if (table === "messages") tables.messages = reads.shift() ?? tables.messages;
+        return from(table);
+      });
+      await expect(send(TENANT, "reminder_24h", reminder)).resolves.toMatchObject({ status: "sent", providerMsgId: "wamid.first" });
+      expect(sender.sendText).not.toHaveBeenCalled();
+      vi.restoreAllMocks();
+    });
+
+    it("releases the claim when WhatsApp refused for certain, or there were no credits, so a later attempt may send", async () => {
+      sender.sendText.mockRejectedValueOnce(new SendError("rate_limited", "busy", { retryable: true }));
+      await expect(send(TENANT, "reminder_24h", reminder)).resolves.toMatchObject({ status: "failed", error: { code: "rate_limited", outcomeUnknown: false } });
+      expect(calls("release_notify_attempt")).toEqual([{ p_tenant_id: TENANT, p_message_id: ID }]);
+
+      rpc.mockClear();
+      rpcHandlers.spend_credits = () => ok(false);
+      await expect(send(TENANT, "reminder_24h", reminder)).resolves.toEqual({ status: "skipped", reason: "insufficient_credits" });
+      expect(calls("release_notify_attempt")).toEqual([{ p_tenant_id: TENANT, p_message_id: ID }]);
+    });
+
+    it("keeps the claim after an unknown outcome or a record that failed: a repeat must never send it again", async () => {
+      sender.sendText.mockRejectedValueOnce(new SendError("upstream_failed", "no answer", { retryable: true, outcomeUnknown: true }));
+      await expect(send(TENANT, "reminder_24h", reminder)).resolves.toMatchObject({ status: "failed", error: { outcomeUnknown: true } });
+      expect(calls("release_notify_attempt")).toHaveLength(0);
+
+      rpc.mockClear();
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      rpcHandlers.notify_record = () => ({ data: null, error: { message: "connection reset" } });
+      await expect(send(TENANT, "reminder_24h", reminder)).resolves.toMatchObject({ status: "sent" });
+      expect(calls("release_notify_attempt")).toHaveLength(0);
+      error.mockRestore();
+    });
+
+    it("a window that closed mid-send releases the free-form claim and claims the template's own id", async () => {
+      sender.sendText.mockRejectedValueOnce(new OutsideWindowError());
+      await send(TENANT, "reminder_24h", { ...reminder, templateParams: ["visit", "Skyline Homes", "Sat 10 Oct, 5:00 pm"] });
+      expect(calls("release_notify_attempt")).toEqual([{ p_tenant_id: TENANT, p_message_id: ID }]);
+      expect(calls("claim_notify_attempt").map((c) => c.p_message_id)).toEqual([ID, keyedMessageId(TENANT, "reminder_24h", `${KEY}#template`)]);
+    });
   });
 
   it("refuses a key that is empty or too long, before anything is read", async () => {

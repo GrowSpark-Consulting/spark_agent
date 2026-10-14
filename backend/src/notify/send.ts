@@ -20,6 +20,9 @@ import { OutsideWindowError, SendError, senderFactory, type MessageSender } from
 // sender's code (rate_limited, whatsapp_not_connected…). When the outcome is unknown (a timeout), the
 // credits are refunded too and the failure says outcomeUnknown, so nobody resends it; holding them
 // instead waits for Raja (docs/contracts.md, decision 16).
+// A keyed send (idempotencyKey) goes at most once: a repeat returns the recorded send, and a keyed message is claimed
+// before WhatsApp is asked (0045), so a repeat after an attempt that died or lost its record is answered "unknown"
+// (outcomeUnknown) instead of sending again. Its credit stays spent: the message most likely went out.
 
 export type NotifyPayload = {
   /** Customer messages: the conversation to reply in. */
@@ -139,6 +142,24 @@ async function earlierSend(db: SupabaseClient, tenantId: string, kind: Notificat
   const [row] = z.array(SentRow).parse(data ?? []);
   if (!row) return null;
   return { status: "sent", messageId: row.id, providerMsgId: row.provider_msg_id ?? "", creditsCharged: row.credits_charged, usedTemplate: row.template_name !== null };
+}
+
+const IN_DOUBT = "An earlier attempt to send this message may have gone out, so it was not sent again.";
+
+/** Claims a keyed message before WhatsApp is asked (0045): claimed (send it), sent (recorded already) or in_doubt (don't). */
+async function claimAttempt(db: SupabaseClient, tenantId: string, messageId: string, kind: NotificationKind): Promise<"claimed" | "sent" | "in_doubt"> {
+  const { data, error } = await db.rpc("claim_notify_attempt", { p_tenant_id: tenantId, p_message_id: messageId, p_kind: kind });
+  if (error) throw new Error(`notify.send: claiming the send failed: ${error.message}`);
+  return z.enum(["claimed", "sent", "in_doubt"]).parse(data);
+}
+
+/**
+ * Lets a later attempt send a keyed message that certainly did not go out. Logged, never thrown: a claim left in place
+ * only means a later attempt is answered "unknown" and sends nothing, never twice.
+ */
+async function releaseAttempt(db: SupabaseClient, tenantId: string, messageId: string): Promise<void> {
+  const { error } = await db.rpc("release_notify_attempt", { p_tenant_id: tenantId, p_message_id: messageId });
+  if (error) console.error(`[notify] the claim on message ${messageId} was not released: ${error.message}`);
 }
 
 /**
@@ -304,7 +325,19 @@ export async function send(tenantId: string, kind: NotificationKind, payload: No
   }
 
   const messageId = key !== undefined ? keyedMessageId(tenantId, kind, key) : randomUUID();
+  // A keyed message is claimed before WhatsApp is asked (0045), so it goes at most once: an earlier attempt that never
+  // recorded or released its claim may have gone out (the process died, or notify_record failed), and is not sent again.
+  if (key !== undefined) {
+    const claim = await claimAttempt(db, tenantId, messageId, kind);
+    if (claim === "sent") {
+      const earlier = await earlierSend(db, tenantId, kind, key);
+      if (earlier) return earlier;
+    }
+    if (claim !== "claimed") return failed("upstream_failed", IN_DOUBT, { outcomeUnknown: true });
+  }
+  const release = () => (key !== undefined ? releaseAttempt(db, tenantId, messageId) : Promise.resolve());
   if (cost > 0 && reason && !(await spendCredits(tenantId, cost, reason, messageId))) {
+    await release();
     return { status: "skipped", reason: "insufficient_credits" };
   }
 
@@ -327,6 +360,7 @@ export async function send(tenantId: string, kind: NotificationKind, payload: No
     // The window closed between our check and WhatsApp's. Send again without the free-form message,
     // which picks the kind's approved template; a kind with no template is skipped.
     if (err instanceof OutsideWindowError && !template) {
+      await release();
       if (!kindConfig.template) return { status: "skipped", reason: "outside_window" };
       return send(tenantId, kind, {
         ...payload,
@@ -335,7 +369,10 @@ export async function send(tenantId: string, kind: NotificationKind, payload: No
         idempotencyKey: key !== undefined ? templateFallbackKey(key) : undefined,
       });
     }
-    return senderFailure(err, "WhatsApp did not accept the message, so it was not sent.");
+    const failure = senderFailure(err, "WhatsApp did not accept the message, so it was not sent.");
+    // Refused for certain: a later attempt may send. An unknown outcome keeps its claim, so nothing ever resends it.
+    if (failure.status === "failed" && !failure.error.outcomeUnknown) await release();
+    return failure;
   }
 
   const actor = payload.actorId ?? (kindConfig.sender === "ai" ? "ai" : "system");
@@ -351,7 +388,8 @@ export async function send(tenantId: string, kind: NotificationKind, payload: No
     p_actor: actor,
     p_kind: kind,
   });
-  // The message has gone out and is paid for; a retry would send it twice. Log and report it as sent.
+  // The message has gone out and is paid for. Log and report it as sent: its claim stays (0045), so a retry of a keyed
+  // send is answered "unknown" and never sends it twice.
   if (recorded.error) console.error(`notify_record failed for message ${messageId}: ${recorded.error.message}`);
   if (cost > 0 && reason) announceSpend(tenantId, cost, reason, messageId);
 
