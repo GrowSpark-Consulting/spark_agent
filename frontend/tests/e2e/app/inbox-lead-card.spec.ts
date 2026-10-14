@@ -86,7 +86,7 @@ test.describe("Inbox · lead card", () => {
     await expect(card).toContainText("Karthik R");
     await expect(card).toContainText("+91 98xxx xxx21");
     await expect(card.getByRole("definition").first()).toHaveText("Qualified");
-    await expect(card).toContainText("asked to talk to a person");
+    await expect(card).toContainText("Asked for a person");
     await expect(card.getByTestId("lead-card-answer")).toHaveText([
       "Preferred area: Velachery",
       "Budget: ₹60,00,000 – ₹80,00,000",

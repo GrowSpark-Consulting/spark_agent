@@ -9,6 +9,7 @@ import { CHECKS, ROUTES, STEP_LABELS, TOTAL_STEPS, type CheckKind } from "@/feat
 import { offeredTrades, type ActivePack, type OfferedTrade } from "@/features/onboarding/packs";
 import {
   industryKey,
+  phoneProblem,
   trialPhoneOf,
   initialState,
   plannedFailure,
@@ -109,7 +110,7 @@ export function OnboardingFlow({ activePacks }: { activePacks: ActivePack[] | nu
   const inSteps = st < TOTAL_STEPS;
 
   const nextOff =
-    (st === 0 && s.otpSent && s.otp.length < 6) ||
+    (st === 0 && (!!phoneProblem(s) || (s.otpSent && s.otp.length < 6))) ||
     (st === 1 && (!s.biz.trim() || !tradeOffered || savingBusiness));
 
   const nextLabel =

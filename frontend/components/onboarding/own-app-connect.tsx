@@ -29,6 +29,7 @@ export function OwnAppConnect({
   onRetryConfig,
   copied,
   onCopy,
+  onConnected,
 }: {
   config: WebhookConfigResult | null;
   /** The business `config` was read for. The details are sent to this business only. */
@@ -36,6 +37,8 @@ export function OwnAppConnect({
   onRetryConfig: () => void;
   copied: string | null;
   onCopy: (label: string, value: string) => void;
+  /** Called with the connection the API returned (whatever its status), so the step can re-read what is saved. */
+  onConnected?: (connection: WhatsAppConnectionPublic) => void;
 }) {
   const [form, setForm] = React.useState<ManualConnectForm>(EMPTY);
   const [pending, setPending] = React.useState(false);
@@ -74,6 +77,7 @@ export function OwnAppConnect({
       return;
     }
     setConnection(result.connection);
+    onConnected?.(result.connection);
     // The secrets were sent once. They are not kept once the API has stored them.
     if (result.connection.status === "active") setForm((f) => ({ ...f, token: "", appSecret: "" }));
   };

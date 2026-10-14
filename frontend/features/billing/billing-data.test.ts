@@ -5,7 +5,7 @@ const getJson = vi.fn();
 const postJson = vi.fn();
 vi.mock("@/lib/api/client", () => ({ getJson: (...args: unknown[]) => getJson(...args), postJson: (...args: unknown[]) => postJson(...args) }));
 
-const { BillingDataError, changePlan, fetchAccountStatus, fetchCreditHistory, fetchPayment, fetchPlans, HISTORY_PAGE, isPaymentId, planRelation, reasonLabel, startCheckout, startSetupFee, startTopup } = await import("./billing-data");
+const { BillingDataError, cancelPlan, changePlan, fetchAccountStatus, fetchCreditHistory, fetchPayment, fetchPlans, HISTORY_PAGE, isPaymentId, planRelation, reasonLabel, resumePlan, startCheckout, startSetupFee, startTopup } = await import("./billing-data");
 
 const TENANT = "10000000-0000-4000-8000-000000000001";
 const OTHER = "10000000-0000-4000-8000-000000000009";
@@ -226,6 +226,34 @@ describe("changePlan", () => {
     const refusal = new Error("conflict");
     postJson.mockRejectedValue(refusal);
     await expect(changePlan(TENANT, { planKey: "pro" })).rejects.toBe(refusal);
+  });
+});
+
+describe("cancelPlan and resumePlan", () => {
+  it("cancel POSTs with no body for this business and reads both documented outcomes", async () => {
+    for (const answer of [{ status: "scheduled", endsAt: "2026-11-01T00:00:00.000Z" }, { status: "ended" }]) {
+      postJson.mockResolvedValueOnce(answer);
+      expect(await cancelPlan(TENANT)).toEqual(answer);
+    }
+    expect(postJson).toHaveBeenCalledWith("/api/billing/cancel", undefined, { tenantId: TENANT });
+  });
+
+  it("resume POSTs with no body and reads { renewsAt }", async () => {
+    postJson.mockResolvedValueOnce({ renewsAt: "2026-11-01T00:00:00.000Z" });
+    expect(await resumePlan(TENANT)).toEqual({ renewsAt: "2026-11-01T00:00:00.000Z" });
+    expect(postJson).toHaveBeenCalledWith("/api/billing/resume", undefined, { tenantId: TENANT });
+  });
+
+  it("rejects an answer the contract does not have, and lets the API's refusal through untouched", async () => {
+    postJson.mockResolvedValueOnce({ status: "refunded" });
+    await expect(cancelPlan(TENANT)).rejects.toBeInstanceOf(BillingDataError);
+    postJson.mockResolvedValueOnce({ renewsAt: 5 });
+    await expect(resumePlan(TENANT)).rejects.toBeInstanceOf(BillingDataError);
+    const refusal = new Error("conflict");
+    postJson.mockImplementationOnce(async () => {
+      throw refusal;
+    });
+    await expect(cancelPlan(TENANT)).rejects.toBe(refusal);
   });
 });
 

@@ -43,7 +43,9 @@ const CHANNEL = "ch-1";
 const WABA = "100000000000001";
 const PNID = "200000000000001";
 const CONNECTION = "c0000000-0000-4000-8000-0000000000a1";
-const PHONE = "910000000101";
+const DEFAULT_PHONE = "910000000101";
+/** Every secret the world puts in the environment or signs with (all synthetic): the log sweep looks for them in every line. */
+export const SYNTHETIC_SECRETS = ["synthetic-meta-app-secret", "synthetic-anon-key", "synthetic-service-key", "synthetic-embeddings-key", "synthetic-anthropic-key", "synthetic-route-token"];
 const APP_SECRET = "synthetic-meta-app-secret";
 const PACKS_DIR = fileURLToPath(new URL("../../../packs", import.meta.url));
 
@@ -68,9 +70,12 @@ const llmResult = (text: string): LlmResult => ({ text, model: "mock", stopReaso
 function scriptedLlm(script: ModelScript) {
   const next = { extraction: 0, reply: 0 };
   const calls = { extraction: 0, reply: 0 };
+  /** Every request the pipeline made, as sent (Day 7 PR C: what reached the model). */
+  const requests: LlmRequest[] = [];
   const client: LlmClient = {
     async complete(request: LlmRequest) {
       const role = request.role === "extraction" ? "extraction" : "reply";
+      requests.push(request);
       calls[role]++;
       const items = (role === "extraction" ? script.extraction : script.reply) ?? [role === "extraction" ? GOOD_EXTRACTION : GOOD_REPLY];
       const item = items[Math.min(next[role]++, items.length - 1)];
@@ -78,7 +83,7 @@ function scriptedLlm(script: ModelScript) {
       return llmResult(typeof item === "function" ? item() : item);
     },
   };
-  return { client, calls };
+  return { client, calls, requests };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -101,6 +106,8 @@ export interface Delivery {
 }
 
 export class FakeNotify {
+  /** Put in the message of every failure this fake returns or throws. */
+  poison = "";
   /** FAKE of notify.send. See the note at the top of this file. */
   readonly isFake = true;
   balance: number;
@@ -170,7 +177,7 @@ export class FakeNotify {
     const text = payload.interactive ? payload.interactive.body : (payload.text ?? "");
     const delivery: Delivery = { kind, key, text };
     const script: SendScript = kind === "ai_reply" ? (this.scripts.shift() ?? "ok") : "ok";
-    const failed = (retryable: boolean, outcomeUnknown: boolean, code: string): SendOutcome => ({ status: "failed", error: { code, message: "fake", retryable, outcomeUnknown } });
+    const failed = (retryable: boolean, outcomeUnknown: boolean, code: string): SendOutcome => ({ status: "failed", error: { code, message: `fake${this.poison}`, retryable, outcomeUnknown } });
     switch (script) {
       case "ok": {
         this.deliveries.push(delivery);
@@ -205,7 +212,7 @@ export class FakeNotify {
         return failed(false, true, "timeout");
       case "crash_after_accept":
         this.deliveries.push(delivery);
-        throw new Error("the process died after the provider accepted the message (simulated)");
+        throw new Error(`the process died after the provider accepted the message (simulated)${this.poison}`);
     }
   };
 }
@@ -257,6 +264,14 @@ export interface WorldOptions {
   balance?: number;
   optedOut?: boolean;
   mode?: "ai" | "human" | "external";
+  /** The customer's number as WhatsApp gives it (wa_id, digits only). */
+  phone?: string;
+  /** The customer's profile name. */
+  profileName?: string;
+  /** The knowledge-base text the search finds. */
+  kbText?: string;
+  /** Put in the message of every simulated failure (a store error, a send error, an injected step failure): what a provider or a database can put in a message. */
+  poison?: string;
   /** isEnabled(tenant, "ai_auto_reply"): the business has the assistant on (the default). */
   featureEnabled?: boolean;
   /** A rate limit or the daily AI spend cap the chat has reached (lib/ai-limits.ts); none by default. */
@@ -297,6 +312,10 @@ export async function createWorld(options: WorldOptions = {}) {
     fake.messages.set(messageId, { id: messageId, tenantId: TENANT, conversationId: CONV, direction: "out", sender: delivery.kind === "ai_reply" ? "ai" : "system", kind: "text", createdAt: new Date().toISOString(), body: delivery.text, meta: {} } as FakeMessage);
   };
   const model = scriptedLlm(options.model ?? {});
+  const PHONE = options.phone ?? DEFAULT_PHONE;
+  const poison = options.poison ?? "";
+  notify.poison = poison;
+  fake.state.failMessage = poison;
 
   // Messages the webhook stored, by the provider's id (the database's store_inbound_message is idempotent on it).
   const stored = new Map<string, string>();
@@ -348,7 +367,7 @@ export async function createWorld(options: WorldOptions = {}) {
               value: {
                 messaging_product: "whatsapp",
                 metadata: { display_phone_number: "910000000001", phone_number_id: PNID },
-                contacts: [{ profile: { name: "Test Customer" }, wa_id: PHONE }],
+                contacts: [{ profile: { name: options.profileName ?? "Test Customer" }, wa_id: PHONE }],
                 messages: [{ from: PHONE, id: providerMsgId, timestamp: String(base + at), ...message }],
               },
             },
@@ -385,7 +404,7 @@ export async function createWorld(options: WorldOptions = {}) {
     store: fake.store,
     llm: model.client,
     loadPackDefinition: async (key, version) => (key === pack.key && version === pack.version ? (pack as unknown) : null),
-    retrieve: async () => [{ chunkId: "c1", documentId: "d1", title: "Price list", content: "2BHK of 950 sq ft in Velachery starts at ₹78 lakh.", similarity: 0.8 }],
+    retrieve: async () => [{ chunkId: "c1", documentId: "d1", title: "Price list", content: options.kbText ?? "2BHK of 950 sq ft in Velachery starts at ₹78 lakh.", similarity: 0.8 }],
     signal,
     // Qualifying is on, as in runtime.ts (an empty catalog: no rule that needs one earns anything), so its step is part of the turn.
     scoring: { loadCatalog: async () => [], isEnabled: async () => true },
@@ -456,9 +475,9 @@ export async function createWorld(options: WorldOptions = {}) {
         const times = injected?.times ?? 1;
         let value: T;
         try {
-          if (injected?.when === "before" && n <= times) throw new Error(`step ${id} failed before it ran (injected)`);
+          if (injected?.when === "before" && n <= times) throw new Error(`step ${id} failed before it ran (injected)${poison}`);
           value = await fn();
-          if (injected?.when === "after" && n <= times) throw new Error(`step ${id} failed after it ran (injected)`);
+          if (injected?.when === "after" && n <= times) throw new Error(`step ${id} failed after it ran (injected)${poison}`);
         } catch (error) {
           if (error instanceof NonRetriableError || n > retries) throw new RunFailed(id, error);
           throw new RetryNow();
