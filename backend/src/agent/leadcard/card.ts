@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { maskPhone } from "../../channels/whatsapp/phone";
+import { cleanDisplayText, refusesAreaText, refusesDisplayText } from "../scoring/area-text";
 
 // The lead card (docs/handover.md, module 6; Raja, 11 Oct): everything staff need to pick up a chat WITHOUT reading it. Who the customer is,
 // what they want, how promising (hot, warm or cold), why the assistant is calling a person, a short summary, what to do next, a reply ready to
@@ -119,12 +120,30 @@ const oneLine = (text: string, max = LINE_LIMIT) => {
 
 const showValue = (value: string | number | boolean): string => (typeof value === "boolean" ? (value ? "yes" : "no") : String(value));
 
-/** One line per answer, "Budget: 60L", in the pack's order. An empty answer is left out. */
+/** A run of this many digits in a value or in words shown to staff is a phone number (a 6-digit pincode and an amount such as 1,20,00,000 are not). */
+const PHONE_DIGITS = 10;
+/** The labels of a detail that is a place: held to the strict place cleaner (no link, no @, no 7-digit run, only plain characters). */
+const PLACE_LABEL = /\b(?:location|locality|pincode|pin code|pin|place)\b|\barea\b/i;
+/** ...except a size: "Area in sq ft" is a number, not a place. */
+const SIZE_LABEL = /\b(?:sq|sqft|square|size|ft|feet|meters?|metres?|sqm)\b/i;
+const isPlaceLabel = (label: string): boolean => PLACE_LABEL.test(label) && !SIZE_LABEL.test(label);
+
+type ShownAnswer = { label: string; value: string; hidden: boolean };
+
+/** What staff see of one answer: its text, or "hidden" when it carries a link, an "@" or a phone number (a place: or anything outside plain characters). */
+function shownAnswer(f: CardAnswer): ShownAnswer {
+  const value = showValue(f.value).trim();
+  if (typeof f.value !== "string" || value === "") return { label: f.label, value, hidden: false };
+  const hidden = isPlaceLabel(f.label) ? refusesAreaText(value) : refusesDisplayText(value, PHONE_DIGITS, true);
+  return { label: f.label, value: hidden ? "" : value, hidden };
+}
+
+/** One line per answer, "Budget: 60L", in the pack's order. An empty answer is left out; one with a link, an "@" or a phone number says "not shown". */
 export function answerLines(fields: CardAnswer[]): string[] {
   return fields
-    .map((f) => ({ label: f.label, value: showValue(f.value).trim() }))
-    .filter((f) => f.value !== "")
-    .map((f) => oneLine(`${f.label}: ${f.value}`));
+    .map(shownAnswer)
+    .filter((f) => f.hidden || f.value !== "")
+    .map((f) => oneLine(f.hidden ? `${f.label}: not shown` : `${f.label}: ${f.value}`));
 }
 
 /** What the customer wants, from their answers alone: area first, then the rest. Used when the model's words are not. */
@@ -132,7 +151,8 @@ function needFrom(fields: CardAnswer[]): string {
   // A yes-or-no answer ("Are you the buyer? yes") is not something the customer is looking at.
   const values = fields
     .filter((f) => typeof f.value !== "boolean")
-    .map((f) => ({ label: f.label.toLowerCase(), value: showValue(f.value).trim() }))
+    .map(shownAnswer)
+    .map((f) => ({ label: f.label.toLowerCase(), value: f.value }))
     .filter((f) => f.value !== "");
   if (values.length === 0) return "No details collected yet";
   const area = values.find((f) => /area|location|place/.test(f.label));
@@ -153,9 +173,18 @@ export function codeSummary(facts: CardFacts): Pick<CardWords, "need" | "summary
   return { need, summary: lines.join("\n"), nextStep: nextStepFor(facts.trigger) };
 }
 
-export function assembleCard(facts: CardFacts, words: CardWords & { aiWritten: boolean }): LeadCard {
+export function assembleCard(facts: CardFacts, modelWords: CardWords & { aiWritten: boolean }): LeadCard {
+  // A summary, need, next step or discount that carries a link, an "@" or a phone number (from the chat, or from a value that slipped through) is replaced by the words written by code, and
+  // a suggested reply with one is dropped (staff would send it as it is): this card also feeds the staff WhatsApp alerts (notify/staff-alerts.ts).
+  // Each line on its own: digits at the end of one line and the start of the next are not one number.
+  const refusesWords = (text: string) => text.split("\n").some((line) => refusesDisplayText(line, PHONE_DIGITS, true));
+  const unsafe = [modelWords.need, modelWords.summary, modelWords.nextStep, modelWords.discount ?? ""].some(refusesWords);
+  const words: CardWords & { aiWritten: boolean } = unsafe
+    ? { ...codeSummary(facts), discount: null, suggestedReply: null, aiWritten: false }
+    : { ...modelWords, suggestedReply: modelWords.suggestedReply !== null && refusesWords(modelWords.suggestedReply) ? null : modelWords.suggestedReply };
   return {
-    contact: { name: facts.contact.name, phone: facts.contact.phone, phoneMasked: maskPhone(facts.contact.phone), language: facts.contact.language },
+    // The name is the customer's profile name: a link, an "@" or a phone number in it is not shown (null: the screens show the masked number, as for a contact with no name). Their number stays: staff call it.
+    contact: { name: facts.contact.name === null ? null : cleanDisplayText(facts.contact.name, 40, 7), phone: facts.contact.phone, phoneMasked: maskPhone(facts.contact.phone), language: facts.contact.language },
     need: oneLine(words.need),
     languageNote: languageNote(facts.contact.language),
     source: facts.source,

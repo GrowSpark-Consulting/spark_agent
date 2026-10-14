@@ -1,0 +1,23 @@
+name: "A phone number typed into an area is dropped, never stored, and the customer is asked for the area again"
+description: "Day 7, the staff-text cleaning PR. A run of 10 digits in a detail is a phone number: extraction.ts drops the value (counted with the other refused values), so it is not on the lead, not on the lead card and not in a staff alert. The customer's other details are kept, and the normal flow asks again for what is missing. The same for a link or an @."
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - {"priceFrom": 6000000, "attributes": {"price_to": 8000000, "areas": ["Velachery", "Tambaram"]}}
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "2BHK of 950 sq ft in Velachery starts at ₹78 lakh."
+turns:
+  - customer: "2BHK in Adyar 9876543210, budget 80 lakh"
+    mock:
+      extraction: {"language": "en", "intent": "give_details", "fields": {"config": "2BHK", "location": "Adyar 9876543210", "budget": "80L"}, "question": null}
+      reply: "Thanks. Which area are you looking at, and when do you plan to buy?"
+    expect:
+      reply: {"sent": true, "notContains": ["9876543210", "98765"]}
+      aiReplies: 1
+      leadFields: {"config": "2BHK", "budget": "80L"}
+      areaReminder: false
+      handoff: null
+      mode: ai
+    mockOnly:
+      case: "ask_details"

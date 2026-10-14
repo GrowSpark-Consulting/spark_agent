@@ -68,6 +68,10 @@ describe("an injected area in the staff reminder", () => {
     expect(digitsOf(message.text)).not.toMatch(/\d{7,}/);
   });
 
+  it("a name with an emoji is kept (the display cleaner is looser than the one for a place)", () => {
+    expect(areaReminderMessage({ label: "Priya 💖", area: "Adyar" }, CONV, APP).text.startsWith("Priya 💖 wants Adyar,")).toBe(true);
+  });
+
   it("the name in the headline is cleaned the same way: a profile name with a number or a link is shown as 'A customer'", () => {
     for (const label of ["Priya 9876543210", "Priya http://evil.example", "priya@evil.example"]) {
       const message = areaReminderMessage({ label, area: "Adyar" }, CONV, APP);

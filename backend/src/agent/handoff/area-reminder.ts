@@ -4,7 +4,7 @@ import { sendToAdmins, type AlertCounts, type AlertMessage, type AlertSendDeps }
 import { serverEnv } from "../../lib/env";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { send } from "../../notify/send";
-import { AREA_NOT_SHOWN_STAFF, cleanAreaText } from "../scoring/area-text";
+import { AREA_NOT_SHOWN_STAFF, cleanAreaText, cleanDisplayText } from "../scoring/area-text";
 import { staffAlertRecipients } from "../../notify/staff-alerts";
 
 // A customer keeps asking for an area the business has no sites in (Raja, 14 Oct): the assistant has told them there is nothing there for now,
@@ -37,7 +37,7 @@ const oneLine = (text: string, max: number) => {
 
 export function areaReminderMessage(info: { label: string; area: string }, conversationId: string, appUrl: string): AlertMessage {
   // The area and the name are a stranger's words: each passes the strict cleaner (no link, no @, no phone number) or is not shown.
-  const headline = `${oneLine(cleanAreaText(info.label) ?? "A customer", 40)} wants ${cleanAreaText(info.area) ?? AREA_NOT_SHOWN_STAFF}, where you have no sites.`;
+  const headline = `${oneLine(cleanDisplayText(info.label, 40, 7) ?? "A customer", 40)} wants ${cleanAreaText(info.area) ?? AREA_NOT_SHOWN_STAFF}, where you have no sites.`;
   const link = `${appUrl.replace(/\/$/, "")}/dashboard/inbox?chat=${conversationId}`;
   return { text: `${headline}\nThe assistant has told them there is nothing there for now. Please add it to your CRM.\n${link}`, templateParams: [headline, link] };
 }
@@ -63,7 +63,7 @@ export async function customerLabel(tenantId: string, conversationId: string): P
   const contact = (data as { contacts?: { name: string | null; phone: string } | null } | null)?.contacts;
   if (!contact) return "A customer";
   // The name is the customer's own profile name: it passes the same strict cleaner, or their masked number is shown.
-  return (contact.name ? cleanAreaText(contact.name) : null) ?? maskPhone(contact.phone);
+  return (contact.name ? cleanDisplayText(contact.name, 40, 7) : null) ?? maskPhone(contact.phone);
 }
 
 /** The real reminder: Dev 2's staffAlertRecipients and notify.send. */

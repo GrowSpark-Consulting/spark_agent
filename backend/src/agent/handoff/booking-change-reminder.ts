@@ -2,7 +2,7 @@ import { sendToAdmins, type AlertCounts, type AlertMessage, type AlertSendDeps }
 import { serverEnv } from "../../lib/env";
 import { send } from "../../notify/send";
 import { staffAlertRecipients } from "../../notify/staff-alerts";
-import { cleanAreaText } from "../scoring/area-text";
+import { cleanDisplayText } from "../scoring/area-text";
 import { customerLabel } from "./area-reminder";
 
 // A customer with NO booking on record asks to cancel or move one (Finding 3 of the Day 7 injection sweep, found by the live run). Before, the model said it would check with the
@@ -43,7 +43,7 @@ export const bookingChangeKey = (leadId: string): string => `no_booking_change:$
 
 export function bookingChangeReminderMessage(info: { label: string; kind: "cancel" | "reschedule" }, conversationId: string, appUrl: string): AlertMessage {
   // The name is a stranger's words (a WhatsApp profile name): it passes the strict cleaner (no link, no @, no phone number) or is not shown.
-  const name = oneLine(cleanAreaText(info.label) ?? "A customer", 40);
+  const name = oneLine(cleanDisplayText(info.label, 40, 7) ?? "A customer", 40);
   const headline = `${name} asked to ${info.kind === "cancel" ? "cancel" : "move"} a booking, but none is on record for them in this chat.`;
   const link = `${appUrl.replace(/\/$/, "")}/dashboard/inbox?chat=${conversationId}`;
   return { text: `${headline}\nIt may have been made by phone or by your team. Please check.\n${link}`, templateParams: [headline, link] };

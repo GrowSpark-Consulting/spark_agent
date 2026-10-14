@@ -2,6 +2,7 @@ import { Extraction } from "@pakka/types";
 import type { z } from "zod";
 import { stripUnsafeCharacters } from "../../lib/text";
 import { parseJsonObject } from "../llm/json";
+import { refusesDisplayText } from "../scoring/area-text";
 
 // From the fast model's text to a checked Extraction (pipeline step 4, docs/handover.md module 2). The model only
 // reports what the customer said; this is where code decides what to believe. Every part of its answer is
@@ -14,6 +15,8 @@ export const QUESTION_MAX_CHARS = 300;
 export const TIME_MAX_CHARS = 100;
 /** A detail a customer gave (a locality, a budget in words) is short; anything longer is cut. */
 export const FIELD_VALUE_MAX_CHARS = 200;
+/** A run of this many digits in a detail is a phone number (a 6-digit pincode and an amount such as 1,20,00,000 are not). */
+export const STAFF_PHONE_DIGITS = 10;
 
 export type InterpretResult =
   | {
@@ -50,7 +53,8 @@ export function interpretExtraction(text: string, fieldSchema: z.ZodObject): Int
       unknownKeys++;
     } else if (typeof value === "string") {
       const cleaned = tidy(value, FIELD_VALUE_MAX_CHARS);
-      if (cleaned) offered[key] = cleaned;
+      // A detail with a link, an "@" or a phone number (a run of 10 digits) is never stored: staff, the staff alerts and every screen read it (Day 7, staff-text cleaning).
+      if (cleaned && !refusesDisplayText(cleaned, STAFF_PHONE_DIGITS, true)) offered[key] = cleaned;
       else invalidValues++;
     } else if (typeof value === "number" || typeof value === "boolean") {
       offered[key] = value;
