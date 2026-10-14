@@ -31,7 +31,7 @@ const GRANT_REASONS = ["plan_grant", "trial_grant", "topup", "admin"];
 const Plan = z.object({ key: z.string(), name: z.string(), monthly_credits: z.number().int() });
 const Balance = z.array(z.object({ plan: z.number().int(), topup: z.number().int(), total: z.number().int() })).length(1);
 const Grant = z.object({ delta: z.number().int(), expires_at: z.string().nullable() });
-const Subscription = z.object({ status: z.string(), current_period_end: z.string().nullable() });
+const Subscription = z.object({ status: z.string(), current_period_end: z.string().nullable(), cancel_at: z.string().nullable() });
 
 function failed(what: string, error: { message: string } | null): void {
   if (error) throw new Error(`account status: ${what} read failed: ${error.message}`);
@@ -47,7 +47,7 @@ export async function accountStatus(context: TenantContext, deps: AccountStatusD
     deps.db.from("credit_ledger").select("delta, expires_at").eq("tenant_id", tenantId).gt("delta", 0).in("reason", GRANT_REASONS),
     // The live plan only: a pending checkout or upgrade (no period yet) or a cancelled one says nothing about renewal, and
     // a descending sort would put a pending row's empty period first.
-    deps.db.from("subscriptions").select("status, current_period_end").eq("tenant_id", tenantId).in("status", ["active", "past_due"]).order("current_period_end", { ascending: false }).limit(1),
+    deps.db.from("subscriptions").select("status, current_period_end, cancel_at").eq("tenant_id", tenantId).in("status", ["active", "past_due"]).order("current_period_end", { ascending: false }).limit(1),
     deps.aiAutoReply(tenantId),
     status === "active"
       ? deps.db.from("whatsapp_connections").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("status", "active")
@@ -85,7 +85,8 @@ export async function accountStatus(context: TenantContext, deps: AccountStatusD
     plan: { key: p.key, name: p.name, monthlyCredits: p.monthly_credits },
     credits,
     creditsGranted,
-    renewsAt: status === "active" && sub?.current_period_end ? new Date(sub.current_period_end).toISOString() : null,
+    renewsAt: status === "active" && sub?.current_period_end && !sub.cancel_at ? new Date(sub.current_period_end).toISOString() : null,
+    endsAt: sub?.cancel_at ? new Date(sub.cancel_at).toISOString() : null,
     trialEndsAt: status === "trial" && trialEndsAt ? new Date(trialEndsAt).toISOString() : null,
     aiPaused: aiPausedReason !== null,
     aiPausedReason,
