@@ -9,7 +9,7 @@ import { EmptyState, ErrorState } from "@/components/shared/states";
 import { getAuth } from "@/lib/auth/session";
 import { formatError } from "@/lib/errors";
 import { visibleActions } from "@/lib/whatsapp/connection-actions";
-import { parseLastCheck, webhookUnconfirmed } from "@/lib/whatsapp/last-check";
+import { parseLastCheck, webhookBanner, webhookUnconfirmed } from "@/lib/whatsapp/last-check";
 import { fetchTemplates, type TemplateStatusRow } from "@/lib/whatsapp/templates";
 
 const STATUS: Record<WhatsAppConnectionPublic["status"], { label: string; tone: "ok" | "warn" | "off"; detail: string }> = {
@@ -117,6 +117,7 @@ export async function WhatsAppConnectionPanel({ tenantId, role, compact }: { ten
         {result.connections.map((c) => {
           const last = parseLastCheck(c.last_check);
           const s = c.status === "active" && webhookUnconfirmed(last) ? UNCONFIRMED : STATUS[c.status];
+          const banner = c.status === "active" ? webhookBanner(last) : null;
           const added = addedOn(c.created_at);
           const actions = role ? visibleActions(c.status, role, c.method) : [];
           return (
@@ -131,6 +132,13 @@ export async function WhatsAppConnectionPanel({ tenantId, role, compact }: { ten
                 {METHOD[c.method]}
                 {c.coexistence ? " · WhatsApp Business app still works" : ""}
               </span>
+              {banner ? (
+                <div className="app-notice" role={banner.kind === "blocked" ? "alert" : "status"} data-testid="webhook-banner" data-kind={banner.kind}>
+                  <strong>{banner.message}</strong>
+                  {!compact && banner.detail ? <span> {banner.detail}</span> : null}
+                  {compact ? <span> See the WhatsApp page.</span> : null}
+                </div>
+              ) : null}
               {!compact ? (
                 <>
                   <p className="app-card-text">{s.detail}</p>
