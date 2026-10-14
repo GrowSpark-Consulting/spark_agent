@@ -123,7 +123,7 @@ describe("the mirror of inngest/process-message.ts (drift guard)", () => {
     expect(flat).toContain("tellOwnersAboutLimit(");
     expect(flat).toContain('steps.run("started"');
     const world = readFileSync(fileURLToPath(new URL("../../test-support/whole-turn-world.ts", import.meta.url)), "utf8").replace(/\s+/g, " ");
-    expect(world).toContain("aiLimit: async () => options.aiLimit ?? null");
+    expect(world).toContain("aiLimit: async (tenantId, conversationId) => (options.aiLimitFrom ? options.aiLimitFrom(tenantId, conversationId) : (options.aiLimit ?? null))");
     const gate = readFileSync(fileURLToPath(new URL("./process-message.ts", import.meta.url)), "utf8").replace(/\s+/g, " ");
     // the limit is only asked when the assistant would answer: not for an opted-out contact, a chat a person has, or the feature off
     expect(gate).toContain("needsFeature && featureEnabled && deps.aiLimit");

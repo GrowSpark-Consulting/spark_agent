@@ -6,8 +6,8 @@ import { createWorld, type Injection, type WorldOptions } from "../../test-suppo
 // `aiLimit` (lib/ai-limits.ts aiLimitFor) in the gate, before any model call; the world of test-support/whole-turn-world.ts has the same hook (`aiLimit`). What is proved here, through
 // the real webhook handler and the emulator: with a limit reached the model is never called, no AI reply goes out, no credit is spent, the message waits for staff (it is not
 // answered), STOP is still honoured (one confirmation), nothing changes under a replayed event or webhook or an injected step failure, and when the limit clears the next
-// message is answered once. NOT proved: the "limit-notice" step that tells the owners (it needs the database; lib/ai-limits.test.ts and the process-message tests have it), the real
-// `ai_limits` function, and the model client's own spend guard.
+// message is answered once. The owner alert (the "limit-notice" step) and the real numbers are in whole-turn-limit-alert.test.ts. NOT proved: the real `ai_limits` function (its own
+// SQL test), the real recipients lookup and notify.send.
 
 beforeEach(() => {
   vi.spyOn(console, "log").mockImplementation(() => {});
@@ -43,11 +43,11 @@ describe.each(AI_LIMITS)("with the limit %s reached", (limit) => {
     expect(w.report().notices).toHaveLength(0);
   });
 
-  it("the steps are only the ones before the gate, and the stop check: no read receipt, no understanding, no reply", async () => {
+  it("the steps are only the ones before the gate, the stop check and the owner alert: no read receipt, no understanding, no reply", async () => {
     const w = await createWorld({ aiLimit: limit });
     await w.post("wamid.L1", TEXT);
     const [report] = await w.drain();
-    expect(report.steps).toEqual(["started", "resolve", "batch", "lead", "gate", "stop-check-gated"]);
+    expect(report.steps).toEqual(["started", "resolve", "batch", "lead", "gate", "stop-check-gated", "limit-notice"]);
   });
 
   it("a replayed event and a replayed webhook change nothing", async () => {
@@ -76,7 +76,7 @@ describe.each(AI_LIMITS)("with the limit %s reached", (limit) => {
   });
 
   it("a step that fails once, before or after it runs, at every step of the limited turn: still no reply, no charge, no model call", async () => {
-    const stepIds = ["started", "resolve", "batch", "lead", "gate", "stop-check-gated"];
+    const stepIds = ["started", "resolve", "batch", "lead", "gate", "stop-check-gated", "limit-notice"];
     for (const stepId of stepIds) {
       for (const when of ["before", "after"] as const) {
         const w = await createWorld({ aiLimit: limit });
