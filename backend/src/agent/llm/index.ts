@@ -1,3 +1,4 @@
+import { serverSpendGuard, withSpendGuard } from "../../lib/ai-limits";
 import { serverEnv } from "../../lib/env";
 import { createAnthropicClient, type LlmClient } from "./anthropic";
 import { tracerFromEnv, type TracerHandle } from "./tracing";
@@ -17,7 +18,8 @@ export function llm(): LlmClient {
   if (!client) {
     const env = serverEnv();
     tracing = tracerFromEnv(env);
-    client = createAnthropicClient(env.ANTHROPIC_API_KEY, tracing.tracer);
+    // Each call's cost goes into today's spend, and a business past its daily cap gets no more calls (lib/ai-limits.ts).
+    client = withSpendGuard(createAnthropicClient(env.ANTHROPIC_API_KEY, tracing.tracer), serverSpendGuard());
   }
   return client;
 }

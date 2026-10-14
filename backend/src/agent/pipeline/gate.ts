@@ -2,7 +2,9 @@
 // this conversation, and which of the customer's messages it can read. Plain code with no database and no
 // model. A message turned away stays in the inbox for staff; nothing is sent and nothing is lost.
 
-export type GateReason = "opted_out" | "not_ai_mode" | "feature_off" | "unsupported_kind";
+import type { AiLimit } from "../../lib/ai-limits";
+
+export type GateReason = "opted_out" | "not_ai_mode" | "feature_off" | "unsupported_kind" | AiLimit;
 
 export interface GateInput {
   /** contacts.opted_out_at is set: they said STOP. */
@@ -11,6 +13,8 @@ export interface GateInput {
   mode: "ai" | "human" | "external";
   /** isEnabled(tenant, 'ai_auto_reply'): the plan has it, the business switched it on, and the business is live. */
   featureEnabled: boolean;
+  /** A rate limit or the daily AI spend cap the chat has reached (lib/ai-limits.ts), or null/absent. */
+  limit?: AiLimit | null;
 }
 
 /** The conversation-level decision, strongest reason first, so a trace says why the AI stayed out in the most useful words. */
@@ -18,6 +22,7 @@ export function decideGate(input: GateInput): { open: true } | { open: false; re
   if (input.optedOut) return { open: false, reason: "opted_out" };
   if (input.mode !== "ai") return { open: false, reason: "not_ai_mode" };
   if (!input.featureEnabled) return { open: false, reason: "feature_off" };
+  if (input.limit) return { open: false, reason: input.limit };
   return { open: true };
 }
 
