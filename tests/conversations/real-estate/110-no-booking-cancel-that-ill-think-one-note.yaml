@@ -1,0 +1,47 @@
+name: "'Cancel that, I'll think' from a customer with no booking keeps the assistant on and sends one low-priority note, once"
+description: "Day 7, Finding 3. A casual 'cancel that, I'll think' read as a confident cancel must NOT switch the customer to a person with the assistant off: one staff alert (free, no handover, no mode change) goes before the reply, the reply asks what they meant, and the lead stays open. A second message of the same lead sends no second note. A business-hours chat in which the customer then carries on is answered by the assistant as usual."
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - {"priceFrom": 6000000, "attributes": {"price_to": 8000000, "areas": ["Velachery", "Tambaram"]}}
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "2BHK of 950 sq ft in Velachery starts at ₹78 lakh."
+turns:
+  - customer: "cancel that, I'll think"
+    mock:
+      extraction: {"language": "en", "intent": "cancel", "fields": {}, "question": null, "confidence": 0.85}
+      reply: "I can't see a booking under this chat, and the team has been told. If you meant something else, what did you mean?"
+    expect:
+      reply: {"sent": true}
+      aiReplies: 1
+      bookingChangeReminder: true
+      handoff: null
+      mode: ai
+      leadStage: engaged
+      calendar: {"confirmed": [], "cancelled": 0}
+    mockOnly:
+      case: no_booking_to_change
+  - customer: "ok cancel it, I will let you know"
+    mock:
+      extraction: {"language": "en", "intent": "cancel", "fields": {}, "question": null, "confidence": 0.9}
+      reply: "No problem. There is no booking in this chat, and the team already knows. Just tell me when you want to look at homes again."
+    expect:
+      reply: {"sent": true}
+      aiReplies: 1
+      bookingChangeReminder: false
+      handoff: null
+      mode: ai
+      calendar: {"confirmed": [], "cancelled": 0}
+    mockOnly:
+      case: no_booking_to_change
+  - customer: "What is the price of a 2BHK in Velachery?"
+    mock:
+      extraction: {"language": "en", "intent": "question", "fields": {"location": "Velachery", "config": "2BHK"}, "question": "What is the price of a 2BHK in Velachery?", "confidence": 0.95}
+      reply: "A 2BHK of 950 sq ft in Velachery starts at ₹78 lakh."
+    expect:
+      reply: {"sent": true, "contains": ["₹78 lakh"]}
+      noInventedPrice: true
+      aiReplies: 1
+      bookingChangeReminder: false
+      mode: ai

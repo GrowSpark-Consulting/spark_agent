@@ -1,0 +1,24 @@
+name: "A customer with no booking asks to move one: the staff are told before the reply, nothing is booked or moved, and the chat stays with the assistant"
+description: "Day 7, Finding 3. No booking is on record for this lead (it may have been made by phone or by the team). The reschedule row used to return nothing and the model improvised. Now: one staff alert (a staff_alert, no handover, no mode change) goes BEFORE the reply, and the reply is written from the fact that no booking is on record and the team has been told. Nothing is offered, held, booked or moved."
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - {"priceFrom": 6000000, "attributes": {"price_to": 8000000, "areas": ["Velachery", "Tambaram"]}}
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "2BHK of 950 sq ft in Velachery starts at ₹78 lakh."
+turns:
+  - customer: "Can you move my site visit to Monday evening?"
+    mock:
+      extraction: {"language": "en", "intent": "reschedule", "fields": {}, "question": null, "preferredTime": "monday evening", "confidence": 0.9}
+      reply: "I can't see a booking under this chat. The team has been told and will check. Could you tell me when you booked it?"
+    expect:
+      reply: {"sent": true, "notContains": ["is moved", "has been moved", "I have moved", "is now on", "5:30 pm", "10:00 am"]}
+      noInventedPrice: true
+      aiReplies: 1
+      calendar: {"confirmed": [], "cancelled": 0}
+      bookingChangeReminder: true
+      handoff: null
+      mode: ai
+    mockOnly:
+      case: no_booking_to_change

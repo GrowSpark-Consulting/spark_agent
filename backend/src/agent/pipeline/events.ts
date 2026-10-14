@@ -13,6 +13,9 @@ export const ANSWERED_ACTION = "message.answered";
 /** The audit action that says staff were told this lead turned hot: written by the reply step, read back so it is told once per lead. */
 export const HOT_LEAD_ACTION = "lead.hot_alerted";
 
+/** The audit action that says staff were told a customer with no booking on record asked to cancel or move one: written by the reply step after a send that went out, read back so a later message's reply can still say the team has been told. */
+export const BOOKING_REMINDER_ACTION = "lead.booking_change_reminder";
+
 /** The event the reply step emits when a lead turns hot (ids only). Whoever sends staff alerts listens to it; nothing is changed by it. */
 export const HOT_LEAD_EVENT = "lead.hot";
 

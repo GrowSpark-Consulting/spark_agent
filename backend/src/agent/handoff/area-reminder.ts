@@ -57,7 +57,7 @@ export async function sendAreaReminder(input: AreaReminderInput, deps: AreaRemin
 }
 
 /** The customer's name, or their masked number. Service role: the business and the chat are both named. */
-async function customerLabel(tenantId: string, conversationId: string): Promise<string> {
+export async function customerLabel(tenantId: string, conversationId: string): Promise<string> {
   const { data, error } = await supabaseAdmin().from("conversations").select("contacts(name, phone)").eq("tenant_id", tenantId).eq("id", conversationId).maybeSingle();
   if (error) throw new Error("area reminder: the chat could not be read");
   const contact = (data as { contacts?: { name: string | null; phone: string } | null } | null)?.contacts;

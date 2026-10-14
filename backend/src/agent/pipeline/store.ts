@@ -5,7 +5,7 @@ import { AppError } from "../../lib/errors";
 import { parsePendingState, type PendingState } from "../scheduling/state";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { TimeoutError, withTimeout } from "../../lib/timeout";
-import { ANSWERED_ACTION, HOT_LEAD_ACTION } from "./events";
+import { ANSWERED_ACTION, BOOKING_REMINDER_ACTION, HOT_LEAD_ACTION } from "./events";
 
 // The message pipeline's reads and writes, with the service role. It bypasses row-level security, so every
 // query names its business (`tenant_id`; for the tenants table, its own `id`), and the business always comes
@@ -144,6 +144,8 @@ export interface PipelineStore {
   saveLeadScore(tenantId: string, leadId: string, result: { score: number; temperature: "hot" | "warm" | "cold" | "disqualified" }): Promise<boolean>;
   /** Whether staff were already told that this lead turned hot (the audit row the reply step writes), so it is told once per lead. */
   hasHotLeadAlert(tenantId: string, leadId: string): Promise<boolean>;
+  /** Staff were already told that this lead asked to cancel or move a booking it does not have (the audit row the reply step writes after a send that went out). */
+  hasBookingChangeReminder(tenantId: string, leadId: string): Promise<boolean>;
   /**
    * The offer of times waiting for the customer's answer, as the chat's latest earlier turn left it (`messages.meta.agent.offer` on the
    * customer message that turn answered, before `before`): the newest message that says anything about an offer decides, and `null` (the
@@ -510,6 +512,14 @@ export function createPipelineStore(db: SupabaseClient = supabaseAdmin(), { time
         db.from("audit_logs").select("id").eq("tenant_id", tenantId).eq("action", HOT_LEAD_ACTION).eq("entity_id", leadId).limit(1).abortSignal(signal),
       );
       if (error) fail("check hot lead alert", error);
+      return Array.isArray(data) && data.length > 0;
+    },
+
+    async hasBookingChangeReminder(tenantId, leadId) {
+      const { data, error } = await run("check booking change reminder", (signal) =>
+        db.from("audit_logs").select("id").eq("tenant_id", tenantId).eq("action", BOOKING_REMINDER_ACTION).eq("entity_id", leadId).limit(1).abortSignal(signal),
+      );
+      if (error) fail("check booking change reminder", error);
       return Array.isArray(data) && data.length > 0;
     },
 
