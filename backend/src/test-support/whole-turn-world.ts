@@ -13,6 +13,8 @@ import { isAiLimit, type AiLimit } from "../lib/ai-limits";
 import { turnClock } from "../agent/pipeline/turn-deadline";
 import { understandTurn, type UnderstandDeps } from "../agent/pipeline/understand";
 import { markReadStep, type MarkReadDeps } from "../channels/whatsapp/mark-read";
+import { createSentReplyRecorded } from "../agent/pipeline/reply-record";
+import { keyedMessageId } from "../notify/send";
 import type { AuditEntry } from "../lib/audit";
 import type { NotifyPayload, SendOutcome } from "../notify/send";
 import { fakePipelineStore, type FakeMessage } from "./fake-pipeline-store";
@@ -116,6 +118,10 @@ export class FakeNotify {
 
   private readonly isOptedOut: () => boolean;
 
+  /** Called right after a reply was delivered and reported as sent, recorded or not (`ok` and `ok_unrecorded`). */
+  afterDelivered: () => void = () => undefined;
+  /** Called when a send is recorded (the row notify_record writes), with the id notify.send gives it (keyedMessageId, as the real one does). */
+  onRecorded: (delivery: Delivery, messageId: string) => void = () => undefined;
   /** Called right after a reply was delivered and recorded (a test uses it to make the NEXT store write fail, as when a process dies between the send and its records). */
   afterRecorded: () => void = () => undefined;
 
@@ -169,13 +175,20 @@ export class FakeNotify {
       case "ok": {
         this.deliveries.push(delivery);
         this.rows.push(delivery);
-        const outcome: SendOutcome = { status: "sent", messageId: `m-${++this.seq}`, providerMsgId: `wamid.OUT${this.seq}`, creditsCharged: cost, usedTemplate: false };
+        // The real one gives a keyed send the id keyedMessageId(business, kind, key): the failure handler finds the recorded reply by it.
+        const messageId = key !== undefined ? keyedMessageId(_tenantId, kind, key) : `m-${++this.seq}`;
+        const outcome: SendOutcome = { status: "sent", messageId, providerMsgId: `wamid.OUT${++this.seq}`, creditsCharged: cost, usedTemplate: false };
         if (recordedKey !== undefined) this.recorded.set(recordedKey, outcome);
-        if (kind === "ai_reply") this.afterRecorded();
+        this.onRecorded(delivery, messageId);
+        if (kind === "ai_reply") {
+          this.afterRecorded();
+          this.afterDelivered();
+        }
         return outcome;
       }
       case "ok_unrecorded":
         this.deliveries.push(delivery);
+        this.afterDelivered();
         return { status: "sent", messageId: `m-${++this.seq}`, providerMsgId: `wamid.OUT${this.seq}`, creditsCharged: cost, usedTemplate: false };
       case "retryable":
         this.refund(ref);
@@ -279,6 +292,10 @@ export async function createWorld(options: WorldOptions = {}) {
     tenantInfo: { [TENANT]: { name: "Skyline Homes", agentSettings: {} } },
   });
   const notify = new FakeNotify({ balance: options.balance, scripts: options.sends, isOptedOut: () => fake.contacts.get(CONTACT)?.optedOut === true });
+  // notify_record wrote a row: it is a message of the chat, under the id notify.send gave it.
+  notify.onRecorded = (delivery, messageId) => {
+    fake.messages.set(messageId, { id: messageId, tenantId: TENANT, conversationId: CONV, direction: "out", sender: delivery.kind === "ai_reply" ? "ai" : "system", kind: "text", createdAt: new Date().toISOString(), body: delivery.text, meta: {} } as FakeMessage);
+  };
   const model = scriptedLlm(options.model ?? {});
 
   // Messages the webhook stored, by the provider's id (the database's store_inbound_message is idempotent on it).
@@ -360,6 +377,7 @@ export async function createWorld(options: WorldOptions = {}) {
     send: (tenantId, kind, payload) => notify.send(tenantId, kind, payload),
     audit,
     sendEvent: async (event) => void handoffEvents.push(event as Event),
+    sentReplyRecorded: createSentReplyRecorded(fake.store),
     systemNotice: createSystemNoticePort((tenantId, kind, payload) => notify.send(tenantId, kind, payload)),
     privacyPolicyUrl: "https://example.test/privacy",
   };

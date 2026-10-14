@@ -146,10 +146,9 @@ describe("a send reported as sent but never recorded (notify_record failed: the 
   });
 });
 
-describe("KNOWN LIMIT (Day 6 note on the reply idempotency key, section 3.2): the reply went out, its records were lost, and the run then gives up", () => {
-  it("the failure handler cannot tell the reply went out, so it sends the safe line as well: TWO messages. Passes while the limit exists; if it fails with one message, the limit was closed", async () => {
+describe("a reply went out, its records were lost, and the run then gives up (was KNOWN LIMIT 2, Day 6 note section 3.2: closed by this PR)", () => {
+  it("the audit is down and the marker write fails once, and the step fails on every attempt: the failure handler finds the marker the retry left and sends NO safe line: one message", async () => {
     const w = await createWorld();
-    // The reply is sent and recorded by notify.send; then the audit is down (no answered rows) and the marker write is lost, and the step fails on every attempt.
     w.notify.afterRecorded = () => {
       w.failAudits(999);
       w.fake.state.failNext.add("saveAgentMeta");
@@ -157,12 +156,59 @@ describe("KNOWN LIMIT (Day 6 note on the reply idempotency key, section 3.2): th
     await w.post("wamid.A1", TEXT);
     const [report] = await w.drain({ inject: [{ stepId: "reply", when: "after", times: 4 }] });
     expect(report.status).toBe("failed");
+    expect(report.giveUp).toBe("already_replied");
     const r = w.report();
-    expect(r.replies.filter((d) => d.key?.startsWith("reply:"))).toHaveLength(1);
-    // What is observed today:
+    expect(r.replies).toHaveLength(1);
+    expect(r.replies[0].key?.startsWith("reply:")).toBe(true);
+    expect(r.replies.some((d) => d.key?.startsWith("gave_up:"))).toBe(false);
+  });
+
+  it("the marker is lost TOO (every marker write fails) and the audit is down: the recorded reply row proves it, so still NO safe line", async () => {
+    const w = await createWorld();
+    w.notify.afterRecorded = () => {
+      w.failAudits(999);
+      w.fake.state.failAlways.add("saveAgentMeta");
+    };
+    await w.post("wamid.A1", TEXT);
+    const [report] = await w.drain({ inject: [{ stepId: "reply", when: "after", times: 4 }] });
+    expect(report.status).toBe("failed");
+    expect(report.giveUp).toBe("already_replied");
+    const r = w.report();
+    expect(r.replies).toHaveLength(1);
+    expect(r.replyRows).toBe(1);
+    expect(r.replies.some((d) => d.key?.startsWith("gave_up:"))).toBe(false);
+  });
+
+  it("the same when the records cannot even be read by the handler: it fails open and sends the safe line (never silence), once, under its own key", async () => {
+    const w = await createWorld();
+    w.notify.afterRecorded = () => {
+      w.failAudits(999);
+      w.fake.state.failAlways.add("saveAgentMeta");
+    };
+    await w.post("wamid.A1", TEXT);
+    // the recorded rows cannot be read: the check cannot be made (the marker is lost too)
+    w.fake.state.failAlways.add("recordedMessageIds");
+    const [report] = await w.drain({ inject: [{ stepId: "reply", when: "after", times: 4 }] });
     expect(report.giveUp).toBe("sent");
-    expect(r.replies).toHaveLength(2); // THE LIMIT: the reply, then the safe line under gave_up:<message>
-    expect(r.replies.map((d) => d.key?.split(":")[0]).sort()).toEqual(["gave_up", "reply"]);
+    expect(w.report().replies.filter((d) => d.key?.startsWith("gave_up:"))).toHaveLength(1);
+  });
+});
+
+describe("KNOWN LIMIT 2b (what remains after this PR; the root cause is KNOWN GAP 1, inside Dev 2's notify.send): the reply was delivered but NOTHING of ours recorded it", () => {
+  it("notify_record failed (the send is reported as sent, no row), the marker and the audit rows are lost, and the step fails on every attempt: no signal exists, so the retries resend (the notify gap) and the handler adds one safe line. Passes while this exists; it needs a pending record from notify.send to close", async () => {
+    const w = await createWorld({ sends: ["ok_unrecorded", "ok_unrecorded", "ok_unrecorded", "ok_unrecorded"] });
+    w.notify.afterDelivered = () => {
+      w.failAudits(999);
+      w.fake.state.failAlways.add("saveAgentMeta");
+    };
+    await w.post("wamid.A1", TEXT);
+    const [report] = await w.drain({ inject: [{ stepId: "reply", when: "after", times: 4 }] });
+    expect(report.status).toBe("failed");
+    expect(report.giveUp).toBe("sent");
+    const r = w.report();
+    expect(w.notify.rows.filter((d) => d.key?.startsWith("reply:"))).toHaveLength(0); // none of the replies was recorded anywhere (only the safe line was)
+    expect(r.replies.filter((d) => d.key?.startsWith("reply:"))).toHaveLength(4); // the notify gap: an unrecorded key cannot dedupe
+    expect(r.replies.filter((d) => d.key?.startsWith("gave_up:"))).toHaveLength(1); // and the safe line on top
   });
 });
 

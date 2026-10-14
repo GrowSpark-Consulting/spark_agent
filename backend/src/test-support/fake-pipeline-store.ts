@@ -84,8 +84,9 @@ export function fakePipelineStore(
   const consentLogs: FakeConsentLog[] = [];
   /** record_kb_gap's rows: one per business and normalised question, with the business-wide count. */
   const gaps = new Map<string, { tenantId: string; norm: string; question: string; contactId: string; askedCount: number }>();
-  const state = { failNext: new Set<keyof PipelineStore>(), leadCounter: 0, handoffCounter: 0 };
+  const state = { failNext: new Set<keyof PipelineStore>(), /** Fails on EVERY call, until removed. */ failAlways: new Set<keyof PipelineStore>(), leadCounter: 0, handoffCounter: 0 };
   const maybeFail = (op: keyof PipelineStore) => {
+    if (state.failAlways.has(op)) throw new Error(`${op} failed (simulated, always)`);
     if (state.failNext.delete(op)) throw new Error(`${op} failed (simulated)`);
   };
   /** Leads staff were told are hot (the audit row the reply step writes; a test's audit fake adds to it). */
@@ -238,6 +239,11 @@ export function fakePipelineStore(
         if (typeof planCase === "string") return planCase;
       }
       return null;
+    },
+    async recordedMessageIds(tenantId, conversationId, ids) {
+      calls.push("recordedMessageIds");
+      maybeFail("recordedMessageIds");
+      return [...messages.values()].filter((m) => m.tenantId === tenantId && m.conversationId === conversationId && ids.includes(m.id)).map((m) => m.id);
     },
     async getPreviousCoverage(tenantId, conversationId, before) {
       calls.push("getPreviousCoverage");
