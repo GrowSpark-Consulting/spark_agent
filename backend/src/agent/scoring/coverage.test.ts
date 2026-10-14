@@ -111,9 +111,8 @@ describe("readCoverage", () => {
     const long = readCoverage(rule, refs, `${"x".repeat(60)}`);
     expect([...(long?.shown ?? "")]).toHaveLength(MAX_SHOWN_CHARS);
     expect(readCoverage(rule, refs, "Ad\nyar\u0007")?.shown).toBe("Ad yar");
-    const emoji = readCoverage(rule, refs, `${"y".repeat(MAX_SHOWN_CHARS - 1)}😀😀`);
-    expect(emoji?.shown.endsWith("😀")).toBe(true);
-    expect([...(emoji?.shown ?? "")]).toHaveLength(MAX_SHOWN_CHARS);
+    // Day 7, PR C fix: an emoji is outside the characters the strict cleaner allows (area-text.ts), so such a place is not shown at all (fixed words are used).
+    expect(readCoverage(rule, refs, `${"y".repeat(MAX_SHOWN_CHARS - 1)}😀😀`)?.shown).toBe("");
   });
 });
 

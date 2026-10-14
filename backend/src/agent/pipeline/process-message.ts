@@ -116,13 +116,12 @@ export async function runTurn(step: StepRunner, rawEvent: unknown, deps: TurnDep
   // The messages to answer together, and the idempotency check, before anything is written. The event's own
   // message is in the batch if it has not been answered; if it has, the batch may still hold newer messages (a
   // late or repeated event can be the one a debounce kept), and only an empty batch means there is nothing to do.
+  // Only the newest ten are ever read (store.ts BATCH_LIMIT). A message that is NOT among them has more than ten newer ones, so it is not the
+  // newest and a newer turn answers for it: this run must not add it back (that sent a second reply per older message in a flood of more than ten).
   const batch = await step.run<PendingMessage[]>("batch", async () => {
     const since = new Date(Date.parse(resolved.createdAt) - BATCH_WINDOW_MS).toISOString();
     // Copied field by field: what a step returns is kept by Inngest.
     const pending: PendingMessage[] = (await store.recentUnanswered(tenantId, conversationId, since)).map((m) => ({ id: m.id, kind: m.kind }));
-    if (!pending.some((m) => m.id === messageId) && !(await store.isAnswered(tenantId, messageId, resolved.createdAt))) {
-      pending.push({ id: messageId, kind: resolved.kind }); // not among the newest ten, and not answered
-    }
     return pending;
   });
   if (batch.length === 0) return { status: "skipped", reason: "already_answered" };

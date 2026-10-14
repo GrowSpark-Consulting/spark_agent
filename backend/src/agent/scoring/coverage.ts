@@ -1,6 +1,9 @@
 import type { PackDefinition } from "@pakka/types";
-import { stripUnsafeCharacters } from "../../lib/text";
+
+import { cleanAreaText, MAX_SHOWN_CHARS } from "./area-text";
 import { judge } from "./score";
+
+export { MAX_SHOWN_CHARS };
 
 // Where the business works, against where the customer wants to be (Raja, 14 Oct: an area the business has no sites in is answered by
 // listing the areas it does have). Plain code. The pack says which field holds the place and which area matcher judges it (`coverage`,
@@ -13,8 +16,6 @@ export const MAX_LISTED_AREAS = 6;
 export const MAX_KNOWN_AREAS = 50;
 /** How much of one of the business's own area names is put in a reply. */
 export const MAX_AREA_NAME_CHARS = 60;
-/** How much of the customer's own words are put back in a reply. */
-export const MAX_SHOWN_CHARS = 40;
 
 export interface CoverageRule {
   field: string;
@@ -80,7 +81,8 @@ export function readCoverage(rule: CoverageRule, references: Record<string, unkn
   const name = AREA_MATCHER.exec(rule.match)?.[1];
   const verdict = judge(rule.match, area, { references: { ...references, ...(name ? { [`${name}_areas`]: areas.map(normaliseArea).filter(Boolean) } : {}) } });
   if (verdict === undefined) return null;
-  const shown = cutChars(stripUnsafeCharacters(text).replace(/\s+/g, " ").trim(), MAX_SHOWN_CHARS).trim();
+  // What the customer typed is shown back only if it passes the strict cleaner (area-text.ts); otherwise nothing is shown ("") and the reply and the staff reminder use fixed words.
+  const shown = cleanAreaText(text) ?? "";
   return { served: verdict, area, shown, areas: areas.slice(0, MAX_LISTED_AREAS), known: areas.map(normaliseArea).filter(Boolean).slice(0, MAX_KNOWN_AREAS) };
 }
 
