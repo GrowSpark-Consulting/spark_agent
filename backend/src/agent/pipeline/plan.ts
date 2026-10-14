@@ -2,7 +2,7 @@ import type { Extraction, HandoffTrigger, NextAction } from "@pakka/types";
 import type { ActRequest, ActResult } from "../scheduling/act";
 import type { OfferedSlot } from "../scheduling/offer";
 import { MAX_ASK_FIELDS, type AskField } from "../scoring/qualify";
-import { textLanguage, type FixedTextKey, type TextLanguage } from "./fixed-texts";
+import { textLanguage, type AreaWords, type FixedTextKey, type TextLanguage } from "./fixed-texts";
 import { planBooking } from "./plan-booking";
 import type { ReplySettings } from "./persona";
 import type { UnderstandResult } from "./understand";
@@ -26,6 +26,8 @@ import type { UnderstandResult } from "./understand";
 //   understood, off topic                                | the model's polite decline             |
 //   understood, gave the detail that fails the lead, and | the model's kind close (no handover)   | the lead's temperature is already "disqualified"
 //   ... asked nothing else                               |                                        |
+//   understood, names a place the business has no sites  | the places it does have, to choose from| the state "options" is kept; no time is offered
+//   ... the same place again after those were listed     | nothing there for now, we will update  | state "unavailable"; staff reminded once to record it; the lead stays open
 //   understood, the knowledge base had the answer        | the model's answer from the facts      | the miss count goes back to 0
 //   understood, the knowledge base had nothing (a gap)   | the safe fallback                      | the gap is recorded; the miss count goes up
 //   ... and that is the second miss in a row, same chat  | the handover line                      | handoff kb_gap (if the business has it on)
@@ -63,7 +65,7 @@ export const UNCLEAR_EXIT_MIN_CONFIDENCE = 0.5;
 
 export type ReplyPlan =
   | { mode: "model"; action: NextAction; facts: string[]; language: Extraction["language"] | null; /** The labels (and allowed choices) of the details the action asks for. */ ask?: AskField[] }
-  | { mode: "fixed"; text: FixedTextKey; language: TextLanguage }
+  | { mode: "fixed"; text: FixedTextKey; language: TextLanguage; /** What an area line is filled in with (fixed-texts.ts areaText). */ vars?: AreaWords }
   /** Nothing is sent: the customer is opted out (Plan.optOut). */
   | { mode: "none" };
 
@@ -89,6 +91,14 @@ export interface PlanInput {
    * the alert; when it is missing, nothing is raised (the safe default is silence).
    */
   hotLeadAlerted?: boolean;
+  /**
+   * The place the lead wants is one the business has no sites in (scoring/coverage.ts, read by the understanding step). Present only then.
+   * `named`: the customer gave it in this very message (or asked to book while it is the lead's place). `stage`: what this chat already
+   * said about this same place (`options`: the areas were listed; `unavailable`: told there is nothing there), or null.
+   */
+  coverage?: { area: string; shown: string; areas: string[]; named: boolean; stage: "options" | "unavailable" | null };
+  /** The customer gave a place in this message and the business has sites there: what the chat said about an unserved place is over. */
+  areaServedNamed?: boolean;
   /** Every message of the burst is a voice note: nothing was typed, and nothing can be listened to yet. */
   voiceNote?: boolean;
   /** The chat's previous turn was also a voice note that was answered: a second one right after is not answered again. */
@@ -141,6 +151,13 @@ export interface Plan {
   voiceNote?: boolean;
   /** Nothing is sent, but the customer's messages count as answered (a repeated voice note): they must not be picked up again. */
   markAnswered?: boolean;
+  /**
+   * What this chat has said about an unserved place, to keep for the next turn (`messages.meta.agent.coverage`): the place and what was
+   * said, or null when the customer moved on to a place the business has. Absent: nothing changes.
+   */
+  coverage?: { area: string; stage: "options" | "unavailable" } | null;
+  /** Staff are reminded, once, to record in their CRM that this customer wants a place the business has nothing in. */
+  areaReminder?: boolean;
   /** The miss count to keep for the next turn of this chat. */
   kbMisses: number;
   /** The row of the table above, for the log (never a customer's words). */
@@ -151,8 +168,10 @@ const fixed = (text: FixedTextKey, language: TextLanguage): ReplyPlan => ({ mode
 
 /** The plan for a turn, and, when the lead has just turned hot and staff have not been told, the one alert that goes with whatever the turn does. */
 export function planReply(input: PlanInput): Plan {
-  const plan = decide(input);
+  const decided = decide(input);
   const { understood } = input;
+  // A place the business has was named: whatever this chat said about an unserved one is over, so the options come first if one is named later.
+  const plan = input.areaServedNamed && understood.status === "understood" && !input.deadlineExceeded && decided.coverage === undefined ? { ...decided, coverage: null } : decided;
   const hot =
     input.hotLeadAlerted === false &&
     input.settings.hotLeadAlertEnabled &&
@@ -246,6 +265,22 @@ function decide(input: PlanInput): Plan {
   // like any other, so the customer is never told twice. It is a kind close, not a handover and not an opt-out: a new answer re-scores.
   if (qualification?.hardFail && !summary.hasQuestion && summary.fieldKeys.includes(qualification.hardFail.field)) {
     return { reply: model({ kind: "close_disqualified", reason: NOT_A_FIT }, [NOT_A_FIT]), kbMisses: 0, case: "disqualified" };
+  }
+
+  // A place the business has no sites in (Raja, 14 Oct): first the places it does have, so the customer can choose; when they name the same
+  // place again, that there is nothing there for now (no visit is offered, staff are reminded to record it). The lead stays open and the chat
+  // stays with the assistant. After the hard fail, so a customer who cannot be served at all is not sent looking for another area.
+  const area = input.coverage;
+  if (area && (area.named || summary.intent === "book")) {
+    // Only the same place NAMED again after the options is insisting; asking to book without naming it repeats what was said.
+    const unavailable = area.stage === "unavailable" || (area.stage === "options" && area.named);
+    return {
+      reply: { mode: "fixed", text: unavailable ? "area_unavailable" : "area_options", language, vars: { area: area.shown, areas: area.areas } },
+      coverage: { area: area.area, stage: unavailable ? "unavailable" : "options" },
+      ...(area.stage === "options" && area.named ? { areaReminder: true } : {}),
+      kbMisses: 0,
+      case: unavailable ? "area_unavailable" : "area_options",
+    };
   }
 
   switch (retrieval.outcome) {

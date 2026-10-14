@@ -68,6 +68,8 @@ const Expect = z
     hotLead: z.boolean().optional(),
     /** Staff were told this turn that a voice note is waiting (a voice_note.received event), or were not. */
     voiceNoteAlert: z.boolean().optional(),
+    /** Staff were reminded this turn to record an area the business has no sites in (a staff alert), or were not. */
+    areaReminder: z.boolean().optional(),
     leadTemperature: z.string().optional(),
     leadScore: z.number().optional(),
     /** The calendar after this turn (needs the chat's `booking`): the start of every confirmed booking, soonest first, and how many were cancelled so far. */

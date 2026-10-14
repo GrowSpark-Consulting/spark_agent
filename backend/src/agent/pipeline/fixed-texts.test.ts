@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { consentNotice, FIXED_TEXTS, fixedText, SAFE_FALLBACK_EN, textLanguage, type FixedTextKey, type TextLanguage, EXIT_BUTTON_IDS, exitQuestionButtons } from "./fixed-texts";
+import { areaText, consentNotice, FIXED_TEXTS, fixedText, SAFE_FALLBACK_EN, textLanguage, type FixedTextKey, type TextLanguage, EXIT_BUTTON_IDS, exitQuestionButtons } from "./fixed-texts";
 
 // The fixed lines: no model, fixed words, one per language.
 
@@ -94,5 +94,41 @@ describe("textLanguage", () => {
     expect(textLanguage("other", null, undefined)).toBe("en");
     expect(textLanguage()).toBe("en");
     expect(textLanguage("fr")).toBe("en");
+  });
+});
+
+describe("the lines about an area the business has no sites in (machine drafts: Raja and a native speaker still to check)", () => {
+  const where = { area: "Adyar", areas: ["Velachery", "Tambaram", "Anna Nagar"] };
+
+  it("are there in every language, with the places to fill in", () => {
+    for (const language of LANGS) {
+      expect(FIXED_TEXTS.area_options[language]).toContain("{area}");
+      expect(FIXED_TEXTS.area_options[language]).toContain("{areas}");
+      expect(FIXED_TEXTS.area_unavailable[language]).toContain("{area}");
+      expect(FIXED_TEXTS.area_unavailable[language]).not.toContain("{areas}");
+    }
+  });
+
+  it("the first line names the customer's area and lists every area the business has, in the business's order, and offers no time and no visit", () => {
+    for (const language of LANGS) {
+      const text = areaText("area_options", language, where);
+      expect(text).toContain("Adyar");
+      expect(text).toContain("Velachery, Tambaram, Anna Nagar");
+      expect(text).not.toMatch(/[{}]/);
+    }
+  });
+
+  it("the second line names the area and says there is nothing there for now, without listing areas again", () => {
+    for (const language of LANGS) {
+      const text = areaText("area_unavailable", language, where);
+      expect(text).toContain("Adyar");
+      expect(text).not.toContain("Velachery");
+      expect(text).not.toMatch(/[{}]/);
+    }
+    expect(areaText("area_unavailable", "en", where)).toMatch(/don't have any property in Adyar for now/);
+  });
+
+  it("puts what it is given in as plain text, whatever characters it has", () => {
+    expect(areaText("area_unavailable", "en", { area: "$& $1 {areas}", areas: [] })).toContain("$& $1 {areas}");
   });
 });

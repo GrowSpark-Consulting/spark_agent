@@ -312,8 +312,9 @@ const Settled = z.array(z.object({ payment_id: z.string(), tenant_id: z.string()
 export type SyncResult = { paymentId: string; status: string } | null;
 
 /**
- * Asks PayU what happened to one of our payments and applies it. Null for a txnid that isn't ours. A PayU outage is
- * thrown (PayuError, retryable) so the caller can retry; an amount that does not match is logged and applies nothing.
+ * Asks PayU what happened to one of our payments and applies it. Null for a txnid that isn't ours. A PayU outage, or
+ * PayU refusing the call (wrong key or salt), is thrown (PayuError, retryable) and changes nothing, so the caller can
+ * retry; an amount that does not match is logged and applies nothing.
  */
 export async function syncPayment(txnid: string, deps: BillingDeps): Promise<SyncResult> {
   if (!deps.payu) throw new AppError("not_available", NOT_SWITCHED_ON);
