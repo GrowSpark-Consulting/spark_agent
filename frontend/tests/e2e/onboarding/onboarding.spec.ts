@@ -359,6 +359,66 @@ test("manual partner access fails without IDs, then waits for “hi”", async (
   await expectNoConnectionClaim(page);
 });
 
+// POST /api/onboarding/trial answers `phone_used` (409) for a WhatsApp number that already had a free trial (Dev 2, #176). It is stood in for
+// here with page.route; the real route and its database check are not exercised.
+test.describe("the trial route's phone check", () => {
+  const TRIAL_ROUTE = /\/api\/onboarding\/trial$/;
+  const USED = "This WhatsApp number has already had a free trial, so we can't start another. Contact us to start on a paid plan.";
+
+  async function toBusinessStep(page: Page, phone?: string) {
+    await openOnboarding(page);
+    if (phone) await page.getByLabel("Your WhatsApp number").fill(phone);
+    await next(page, "Send code on WhatsApp").click();
+    await page.getByPlaceholder("––––––").fill("123456");
+    await next(page, "Verify and continue").click();
+    await page.getByLabel("Business name").fill("Sunrise Homes");
+    await option(page, "Real estate").click();
+  }
+
+  test("a typed number is sent in E.164, and a refused one is shown with the API's words while the wizard stays on the Business step", async ({ page }) => {
+    const bodies: unknown[] = [];
+    await page.route(TRIAL_ROUTE, async (route) => {
+      if (route.request().method() === "OPTIONS") return route.fallback();
+      bodies.push(route.request().postDataJSON());
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        headers: { "access-control-allow-origin": route.request().headers()["origin"] ?? "*" },
+        body: JSON.stringify({ status: "phone_used", message: USED }),
+      });
+    });
+    await toBusinessStep(page, "98765 43210");
+    await next(page, "Continue").click();
+    await expect(page.getByText(USED)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Tell us about your business" })).toBeVisible();
+    expect(bodies).toEqual([{ name: "Sunrise Homes", industry: "re", phone: "+919876543210" }]);
+    await expectNoHorizontalOverflow(page);
+
+    // Typing the business name again clears the message, and nothing was treated as created.
+    await page.getByLabel("Business name").fill("Sunrise Homes Chennai");
+    await expect(page.getByText(USED)).toHaveCount(0);
+    await expect(page.getByText("Test number · code")).toHaveCount(0);
+  });
+
+  test("the pre-filled sample number is never sent", async ({ page }) => {
+    const bodies: unknown[] = [];
+    await page.route(TRIAL_ROUTE, async (route) => {
+      if (route.request().method() === "OPTIONS") return route.fallback();
+      bodies.push(route.request().postDataJSON());
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        headers: { "access-control-allow-origin": route.request().headers()["origin"] ?? "*" },
+        body: JSON.stringify({ status: "has_business" }),
+      });
+    });
+    await toBusinessStep(page);
+    await next(page, "Continue").click();
+    await expect(page.getByRole("heading", { name: "Teach your assistant" })).toBeVisible();
+    expect(bodies).toEqual([{ name: "Sunrise Homes", industry: "re" }]);
+  });
+});
+
 test.describe("onboarding → dashboard", () => {
   // Signed in through the project's storage state: /dashboard is the signed-in home.
   test("completing onboarding is a full page load to /dashboard", async ({ page }) => {
