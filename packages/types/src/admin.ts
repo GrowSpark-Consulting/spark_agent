@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ConnectionMethod, ConnectionStatus } from "./connection";
 
 // The internal admin panel (Dev 3, Day 7) and its billing routes (Dev 2; migration 0041). Platform admins only
 // (platform_admins); every change is audited with the admin as the actor.
@@ -8,6 +9,7 @@ import { z } from "zod";
 //   PATCH /api/admin/plans/:key                    AdminPlanInput → AdminPlan
 //   PATCH /api/admin/features/:key                 AdminFeatureInput → AdminFeature
 //   GET   /api/admin/payments/refunds              → RefundCandidate[]
+//   GET   /api/admin/whatsapp/connections          → AdminConnection[] (Day 7)
 
 export const AdminTenant = z.object({
   id: z.string(),
@@ -91,3 +93,43 @@ export const RefundCandidate = z.object({
   flaggedAt: z.string(),
 });
 export type RefundCandidate = z.infer<typeof RefundCandidate>;
+
+
+/** A connection's latest check, as the connection jobs store it (docs/whatsapp-connection-contract.md, last_check). */
+export const ConnectionCheckView = z.object({
+  ranAt: z.string(),
+  overall: z.enum(["pass", "warn", "fail"]),
+  checks: z.array(
+    z.object({
+      key: z.string(),
+      status: z.enum(["pass", "warn", "fail", "not_verified", "skipped"]),
+      /** Safe for the UI: no token, secret or raw Meta error. */
+      message: z.string().nullable(),
+    }),
+  ),
+});
+export type ConnectionCheckView = z.infer<typeof ConnectionCheckView>;
+
+/**
+ * One WhatsApp connection, of any business, for the admin panel's connection list: method, status and last check. No token
+ * or secret is ever read for it. The number is the business's own (not a customer's), shown as Meta displays it.
+ */
+export const AdminConnection = z.object({
+  id: z.string(),
+  tenantId: z.string(),
+  tenantName: z.string(),
+  method: ConnectionMethod,
+  status: ConnectionStatus,
+  displayPhone: z.string().nullable(),
+  verifiedName: z.string().nullable(),
+  coexistence: z.boolean(),
+  qualityRating: z.string().nullable(),
+  messagingLimit: z.string().nullable(),
+  /** A manual connection's token runs out then (token-expiry warns 7 days before); null when it does not expire or is unknown. */
+  tokenExpiresAt: z.string().nullable(),
+  /** Null when it was never checked, or the stored check is in an older shape. */
+  lastCheck: ConnectionCheckView.nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type AdminConnection = z.infer<typeof AdminConnection>;
