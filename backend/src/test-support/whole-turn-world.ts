@@ -9,6 +9,7 @@ import { createSystemNoticePort } from "../agent/pipeline/ports";
 import { answerAfterFailure, replyTurn, type ReplyDeps } from "../agent/pipeline/reply";
 import { BATCH_WINDOW_MS, runTurn, type StepRunner } from "../agent/pipeline/process-message";
 import { stopCheck, stopCheckAfterGate } from "../agent/pipeline/stop";
+import { isAiLimit, type AiLimit } from "../lib/ai-limits";
 import { turnClock } from "../agent/pipeline/turn-deadline";
 import { understandTurn, type UnderstandDeps } from "../agent/pipeline/understand";
 import { markReadStep, type MarkReadDeps } from "../channels/whatsapp/mark-read";
@@ -245,6 +246,8 @@ export interface WorldOptions {
   mode?: "ai" | "human" | "external";
   /** isEnabled(tenant, "ai_auto_reply"): the business has the assistant on (the default). */
   featureEnabled?: boolean;
+  /** A rate limit or the daily AI spend cap the chat has reached (lib/ai-limits.ts); none by default. */
+  aiLimit?: AiLimit | null;
   /** Inngest drops an event whose id it has seen (the default). False: both copies are delivered. */
   dedupeEvents?: boolean;
 }
@@ -374,13 +377,14 @@ export async function createWorld(options: WorldOptions = {}) {
 
   /**
    * The body of the process-message function, in the order of inngest/process-message.ts (whole-turn.test.ts guards that it stays so). Left out: the
-   * "external-notice" step for a chat a team member handles from their own number (it needs the database; it has its own tests).
+   * "external-notice" step for a chat a team member handles from their own number, and the "limit-notice" step that tells the owners a limit stopped
+   * the assistant (both need the database; they have their own tests).
    */
   async function processMessageBody(event: { data: unknown }, step: StepApi): Promise<unknown> {
     const startedAt = await step.run("started", async () => Date.now());
-    const turn = await runTurn(step, event.data, { store: fake.store, isEnabled: async () => options.featureEnabled ?? true });
+    const turn = await runTurn(step, event.data, { store: fake.store, isEnabled: async () => options.featureEnabled ?? true, aiLimit: async () => options.aiLimit ?? null });
     if (turn.status !== "ready") {
-      if (turn.status === "gated_off" && (turn.reason === "not_ai_mode" || turn.reason === "feature_off")) {
+      if (turn.status === "gated_off" && (turn.reason === "not_ai_mode" || turn.reason === "feature_off" || isAiLimit(turn.reason))) {
         const ids = MessageReceived.safeParse(event.data);
         if (ids.success) await stopCheckAfterGate(step, ids.data, replyDeps);
       }
