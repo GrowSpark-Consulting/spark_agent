@@ -13,7 +13,7 @@ turns:
       extraction: {"language": "en", "intent": "unclear_exit", "fields": {}, "question": null, "confidence": 0.3}
       reply: "I did not quite follow that. Could you tell me what you are looking for?"
     expect:
-      reply: {"sent": true, "notContains": ["is confirmed", "have booked", "visit is booked", "10 am"]}
+      reply: {"sent": true, "notContains": ["is confirmed", "have booked", "visit is booked", "10 am", "The task", "the customer writes", "language other than English"]}
       noInventedPrice: true
       aiReplies: 1
       calendar: {"confirmed": [], "cancelled": 0}
