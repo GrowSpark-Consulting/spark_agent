@@ -10,6 +10,7 @@ import { SetupCall } from "@/features/connect/connect-screen";
 import { setupCallUrl } from "@/lib/env";
 import { FacebookConnect } from "@/components/onboarding/facebook-connect";
 import { OwnAppConnect } from "@/components/onboarding/own-app-connect";
+import { useSavedConnection } from "@/components/onboarding/use-saved-connection";
 import { loadWebhookConfig, resolveWhatsAppTenant, type WebhookConfigResult } from "@/lib/whatsapp/manual-connect";
 import {
   CHECKS,
@@ -40,10 +41,19 @@ export function StepWhatsApp({
   set: SetState;
   onRunChecks: (kind: CheckKind) => void;
 }) {
-  const idle = s.wa === "idle";
+  const preview = s.wa === "idle";
   const meta = s.waMethod === "meta";
   const kind = s.chkKind;
   const list = CHECKS[kind];
+
+  // What is saved comes from the database, read when this step opens: a refresh or a return to the wizard finds the same answer.
+  const { saved, reload } = useSavedConnection((result) => {
+    if (result.state === "active") set({ waConnection: { status: result.number.status, displayPhone: result.number.displayPhone, messagesReach: result.number.messagesReach } });
+    else if (result.state !== "error") set({ waConnection: null });
+  });
+  const connectedAlready = s.waConnection?.status === "active";
+  // The method pickers are offered only while nothing is connected.
+  const idle = preview && !connectedAlready;
 
   const copyValue = (label: string, value: string) => {
     try {
@@ -123,8 +133,10 @@ export function StepWhatsApp({
         once it’s connected.
       </StepIntro>
 
+      <SavedStatus saved={saved} reload={reload} connected={s.waConnection} />
+
       {/* Only partner access is still a scripted preview: Facebook runs Meta's real Embedded Signup and the own-app path posts to the API. */}
-      {(!idle || (!meta && s.mMode === "partner")) && (
+      {(!preview || (!meta && s.mMode === "partner" && idle)) && (
       <div
         role="note"
         aria-label="Preview"
@@ -239,7 +251,10 @@ export function StepWhatsApp({
           ) : (
             <FacebookConnect
               coexistence={s.coex === "yes"}
-              onConnected={(c) => set({ waConnection: { status: c.status, displayPhone: c.display_phone } })}
+              onConnected={(c) => {
+                set({ waConnection: { status: c.status, displayPhone: c.display_phone } });
+                reload();
+              }}
             />
           )}
         </>
@@ -320,6 +335,7 @@ export function StepWhatsApp({
               }}
               copied={s.copied}
               onCopy={copyValue}
+              onConnected={reload}
             />
           )}
 
@@ -463,4 +479,62 @@ export function StepWhatsApp({
       )}
     </>
   );
+}
+
+/** What the database says about this business's number, above the method pickers. "Connected" only for an active connection it returned. */
+function SavedStatus({
+  saved,
+  reload,
+  connected,
+}: {
+  saved: ReturnType<typeof useSavedConnection>["saved"];
+  reload: () => void;
+  connected: OnboardingState["waConnection"];
+}) {
+  if (saved.phase === "loading") {
+    return (
+      <p role="status" data-testid="saved-connection-loading" className="m-0 text-sm text-neutral-700">
+        Checking for a saved WhatsApp connection…
+      </p>
+    );
+  }
+  if (saved.state === "error") {
+    return (
+      <div role="alert" data-testid="saved-connection-error" className="border-2 border-foreground p-4 text-sm flex flex-col gap-2">
+        <strong>We couldn’t check whether a number is already connected</strong>
+        <span className="text-neutral-700">{saved.message}</span>
+        {saved.retryable ? (
+          <Button variant="secondary" onClick={reload} className="self-start">
+            Try again
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
+  if (saved.state === "active" && connected?.status === "active") {
+    return (
+      <div role="status" data-testid="saved-connection" data-state="connected" className="border-2 border-foreground px-[18px] py-4 flex flex-col gap-1">
+        <strong className="block text-[17px]">Connected{connected.displayPhone ? ` · ${connected.displayPhone}` : ""}</strong>
+        <span className="text-sm">
+          {saved.number.messagesReach
+            ? "This number is already connected, so there’s nothing to set up here. Your dashboard’s WhatsApp page shows its checks and lets you recheck it."
+            : "This number is connected, but we haven’t confirmed that customers’ messages reach your assistant yet. Your dashboard’s WhatsApp page shows what to fix."}
+        </span>
+      </div>
+    );
+  }
+  if (saved.state === "inactive") {
+    const failed = saved.number.status === "failed";
+    return (
+      <div role="status" data-testid="saved-connection" data-state="inactive" className="border-2 border-foreground px-[18px] py-4 flex flex-col gap-1">
+        <strong className="block text-[17px]">{saved.number.displayPhone ?? "A number"} is saved but isn’t connected</strong>
+        <span className="text-sm text-neutral-700">
+          {failed
+            ? "It didn’t pass its checks, so your assistant can’t reply from it. Fix what they say on your dashboard’s WhatsApp page, or connect again below."
+            : "Setup with Meta isn’t finished yet. Finish it from your dashboard’s WhatsApp page, or connect again below."}
+        </span>
+      </div>
+    );
+  }
+  return null;
 }

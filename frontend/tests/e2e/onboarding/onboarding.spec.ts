@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 // `test` fails on any console or page error, except the browser's own line for an API answer that
 // isn't 2xx: the owner's Business step gets 409 has_business from POST /api/onboarding/trial.
-import { PASSWORD, SIGNED_OUT, expect, signUp, test, uniqueEmail } from "../support/app";
+import { PASSWORD, SIGNED_OUT, expect, signIn, signUp, test, uniqueEmail } from "../support/app";
 
 /** The wizard's footer button that moves to the next step (label changes per step). */
 const next = (page: Page, label: string | RegExp) => page.getByRole("button", { name: label });
@@ -357,6 +357,77 @@ test("manual partner access fails without IDs, then waits for “hi”", async (
   await expect(next(page, /^Continue$/)).toBeVisible();
   await expect(page.getByText("Preview finished: +91 98400 12345 isn’t connected yet")).toBeVisible();
   await expectNoConnectionClaim(page);
+});
+
+// The WhatsApp step reads the saved connection from the database when it opens (lib/whatsapp/saved-connection.ts), so a refresh or a
+// return to the wizard finds the same answer. These accounts come from the mock database's per-user `whatsapp_connections_public`.
+test.describe("onboarding restores the saved WhatsApp connection", () => {
+  test.use({ storageState: SIGNED_OUT });
+
+  async function openWhatsAppStep(page: Page, email: string) {
+    // A member with a business lands on the dashboard after signing in; the wizard is opened by address, as the account's owner would.
+    await signIn(page, email);
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await openOnboarding(page);
+    await walkTo(page, "WhatsApp");
+  }
+
+  test("an active saved number shows as connected after a refresh, with nothing to set up again", async ({ page }) => {
+    await openWhatsAppStep(page, "connected@test.local");
+    const saved = page.getByTestId("saved-connection");
+    await expect(saved).toHaveAttribute("data-state", "connected");
+    await expect(saved).toContainText("Connected · +91 98400 12345");
+    await expect(page.getByRole("radiogroup", { name: "Connection method" })).toHaveCount(0);
+    await expect(next(page, "Continue")).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+
+    // A refresh drops everything React remembered; the step reads the database again and finds the same number.
+    await page.reload();
+    await walkTo(page, "WhatsApp");
+    await expect(page.getByTestId("saved-connection")).toContainText("Connected · +91 98400 12345");
+    await next(page, "Continue").click();
+    await next(page, "Go live").click();
+    await expect(page.getByText("Your number +91 98400 12345")).toBeVisible();
+  });
+
+  test("nothing is claimed while the read is still running", async ({ page }) => {
+    await openWhatsAppStep(page, "slow@test.local");
+    await expect(page.getByTestId("saved-connection-loading")).toContainText("Checking for a saved WhatsApp connection");
+    await expect(page.getByTestId("saved-connection")).toHaveCount(0);
+    // The read answers empty: no number saved, the pickers appear, and nothing is called connected.
+    await expect(page.getByRole("radiogroup", { name: "Connection method" })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("saved-connection-loading")).toHaveCount(0);
+    await expect(page.getByTestId("saved-connection")).toHaveCount(0);
+    await expectNoConnectionClaim(page);
+  });
+
+  test("a saved number that is still being set up is not called connected, and the pickers stay", async ({ page }) => {
+    await openWhatsAppStep(page, "pending@test.local");
+    const saved = page.getByTestId("saved-connection");
+    await expect(saved).toHaveAttribute("data-state", "inactive");
+    await expect(saved).toContainText("+91 98400 12345 is saved but isn’t connected");
+    await expect(saved).not.toContainText(/^Connected/);
+    await expect(page.getByRole("radiogroup", { name: "Connection method" })).toBeVisible();
+    await next(page, "Do this later").click();
+    await next(page, "Go live").click();
+    await expect(page.getByText("Not connected yet")).toBeVisible();
+  });
+
+  test("a disconnected number counts as none", async ({ page }) => {
+    await openWhatsAppStep(page, "disconnected@test.local");
+    await expect(page.getByTestId("saved-connection")).toHaveCount(0);
+    await expect(page.getByRole("radiogroup", { name: "Connection method" })).toBeVisible();
+  });
+
+  test("a failed read says so and offers Try again; it is not shown as an empty answer", async ({ page }) => {
+    await openWhatsAppStep(page, "viewerror@test.local");
+    const failed = page.getByTestId("saved-connection-error");
+    await expect(failed).toContainText("We couldn’t check whether a number is already connected");
+    await expect(failed.getByRole("button", { name: "Try again" })).toBeVisible();
+    await expect(page.getByTestId("saved-connection")).toHaveCount(0);
+    await expect(failed).not.toContainText("internal detail");
+    await expectNoConnectionClaim(page);
+  });
 });
 
 test.describe("onboarding → dashboard", () => {
