@@ -10,6 +10,7 @@ import { startTrialFor } from "../billing/start-trial";
 import { createTrialTenant } from "../billing/trial";
 import { trialPhoneUsed } from "../billing/trial-phone";
 import { cancelFromCalendar, completeFromCalendar, noShowFromCalendar, rescheduleFromCalendar, slotsForMove } from "../booking/actions";
+import { contactDeletionPreview, deleteContactData } from "../consent/deletion";
 import { googleConnectUrl, handleGoogleCallback } from "../booking/google-calendar";
 import { sendTestMessage } from "../channels/whatsapp/test-message";
 import { handleWhatsAppWebhook } from "../channels/whatsapp/inbound";
@@ -118,6 +119,15 @@ const conversationLeadCard: RouteHandler = (request, deps, params) =>
 const conversationSuggest: RouteHandler = async (request, deps, params) => {
   const { context } = await requireTenant(request, deps.userClient);
   return Response.json(await suggestReply(context, params.id));
+};
+// A customer's request to delete their data (consent/deletion.ts, 0043; Settings → Data & privacy). Owner or admin.
+// → ContactDeletionPreview: what a deletion would remove, for the confirmation.
+const contactDeletionGet: RouteHandler = (request, deps, params) =>
+  tenantRoute(({ context, params: p }) => contactDeletionPreview(context, p.id))(request, deps.userClient, params);
+// no body → ContactDeletionResult: the chats and leads removed, the contact scrubbed, consent_logs deleted. Body-less, so it authenticates itself.
+const contactDeletionPost: RouteHandler = async (request, deps, params) => {
+  const { context } = await requireTenant(request, deps.userClient);
+  return Response.json(await deleteContactData(context, params.id));
 };
 // → AccountStatus: the balance, the meter's denominator, renewal and trial dates, and whether the assistant is paused. Any member.
 const billingBalance = tenantRoute(({ context }) => accountStatus(context));
@@ -291,6 +301,7 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/conversations/:id/templates", browser: true, methods: { GET: conversationTemplateList } },
   { path: "/api/conversations/:id/mode", browser: true, methods: { POST: conversationMode } },
   { path: "/api/conversations/:id/lead-card", browser: true, methods: { GET: conversationLeadCard } },
+  { path: "/api/contacts/:id/deletion", browser: true, methods: { GET: contactDeletionGet, POST: contactDeletionPost } },
   { path: "/api/conversations/:id/suggest", browser: true, methods: { POST: conversationSuggest } },
   { path: "/api/billing/balance", browser: true, methods: { GET: (request, deps) => billingBalance(request, deps.userClient) } },
   { path: "/api/billing/checkout", browser: true, methods: { POST: (request, deps) => billingCheckout(request, deps.userClient) } },

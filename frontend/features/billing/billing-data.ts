@@ -1,4 +1,4 @@
-import { AccountStatus, ChangePlanInput, ChangePlanResult, CheckoutInput, OneTimePaymentInput, PayuCheckout, PaymentView } from "@pakka/types";
+import { AccountStatus, CancelPlanResult, ChangePlanInput, ChangePlanResult, CheckoutInput, OneTimePaymentInput, PayuCheckout, PaymentView, ResumePlanResult } from "@pakka/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { getJson, postJson } from "@/lib/api/client";
@@ -11,6 +11,8 @@ import { getJson, postJson } from "@/lib/api/client";
 //   POST /api/billing/topup            { phone? } or no body      → PayuCheckout        owner only
 //   POST /api/billing/setup-fee        { phone? } or no body      → PayuCheckout        owner only
 //   POST /api/billing/change-plan      { planKey, cycle?, phone? } → ChangePlanResult   owner only
+//   POST /api/billing/cancel           (no body) → CancelPlanResult: scheduled { endsAt } | ended          owner only
+//   POST /api/billing/resume           (no body) → ResumePlanResult { renewsAt }                         owner only
 //   GET  /api/billing/payments/:id     → PaymentView (created | pending | success | failed); any member
 // The server decides every amount; the browser sends no price. A PayuCheckout is not a payment: it is the form to POST to PayU
 // (payu-form.ts). Only GET /api/billing/payments/:id says whether a payment went through (payment-poll.ts).
@@ -62,6 +64,16 @@ export async function startSetupFee(tenantId: string, input: OneTimePaymentInput
 export async function changePlan(tenantId: string, input: ChangePlanInput): Promise<ChangePlanResult> {
   const body = ChangePlanInput.parse(input);
   return parseAnswer(ChangePlanResult, await postJson<unknown>("/api/billing/change-plan", body, { tenantId }), "plan change");
+}
+
+/** Stops the plan renewing (it ends with the period already paid), or ends a past-due plan now. No money moves, so there is no PayU step. */
+export async function cancelPlan(tenantId: string): Promise<CancelPlanResult> {
+  return parseAnswer(CancelPlanResult, await postJson<unknown>("/api/billing/cancel", undefined, { tenantId }), "cancel");
+}
+
+/** Keeps a cancelled plan: it renews again while its period lasts. */
+export async function resumePlan(tenantId: string): Promise<ResumePlanResult> {
+  return parseAnswer(ResumePlanResult, await postJson<unknown>("/api/billing/resume", undefined, { tenantId }), "resume");
 }
 
 /** One payment of this business. The answer must be for the payment asked about. */

@@ -5,10 +5,11 @@ import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { CHECKS, INDUSTRIES, PROFILES, ROUTES, STEP_LABELS, TOTAL_STEPS, type CheckKind } from "@/features/onboarding/data";
+import { CHECKS, ROUTES, STEP_LABELS, TOTAL_STEPS, type CheckKind } from "@/features/onboarding/data";
 import { offeredTrades, type ActivePack, type OfferedTrade } from "@/features/onboarding/packs";
 import {
   industryKey,
+  trialPhoneOf,
   initialState,
   plannedFailure,
   waitHiIndex,
@@ -29,9 +30,7 @@ const CHECK_TICK_MS = 650;
 /** Starts on the default trade if it is offered, otherwise on the first offered one, with its profile. */
 function initialStateFor(trades: OfferedTrade[]): OnboardingState {
   if (trades.length === 0 || trades.some((t) => t.index === initialState.ind)) return initialState;
-  const ind = trades[0].index;
-  const profile = PROFILES[INDUSTRIES[ind].key];
-  return { ...initialState, ind, staff: profile.staff.map((p) => ({ ...p })) };
+  return { ...initialState, ind: trades[0].index };
 }
 
 /** activePacks: the active vertical packs, or null when they couldn't be read (no trade is offered). */
@@ -85,7 +84,7 @@ export function OnboardingFlow({ activePacks }: { activePacks: ActivePack[] | nu
   const submitBusiness = () => {
     if (!tradeOffered) return;
     startSavingBusiness(async () => {
-      const result = await startTrial({ name: s.biz, industry: industryKey(s) });
+      const result = await startTrial({ name: s.biz, industry: industryKey(s), phone: trialPhoneOf(s) });
       if (result.status === "ready") {
         set({ trial: result.trial, hasBusiness: false, trialError: null, step: 2 });
       } else if (result.status === "has_business") {
@@ -96,7 +95,7 @@ export function OnboardingFlow({ activePacks }: { activePacks: ActivePack[] | nu
             result.status === "unavailable"
               ? "Trials for this trade aren’t open yet."
               : result.status === "invalid"
-                ? (result.fields.name ?? result.fields.industry ?? "Check your business details.")
+                ? (result.fields.name ?? result.fields.industry ?? result.fields.phone ?? "Check your business details.")
                 : result.message,
         });
         return;
@@ -208,7 +207,7 @@ export function OnboardingFlow({ activePacks }: { activePacks: ActivePack[] | nu
           {st === 4 && (
             <StepWhatsApp s={s} set={set} onRunChecks={startChecks} />
           )}
-          {st === 5 && <StepTeam s={s} set={set} />}
+          {st === 5 && <StepTeam s={s} />}
           {st === 6 && <StepLive s={s} />}
 
           {/* ── Footer nav ── */}

@@ -24,6 +24,16 @@ describe("decideGate (the conversation)", () => {
     expect(decideGate({ ...open, featureEnabled: false })).toEqual({ open: false, reason: "feature_off" });
   });
 
+  it.each(["ai_spend_cap", "tenant_rate_limit", "contact_rate_limit"] as const)("turns away a chat that reached a limit: %s", (limit) => {
+    expect(decideGate({ ...open, limit })).toEqual({ open: false, reason: limit });
+    expect(decideGate({ ...open, limit: null })).toEqual({ open: true });
+  });
+
+  it("names a limit after the other reasons: an opt-out, a person's chat or the switch says more", () => {
+    expect(decideGate({ ...open, featureEnabled: false, limit: "ai_spend_cap" })).toEqual({ open: false, reason: "feature_off" });
+    expect(decideGate({ ...open, optedOut: true, limit: "contact_rate_limit" })).toEqual({ open: false, reason: "opted_out" });
+  });
+
   it("names the strongest reason first: opted out, then a person's chat, then the switch", () => {
     const all: GateInput = { optedOut: true, mode: "human", featureEnabled: false };
     expect(decideGate(all)).toEqual({ open: false, reason: "opted_out" });

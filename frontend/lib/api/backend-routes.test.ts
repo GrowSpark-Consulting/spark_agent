@@ -73,6 +73,8 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
   { call: "POST /api/billing/topup", file: "features/billing/billing-data.ts" },
   { call: "POST /api/billing/setup-fee", file: "features/billing/billing-data.ts" },
   { call: "POST /api/billing/change-plan", file: "features/billing/billing-data.ts" },
+  { call: "POST /api/billing/cancel", file: "features/billing/billing-data.ts" },
+  { call: "POST /api/billing/resume", file: "features/billing/billing-data.ts" },
   { call: "GET /api/billing/payments/:id", file: "features/billing/billing-data.ts" },
   { call: "GET /api/conversations/:id/templates", file: "features/inbox/template-reply.ts" },
   // Registered behind EMBEDDED_SIGNUP_ENABLED (not_available while off). It refuses connectToken (validation_failed) until the assisted-link PR.
@@ -112,6 +114,8 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   "POST /api/webhooks/payu": "PayU calls it: payment results (verified with PayU before anything changes)",
   "POST /api/billing/cancel": "the Billing screen's Cancel plan button is not built yet (Dhatri)",
   "POST /api/billing/resume": "the Billing screen's Keep my plan button is not built yet (Dhatri)",
+  "GET /api/contacts/:id/deletion": "not called yet: the Data & privacy screen's deletion confirmation (Dhatri)",
+  "POST /api/contacts/:id/deletion": "not called yet: the Data & privacy screen's Delete data button (Dhatri)",
 };
 
 function sourceFiles(dir: string): string[] {

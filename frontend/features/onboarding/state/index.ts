@@ -5,7 +5,6 @@ import {
   type Coex,
   type IndustryKey,
   type ManualMode,
-  type StaffMember,
   type WaMethod,
   INDUSTRIES,
   trialChatUrl,
@@ -55,10 +54,7 @@ export interface OnboardingState {
   chkRun: number;
   waitHi: boolean;
 
-  /* step 5 — team */
-  staff: StaffMember[];
-  cal: boolean;
-  feats: boolean[];
+  /* step 5 — team: nothing is kept here. The feature switches are read from and saved to the server (features/onboarding/persistence.ts). */
 }
 
 export const initialState: OnboardingState = {
@@ -86,9 +82,6 @@ export const initialState: OnboardingState = {
   chkPlannedFail: -1,
   chkRun: 0,
   waitHi: false,
-  staff: PROFILES.re.staff.map((p) => ({ ...p })),
-  cal: false,
-  feats: [true, true, true, true, true, true],
 };
 
 export type Patch =
@@ -103,6 +96,19 @@ export function industryKey(state: OnboardingState): IndustryKey {
 
 export function profileOf(state: OnboardingState) {
   return PROFILES[industryKey(state)];
+}
+
+/** The number the wizard's first field is pre-filled with. It is a sample, not anyone's number, so it is never sent anywhere. */
+export const SAMPLE_PHONE_DIGITS = "9840012345";
+
+/**
+ * The WhatsApp number the person typed, as E.164, for the trial route's early "already had a trial" check. Only a ten-digit Indian mobile
+ * number that is not the pre-filled sample counts; anything else sends nothing (the route treats a missing number as no check).
+ */
+export function trialPhoneOf(state: OnboardingState): string | undefined {
+  const digits = state.phone.replace(/\D/g, "").replace(/^(91|0)(?=\d{10}$)/, "");
+  if (!/^[6-9]\d{9}$/.test(digits) || digits === SAMPLE_PHONE_DIGITS) return undefined;
+  return `+91${digits}`;
 }
 
 /** The route code the backend returned when it created the trial; null when there is no trial (never a sample code). */

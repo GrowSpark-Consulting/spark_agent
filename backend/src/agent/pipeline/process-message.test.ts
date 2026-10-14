@@ -324,6 +324,33 @@ describe("the gate", () => {
     expect(w.leads.size).toBe(1);
   });
 
+  it("turns away a chat that reached a rate limit or the spend cap, before any model is called, and still makes the lead", async () => {
+    const w = world();
+    const aiLimit = vi.fn<NonNullable<TurnDeps["aiLimit"]>>(async () => "contact_rate_limit");
+    const r = runner();
+    expect(await runTurn(r.step, event, { ...w.deps, aiLimit })).toEqual({ status: "gated_off", reason: "contact_rate_limit", leadId: expect.any(String) });
+    expect(aiLimit).toHaveBeenCalledWith(A, CONV);
+    expect(r.ran).toEqual(["resolve", "batch", "lead", "gate"]);
+    expect(w.leads.size).toBe(1);
+  });
+
+  it("asks about the limits only when the AI would otherwise answer, and lets the chat through under them", async () => {
+    const aiLimit = vi.fn<NonNullable<TurnDeps["aiLimit"]>>(async () => null);
+    const off = world();
+    off.isEnabled.mockResolvedValue(false);
+    await runTurn(runner().step, event, { ...off.deps, aiLimit });
+    await runTurn(runner().step, event, { ...world({ mode: "human" }).deps, aiLimit });
+    expect(aiLimit).not.toHaveBeenCalled();
+    expect(await runTurn(runner().step, event, { ...world().deps, aiLimit })).toMatchObject({ status: "ready" });
+  });
+
+  it("does not hide a failure to read the limits: the step fails and is retried", async () => {
+    const aiLimit = vi.fn<NonNullable<TurnDeps["aiLimit"]>>(async () => {
+      throw new Error("ai_limits failed: db down");
+    });
+    await expect(runTurn(runner().step, event, { ...world().deps, aiLimit })).rejects.toThrow(/db down/);
+  });
+
   it("does not hide a failure to find out whether the feature is on: the step fails and is retried", async () => {
     const w = world();
     w.isEnabled.mockRejectedValue(new Error("db down"));

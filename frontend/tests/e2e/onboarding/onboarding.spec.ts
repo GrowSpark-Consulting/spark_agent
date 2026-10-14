@@ -359,74 +359,223 @@ test("manual partner access fails without IDs, then waits for “hi”", async (
   await expectNoConnectionClaim(page);
 });
 
-// The WhatsApp step reads the saved connection from the database when it opens (lib/whatsapp/saved-connection.ts), so a refresh or a
-// return to the wizard finds the same answer. These accounts come from the mock database's per-user `whatsapp_connections_public`.
-test.describe("onboarding restores the saved WhatsApp connection", () => {
-  test.use({ storageState: SIGNED_OUT });
+// The Team step's switches are the business's saved feature switches: GET /api/features and PATCH /api/features/:key (Dev 2). Both are
+// stood in for with page.route and a small fake server, so these tests prove what the step reads, what it sends, when it moves a switch
+// and that a refresh finds the same state: not that the real routes or the plan checks agree.
+test.describe("the Team step saves the feature switches", () => {
+  const FEATURES_ROUTE = /\/api\/features$/;
+  const FEATURE_ROUTE = /\/api\/features\/[a-z0-9_]+$/;
+  type Row = Record<string, unknown>;
+  const row = (key: string, name: string, over: Row = {}): Row => ({
+    key, name, description: "d", state: "on", enabled: true, requiredPlan: null, disabledReason: null,
+    creditsPerMonth: null, creditNote: null, settings: {}, control: "switch", ...over,
+  });
+  const startingRows = (): Row[] => [
+    row("ai_auto_reply", "AI replies"),
+    row("lead_qualification", "Lead qualification"),
+    row("booking", "Booking in chat"),
+    row("reminder_24h", "Day-before reminder", { control: "timing" }),
+    row("reminder_2h", "2-hour reminder"),
+    row("staff_alerts", "Staff alerts", { state: "locked", enabled: false, requiredPlan: "growth" }),
+    row("feedback_request", "Feedback request", { state: "off", enabled: false }),
+  ];
+  const listOf = (rows: Row[]) => ({
+    plan: { key: "starter", name: "Starter", monthlyCredits: 1500 },
+    estimatedCreditsPerMonth: 0,
+    groups: [{ name: "All", features: rows }],
+  });
 
-  async function openWhatsAppStep(page: Page, email: string) {
-    // A member with a business lands on the dashboard after signing in; the wizard is opened by address, as the account's owner would.
-    await signIn(page, email);
-    await expect(page).toHaveURL(/\/dashboard$/);
-    await openOnboarding(page);
-    await walkTo(page, "WhatsApp");
+  /** A fake server: GET returns the rows, PATCH changes one and answers it. `failPatch` makes the next PATCH fail. */
+  async function fakeServer(page: Page, opts: { failGet?: number; patch?: (key: string, n: number) => { status: number; body: unknown } | null } = {}) {
+    const rows = startingRows();
+    const patches: { key: string; body: unknown }[] = [];
+    let gets = 0;
+    await page.route(FEATURES_ROUTE, async (route) => {
+      const req = route.request();
+      if (req.method() === "OPTIONS") return route.fallback();
+      gets += 1;
+      const headers = { "access-control-allow-origin": req.headers()["origin"] ?? "*" };
+      if (gets <= (opts.failGet ?? 0)) return route.fulfill({ status: 500, contentType: "application/json", headers, body: JSON.stringify({ error: { code: "internal", message: "Something went wrong. Try again in a moment." } }) });
+      return route.fulfill({ status: 200, contentType: "application/json", headers, body: JSON.stringify(listOf(rows)) });
+    });
+    await page.route(FEATURE_ROUTE, async (route) => {
+      const req = route.request();
+      if (req.method() === "OPTIONS") return route.fallback();
+      const key = new URL(req.url()).pathname.split("/").pop() ?? "";
+      const body = req.postDataJSON() as { enabled: boolean };
+      patches.push({ key, body });
+      const headers = { "access-control-allow-origin": req.headers()["origin"] ?? "*" };
+      const forced = opts.patch?.(key, patches.length);
+      if (forced) return route.fulfill({ status: forced.status, contentType: "application/json", headers, body: JSON.stringify(forced.body) });
+      const target = rows.find((r) => r.key === key)!;
+      target.enabled = body.enabled;
+      target.state = body.enabled ? "on" : "off";
+      return route.fulfill({ status: 200, contentType: "application/json", headers, body: JSON.stringify(target) });
+    });
+    return { rows, patches, gets: () => gets };
   }
 
-  test("an active saved number shows as connected after a refresh, with nothing to set up again", async ({ page }) => {
-    await openWhatsAppStep(page, "connected@test.local");
-    const saved = page.getByTestId("saved-connection");
-    await expect(saved).toHaveAttribute("data-state", "connected");
-    await expect(saved).toContainText("Connected · +91 98400 12345");
-    await expect(page.getByRole("radiogroup", { name: "Connection method" })).toHaveCount(0);
-    await expect(next(page, "Continue")).toBeVisible();
+  const sw = (page: Page, name: string) => page.getByRole("switch", { name, exact: true });
+
+  test("shows the saved switches, not defaults, and keeps nothing for staff or the calendar", async ({ page }) => {
+    await fakeServer(page);
+    await openOnboarding(page);
+    await walkTo(page, "Team");
+    await expect(sw(page, "AI auto-reply")).toBeChecked();
+    await expect(sw(page, "Feedback request")).not.toBeChecked();
+    // The plan does not include staff alerts: shown off and disabled, with the plan that has it.
+    await expect(sw(page, "Staff WhatsApp alerts")).toBeDisabled();
+    await expect(sw(page, "Staff WhatsApp alerts")).not.toBeChecked();
+    await expect(page.locator('[data-feature="staff_alerts"]')).toContainText("Needs the Growth plan.");
+    // No sample staff, and no pretend calendar.
+    await expect(page.getByTestId("team-note")).toContainText("nobody is added here");
+    await expect(page.getByTestId("calendar-note")).toContainText("nothing is connected");
+    await expect(page.getByText("Google Calendar connected")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Add staff|Connect Google Calendar/ })).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test("a switch moves only after the server saved it, and a refresh finds it saved", async ({ page }) => {
+    const server = await fakeServer(page);
+    await openOnboarding(page);
+    await walkTo(page, "Team");
+    await sw(page, "Lead qualification").click();
+    await expect(sw(page, "Lead qualification")).not.toBeChecked();
+    expect(server.patches).toEqual([{ key: "lead_qualification", body: { enabled: false } }]);
+    await sw(page, "Feedback request").click();
+    await expect(sw(page, "Feedback request")).toBeChecked();
+
+    // A refresh drops everything the page remembered; the step reads the server again.
+    await page.reload();
+    await walkTo(page, "Team");
+    await expect(sw(page, "Lead qualification")).not.toBeChecked();
+    await expect(sw(page, "Feedback request")).toBeChecked();
+    await expect(sw(page, "AI auto-reply")).toBeChecked();
+  });
+
+  test("Reminders is two feature rows and saves both", async ({ page }) => {
+    const server = await fakeServer(page);
+    await openOnboarding(page);
+    await walkTo(page, "Team");
+    await sw(page, "Reminders").click();
+    await expect(sw(page, "Reminders")).not.toBeChecked();
+    expect(server.patches.map((p) => p.key)).toEqual(["reminder_24h", "reminder_2h"]);
+    expect(server.patches.every((p) => (p.body as { enabled: boolean }).enabled === false)).toBe(true);
+  });
+
+  test("a failed save leaves the switch as the server has it and says so", async ({ page }) => {
+    await fakeServer(page, { patch: () => ({ status: 500, body: { error: { code: "internal", message: "Something went wrong. Try again in a moment." } } }) });
+    await openOnboarding(page);
+    await walkTo(page, "Team");
+    await sw(page, "Booking in chat").click();
+    await expect(page.getByTestId("feature-error")).toContainText("Booking in chat was not changed.");
+    await expect(sw(page, "Booking in chat")).toBeChecked();
+    await expect(sw(page, "Booking in chat")).toBeEnabled();
+  });
+
+  test("a plan refusal names the plan and changes nothing", async ({ page }) => {
+    await fakeServer(page, { patch: () => ({ status: 403, body: { error: { code: "plan_required", message: "Feedback request needs the Growth plan. Upgrade to switch it on." } } }) });
+    await openOnboarding(page);
+    await walkTo(page, "Team");
+    await sw(page, "Feedback request").click();
+    await expect(page.getByTestId("feature-error")).toContainText("Nothing was changed.");
+    await expect(sw(page, "Feedback request")).not.toBeChecked();
+  });
+
+  test("one press is one request: the switches are off while one is saving", async ({ page }) => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const server = await fakeServer(page);
+    await page.unroute(FEATURE_ROUTE);
+    const patches: string[] = [];
+    await page.route(FEATURE_ROUTE, async (route) => {
+      if (route.request().method() === "OPTIONS") return route.fallback();
+      patches.push(new URL(route.request().url()).pathname);
+      await gate;
+      const key = new URL(route.request().url()).pathname.split("/").pop() ?? "";
+      const target = server.rows.find((r) => r.key === key)!;
+      target.enabled = false;
+      target.state = "off";
+      return route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": route.request().headers()["origin"] ?? "*" }, body: JSON.stringify(target) });
+    });
+    await openOnboarding(page);
+    await walkTo(page, "Team");
+    await sw(page, "AI auto-reply").click();
+    await expect(sw(page, "Lead qualification")).toBeDisabled();
+    await expect(page.getByText("Saving…")).toBeVisible();
+    release();
+    await expect(sw(page, "AI auto-reply")).not.toBeChecked();
+    expect(patches).toHaveLength(1);
+  });
+
+  test("a failed read says so with Try again, and shows no switches until the server answers", async ({ page }) => {
+    await fakeServer(page, { failGet: 1 });
+    await openOnboarding(page);
+    await walkTo(page, "Team");
+    await expect(page.getByTestId("features-error")).toContainText("Couldn’t load your saved choices");
+    await expect(page.getByRole("switch")).toHaveCount(0);
+    await page.getByTestId("features-error").getByRole("button", { name: "Try again" }).click();
+    await expect(sw(page, "AI auto-reply")).toBeChecked();
+  });
+});
+
+// POST /api/onboarding/trial answers `phone_used` (409) for a WhatsApp number that already had a free trial (Dev 2, #176). It is stood in for
+// here with page.route; the real route and its database check are not exercised.
+test.describe("the trial route's phone check", () => {
+  const TRIAL_ROUTE = /\/api\/onboarding\/trial$/;
+  const USED = "This WhatsApp number has already had a free trial, so we can't start another. Contact us to start on a paid plan.";
+
+  async function toBusinessStep(page: Page, phone?: string) {
+    await openOnboarding(page);
+    if (phone) await page.getByLabel("Your WhatsApp number").fill(phone);
+    await next(page, "Send code on WhatsApp").click();
+    await page.getByPlaceholder("––––––").fill("123456");
+    await next(page, "Verify and continue").click();
+    await page.getByLabel("Business name").fill("Sunrise Homes");
+    await option(page, "Real estate").click();
+  }
+
+  test("a typed number is sent in E.164, and a refused one is shown with the API's words while the wizard stays on the Business step", async ({ page }) => {
+    const bodies: unknown[] = [];
+    await page.route(TRIAL_ROUTE, async (route) => {
+      if (route.request().method() === "OPTIONS") return route.fallback();
+      bodies.push(route.request().postDataJSON());
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        headers: { "access-control-allow-origin": route.request().headers()["origin"] ?? "*" },
+        body: JSON.stringify({ status: "phone_used", message: USED }),
+      });
+    });
+    await toBusinessStep(page, "98765 43210");
+    await next(page, "Continue").click();
+    await expect(page.getByText(USED)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Tell us about your business" })).toBeVisible();
+    expect(bodies).toEqual([{ name: "Sunrise Homes", industry: "re", phone: "+919876543210" }]);
     await expectNoHorizontalOverflow(page);
 
-    // A refresh drops everything React remembered; the step reads the database again and finds the same number.
-    await page.reload();
-    await walkTo(page, "WhatsApp");
-    await expect(page.getByTestId("saved-connection")).toContainText("Connected · +91 98400 12345");
+    // Typing the business name again clears the message, and nothing was treated as created.
+    await page.getByLabel("Business name").fill("Sunrise Homes Chennai");
+    await expect(page.getByText(USED)).toHaveCount(0);
+    await expect(page.getByText("Test number · code")).toHaveCount(0);
+  });
+
+  test("the pre-filled sample number is never sent", async ({ page }) => {
+    const bodies: unknown[] = [];
+    await page.route(TRIAL_ROUTE, async (route) => {
+      if (route.request().method() === "OPTIONS") return route.fallback();
+      bodies.push(route.request().postDataJSON());
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        headers: { "access-control-allow-origin": route.request().headers()["origin"] ?? "*" },
+        body: JSON.stringify({ status: "has_business" }),
+      });
+    });
+    await toBusinessStep(page);
     await next(page, "Continue").click();
-    await next(page, "Go live").click();
-    await expect(page.getByText("Your number +91 98400 12345")).toBeVisible();
-  });
-
-  test("nothing is claimed while the read is still running", async ({ page }) => {
-    await openWhatsAppStep(page, "slow@test.local");
-    await expect(page.getByTestId("saved-connection-loading")).toContainText("Checking for a saved WhatsApp connection");
-    await expect(page.getByTestId("saved-connection")).toHaveCount(0);
-    // The read answers empty: no number saved, the pickers appear, and nothing is called connected.
-    await expect(page.getByRole("radiogroup", { name: "Connection method" })).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByTestId("saved-connection-loading")).toHaveCount(0);
-    await expect(page.getByTestId("saved-connection")).toHaveCount(0);
-    await expectNoConnectionClaim(page);
-  });
-
-  test("a saved number that is still being set up is not called connected, and the pickers stay", async ({ page }) => {
-    await openWhatsAppStep(page, "pending@test.local");
-    const saved = page.getByTestId("saved-connection");
-    await expect(saved).toHaveAttribute("data-state", "inactive");
-    await expect(saved).toContainText("+91 98400 12345 is saved but isn’t connected");
-    await expect(saved).not.toContainText(/^Connected/);
-    await expect(page.getByRole("radiogroup", { name: "Connection method" })).toBeVisible();
-    await next(page, "Do this later").click();
-    await next(page, "Go live").click();
-    await expect(page.getByText("Not connected yet")).toBeVisible();
-  });
-
-  test("a disconnected number counts as none", async ({ page }) => {
-    await openWhatsAppStep(page, "disconnected@test.local");
-    await expect(page.getByTestId("saved-connection")).toHaveCount(0);
-    await expect(page.getByRole("radiogroup", { name: "Connection method" })).toBeVisible();
-  });
-
-  test("a failed read says so and offers Try again; it is not shown as an empty answer", async ({ page }) => {
-    await openWhatsAppStep(page, "viewerror@test.local");
-    const failed = page.getByTestId("saved-connection-error");
-    await expect(failed).toContainText("We couldn’t check whether a number is already connected");
-    await expect(failed.getByRole("button", { name: "Try again" })).toBeVisible();
-    await expect(page.getByTestId("saved-connection")).toHaveCount(0);
-    await expect(failed).not.toContainText("internal detail");
-    await expectNoConnectionClaim(page);
+    await expect(page.getByRole("heading", { name: "Teach your assistant" })).toBeVisible();
+    expect(bodies).toEqual([{ name: "Sunrise Homes", industry: "re" }]);
   });
 });
 
