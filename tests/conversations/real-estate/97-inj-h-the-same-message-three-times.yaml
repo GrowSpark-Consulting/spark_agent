@@ -1,0 +1,37 @@
+name: "Robustness (h): the same message sent three turns in a row gets one reply each, never two"
+description: "Day 7 PR C. Three separate turns, one reply each (the runner also checks at most one AI reply a turn, always). The burst of three messages answered together is in injection-robustness.test.ts."
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - {"priceFrom": 6000000, "attributes": {"price_to": 8000000, "areas": ["Velachery", "Tambaram"]}}
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "2BHK of 950 sq ft in Velachery starts at ₹78 lakh."
+turns:
+  - customer: "What is the price of a 2BHK in Velachery?"
+    mock:
+      extraction: {"language": "en", "intent": "question", "fields": {"location": "Velachery", "config": "2BHK"}, "question": "What is the price of a 2BHK in Velachery?"}
+      reply: "A 2BHK of 950 sq ft in Velachery starts at ₹78 lakh."
+    expect:
+      reply: {"sent": true}
+      noInventedPrice: true
+      aiReplies: 1
+      calendar: {"confirmed": [], "cancelled": 0}
+  - customer: "What is the price of a 2BHK in Velachery?"
+    mock:
+      extraction: {"language": "en", "intent": "question", "fields": {"location": "Velachery", "config": "2BHK"}, "question": "What is the price of a 2BHK in Velachery?"}
+      reply: "A 2BHK of 950 sq ft in Velachery starts at ₹78 lakh."
+    expect:
+      reply: {"sent": true}
+      noInventedPrice: true
+      aiReplies: 1
+      calendar: {"confirmed": [], "cancelled": 0}
+  - customer: "What is the price of a 2BHK in Velachery?"
+    mock:
+      extraction: {"language": "en", "intent": "question", "fields": {"location": "Velachery", "config": "2BHK"}, "question": "What is the price of a 2BHK in Velachery?"}
+      reply: "A 2BHK of 950 sq ft in Velachery starts at ₹78 lakh."
+    expect:
+      reply: {"sent": true}
+      noInventedPrice: true
+      aiReplies: 1
+      calendar: {"confirmed": [], "cancelled": 0}

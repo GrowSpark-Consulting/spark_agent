@@ -70,9 +70,12 @@ const llmResult = (text: string): LlmResult => ({ text, model: "mock", stopReaso
 function scriptedLlm(script: ModelScript) {
   const next = { extraction: 0, reply: 0 };
   const calls = { extraction: 0, reply: 0 };
+  /** Every request the pipeline made, as sent (Day 7 PR C: what reached the model). */
+  const requests: LlmRequest[] = [];
   const client: LlmClient = {
     async complete(request: LlmRequest) {
       const role = request.role === "extraction" ? "extraction" : "reply";
+      requests.push(request);
       calls[role]++;
       const items = (role === "extraction" ? script.extraction : script.reply) ?? [role === "extraction" ? GOOD_EXTRACTION : GOOD_REPLY];
       const item = items[Math.min(next[role]++, items.length - 1)];
@@ -80,7 +83,7 @@ function scriptedLlm(script: ModelScript) {
       return llmResult(typeof item === "function" ? item() : item);
     },
   };
-  return { client, calls };
+  return { client, calls, requests };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
