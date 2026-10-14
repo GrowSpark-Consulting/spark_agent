@@ -74,6 +74,22 @@ describe("handleLeadNudges", () => {
     expect(nurture).toHaveBeenCalledWith(TENANT, LEAD);
   });
 
+  // Exit test 1 (Day 7; inngest/replay-coverage.test.ts): notify.send keeps one message per key (notify/send.test.ts), and moving to nurture
+  // only moves a lead still open, so a second move changes nothing (leads/nudges.test.ts, "leaves a lead that moved on meanwhile alone").
+  it("replay: the same event twice nudges under the same keys and moves the same lead, so the customer hears each nudge once", async () => {
+    await handleLeadNudges({ event, step }, deps());
+    const first = send.mock.calls.map((c) => c[2].idempotencyKey);
+    send.mockClear();
+    nurture.mockResolvedValue(false);
+    await handleLeadNudges({ event, step }, deps());
+    expect(send.mock.calls.map((c) => c[2].idempotencyKey)).toEqual(first);
+    expect(first).toEqual([`followup_nudge:${MESSAGE}:1`, `followup_nudge:${MESSAGE}:2`]);
+    expect(nurture.mock.calls).toEqual([
+      [TENANT, LEAD],
+      [TENANT, LEAD],
+    ]);
+  });
+
   it("uses the business's timing (a test can set minutes)", async () => {
     await handleLeadNudges({ event, step }, deps({ timing: async () => ({ offsetMinutes: [2, 5], nurtureAfterMinutes: 10 }) }));
     expect(journal.filter((j) => j.startsWith("wait-"))).toEqual([

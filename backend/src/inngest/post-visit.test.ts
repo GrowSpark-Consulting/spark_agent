@@ -84,7 +84,7 @@ describe("handlePostVisit", () => {
       templateParams: ["site visit", "Skyline Homes"],
       idempotencyKey: `feedback_request:${BOOKING}`,
     }));
-    expect(alert).toHaveBeenCalledWith(TENANT, STAFF, { kind: "visit_outcome", conversationId: CONVERSATION, what: "site visit" });
+    expect(alert).toHaveBeenCalledWith(TENANT, STAFF, { kind: "visit_outcome", conversationId: CONVERSATION, what: "site visit" }, `visit_outcome:${BOOKING}:${STAFF}`);
     expect(send).toHaveBeenNthCalledWith(2, TENANT, "review_request", {
       conversationId: CONVERSATION,
       text: "Thank you! Would you leave Skyline Homes a quick review? It really helps: https://g.page/r/skyline/review",
@@ -93,10 +93,32 @@ describe("handlePostVisit", () => {
     });
   });
 
+  // Exit test 1 (Day 7; inngest/replay-coverage.test.ts): notify.send keeps one message per key (notify/send.test.ts).
+  it("replay: the same event twice sends and alerts under the same keys, so nobody hears twice", async () => {
+    const keys = () => [...send.mock.calls.map((x) => x[2].idempotencyKey), ...alert.mock.calls.map((x) => x[3])];
+    await handlePostVisit({ event, step }, deps());
+    const first = keys();
+    send.mockClear();
+    alert.mockClear();
+    await handlePostVisit({ event, step }, deps());
+    expect(keys()).toEqual(first);
+    expect(first).toEqual([`feedback_request:${BOOKING}`, `review_request:${BOOKING}`, `visit_outcome:${BOOKING}:${STAFF}`]);
+
+    // A low rating's alerts to the owners, too.
+    rated = { name: "booking.rated", data: { tenantId: TENANT, bookingId: BOOKING, rating: 2 } };
+    alert.mockClear();
+    await handlePostVisit({ event, step }, deps());
+    const low = alert.mock.calls.map((x) => x[3]);
+    alert.mockClear();
+    await handlePostVisit({ event, step }, deps());
+    expect(alert.mock.calls.map((x) => x[3])).toEqual(low);
+    expect(low).toContain(`low_rating:${BOOKING}:owner-1`);
+  });
+
   it("alerts the owners about a low rating instead of asking for a review", async () => {
     rated = { data: { tenantId: TENANT, bookingId: BOOKING, rating: 2 } };
     await expect(handlePostVisit({ event, step }, deps())).resolves.toMatchObject({ rating: 2, lowRatingAlerts: [{ userId: "owner-1", status: "sent" }] });
-    expect(alert).toHaveBeenCalledWith(TENANT, "owner-1", { kind: "low_rating", conversationId: CONVERSATION, what: "site visit", rating: 2 });
+    expect(alert).toHaveBeenCalledWith(TENANT, "owner-1", { kind: "low_rating", conversationId: CONVERSATION, what: "site visit", rating: 2 }, `low_rating:${BOOKING}:owner-1`);
     expect(send).toHaveBeenCalledTimes(1);
   });
 

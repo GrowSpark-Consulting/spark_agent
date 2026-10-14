@@ -55,6 +55,16 @@ describe("handleDailyAgenda", () => {
     expect(enabled).not.toHaveBeenCalledWith(LONDON.id);
   });
 
+  // Exit test 1 (Day 7; inngest/replay-coverage.test.ts): a cron run, so a replay is the same tick again. notify.send keeps one per key.
+  it("replay: the same tick twice sends each owner's agenda under the same key (owner and day), so each gets one", async () => {
+    await handleDailyAgenda({ step }, deps());
+    const first = send.mock.calls.map((c) => c[2].idempotencyKey);
+    send.mockClear();
+    await handleDailyAgenda({ step }, deps());
+    expect(send.mock.calls.map((c) => c[2].idempotencyKey)).toEqual(first);
+    expect(first).toEqual([`daily_agenda:${INDIA.id}:owner-1:2026-10-10`, `daily_agenda:${INDIA.id}:owner-2:2026-10-10`]);
+  });
+
   it("sends nothing to a business without the feature or without bookings today", async () => {
     enabled.mockResolvedValue(false);
     await expect(handleDailyAgenda({ step }, deps())).resolves.toMatchObject({ results: [{ skipped: "feature_off" }] });

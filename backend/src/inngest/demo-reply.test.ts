@@ -36,6 +36,14 @@ describe("sending the answer", () => {
     expect(payload.text).toContain("1. Beauty parlour: DEMO-SALON");
   });
 
+  // Exit test 1 (Day 7; inngest/replay-coverage.test.ts): notify.send keeps one message per key (notify/send.test.ts).
+  it("replay: the same event twice answers under the same key (the message), so the visitor gets one answer", async () => {
+    const { d, send } = deps();
+    await handleDemoReply({ event: { data: data() }, step: stepper().step }, d);
+    await handleDemoReply({ event: { data: data() }, step: stepper().step }, d);
+    expect(send.mock.calls.map((c) => c[2].idempotencyKey)).toEqual([`demo_reply:${MESSAGE}`, `demo_reply:${MESSAGE}`]);
+  });
+
   it("is in the language of the event", async () => {
     const ta = deps();
     await handleDemoReply({ event: { data: data({ lang: "ta" }) }, step: stepper().step }, ta.d);

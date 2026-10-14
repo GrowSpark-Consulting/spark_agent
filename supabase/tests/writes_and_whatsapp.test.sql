@@ -153,11 +153,12 @@ select lives_ok(
     values ('10000000-0000-0000-0000-00000000000a', '30000000-0000-0000-0000-00000000000a',
             '70000000-0000-0000-0000-00000000000a', '[]', 1000)$$,
   'a member can draft a quote for their own lead');
-select lives_ok(
+select throws_ok(
   $$insert into public.consent_logs (tenant_id, contact_id, event, source)
     values ('10000000-0000-0000-0000-00000000000a', '20000000-0000-0000-0000-00000000000a',
             'deletion_requested', 'dashboard')$$,
-  'a member can log a consent event for their own contact');
+  '42501', null,
+  'a member cannot log a consent event, even for their own contact: the server writes them (0046)');
 
 -- Cross-tenant writes
 select throws_ok(

@@ -26,6 +26,15 @@ describe("event-alerts", () => {
     expect(alert).toHaveBeenCalledWith(TENANT, "owner-1", { kind: "hot_lead", conversationId: CONVERSATION }, "lead_hot:lead-9:owner-1");
   });
 
+  // Exit test 1 (Day 7; inngest/replay-coverage.test.ts): notify.send keeps one message per key (notify/send.test.ts).
+  it("replay: the same event twice alerts under the same keys (the event's id and the member), so each hears once", async () => {
+    const { d, alert } = deps();
+    const hot = { event: { name: "lead.hot", id: "lead_hot:lead-9", data: { tenantId: TENANT, leadId: "lead-9", conversationId: CONVERSATION } }, step };
+    await handleStaffEvent(hot, d);
+    await handleStaffEvent(hot, d);
+    expect(alert.mock.calls.map((x) => x[3])).toEqual(["lead_hot:lead-9:owner-1", "lead_hot:lead-9:admin-2", "lead_hot:lead-9:owner-1", "lead_hot:lead-9:admin-2"]);
+  });
+
   it("tells owners and admins a voice note is waiting", async () => {
     const { d, alert } = deps();
     await handleStaffEvent({ event: { name: "voice_note.received", id: "voice_note:m-3", data: { tenantId: TENANT, conversationId: CONVERSATION, leadId: "l" } }, step }, d);
