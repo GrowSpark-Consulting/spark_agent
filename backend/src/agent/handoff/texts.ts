@@ -1,3 +1,4 @@
+import { cleanDisplayText } from "../scoring/area-text";
 import { textLanguage, type TextLanguage } from "../pipeline/fixed-texts";
 
 // The two things the customer sees when a staff member takes their chat to their own WhatsApp number (Raja, 11 Oct, question 3: the customer sees the
@@ -37,7 +38,8 @@ export function ownNumberNotice(language: string | null, who: Handler): string {
 }
 
 export function ownNumberGreeting(language: string | null, who: Pick<Handler, "name" | "business">, customerName: string | null): string {
-  const first = customerName?.trim().split(/\s+/)[0] ?? "";
+  // The name is a stranger's words that staff send in their own voice: with a link, an "@" or a phone number it is not used (the plain greeting goes), and only its first word is.
+  const first = cleanDisplayText(customerName ?? "", 40, 7)?.split(" ")[0] ?? "";
   const template = GREETING[textLanguage(language)];
   return fill(first ? template.withName : template.plain, { name: who.name, business: who.business, customer: first });
 }

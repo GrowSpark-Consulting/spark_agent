@@ -1,3 +1,4 @@
+import { cleanDisplayText } from "../../agent/scoring/area-text";
 import { inngest } from "../../inngest/client";
 import { serverEnv } from "../../lib/env";
 import { AppError } from "../../lib/errors";
@@ -35,6 +36,8 @@ const unauthenticated = () => new AppError("unauthenticated", "The request could
 
 /** Customer text with NUL, control characters and lone surrogates removed: one of them would fail the insert, and Meta would resend the batch. */
 const clean = (text: string | undefined) => (text === undefined ? undefined : stripUnsafeCharacters(text));
+/** The profile name is stored once and read by every screen and alert: a link, an "@" or a phone number in it means no name is stored (the screens then show the masked number). */
+const cleanName = (name: string | undefined) => (name === undefined ? undefined : (cleanDisplayText(name, 60, 7) ?? undefined));
 
 function toStorable(parsed: ParsedMessage): Pick<StoreInboundArgs, "kind" | "body" | "media" | "meta"> {
   const msg = { ...parsed, text: clean(parsed.text) };
@@ -230,7 +233,7 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
                 tenantId: connection.tenantId,
                 channelId: connection.channelId,
                 phone: message.from,
-                contactName: clean(message.contactName),
+                contactName: cleanName(message.contactName),
                 providerMsgId: message.providerMsgId,
                 sentAt: message.timestamp,
                 ...storable,
@@ -252,7 +255,7 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
           tenantId,
           channelId: connection.channelId,
           phone: message.from,
-          contactName: clean(message.contactName),
+          contactName: cleanName(message.contactName),
           providerMsgId: message.providerMsgId,
           sentAt: message.timestamp,
           ...storable,

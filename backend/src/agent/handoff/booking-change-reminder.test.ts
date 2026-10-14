@@ -32,12 +32,18 @@ describe("the staff message", () => {
     expect(message.text.startsWith(message.templateParams[0])).toBe(true);
   });
 
-  it("the name passes the strict cleaner: a name with a link, a phone number or an @ is shown as 'A customer'", () => {
-    for (const label of ["Priya 9876543210", "Priya http://evil.example", "priya@evil.example", "Priya <b>x</b>", "{area}", "", "   "]) {
+  it("the name passes the display cleaner: a name with a link, a phone number or an @ is shown as 'A customer'", () => {
+    for (const label of ["Priya 9876543210", "Priya http://evil.example", "priya@evil.example", "@offers", "98765\u200b43210", "", "   "]) {
       const message = bookingChangeReminderMessage({ label, kind: "cancel" }, CONV, APP);
       expect(message.text.startsWith("A customer asked to cancel a booking")).toBe(true);
       expect(message.text.replace(OUR_LINK, "")).not.toMatch(/https?:|@|evil/i);
       expect(digitsOf(message.text)).not.toMatch(/\d{7,}/);
+    }
+  });
+
+  it("a name with an emoji, an underscore or tags is kept (it is text shown, not run): only a link, an @ or a phone number is refused", () => {
+    for (const label of ["Priya 💖", "Raj_K ✨", "Priya <3"]) {
+      expect(bookingChangeReminderMessage({ label, kind: "cancel" }, CONV, APP).text.startsWith(`${label} asked to cancel a booking`)).toBe(true);
     }
   });
 

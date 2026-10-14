@@ -112,6 +112,8 @@ A STOP chat's later turns show the gate's opted-out outcome.
 
 - `real-estate/101`, `109`-`111` (Day 7, Finding 3): a customer with no booking on record asks to cancel or move one. One staff alert goes BEFORE the reply (`bookingChangeReminder: true` in `expect`; no handover, the assistant stays on), the reply is written from the fact that no booking is on record in this chat and the team has been told, a second message of the lead sends no second note (110), a reminder that could not be sent (`mock: { bookingReminder: fails }`) is tried again by the next message and the reply then says nobody was told (111).
 
+- `real-estate/87`, `102`, `112` (Day 7, staff-text cleaning): a link or a phone number (10 digits) typed into a detail is DROPPED at extraction, so it is never stored and the customer is simply asked again (87, 112); a place that is stored but not fit to show (a 7-digit run in it) is not repeated back, the fixed words are used (102).
+
 ## Latency (Day 6, local only)
 
 `pnpm --filter @pakka/backend latency:chats [--live] [--max-calls N] [--rounds N]` times the steps and calls of these same chats and prints a table per stage, every number labelled mocked, live, configured or not measured. Mocked is the pipeline's own code time. `--live` runs the first turn of seven chats with the real models, at most 15 requests (hard limit 20), with a fake sender, knowledge base and store. Never in CI. The reading of the numbers is in `docs/task-notes/2026-10-13-day6-dev1-step8-audit.md`.

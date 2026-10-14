@@ -1,5 +1,5 @@
-name: "Injection (e): an area typed with a phone number is not shown back; in Tanglish the fixed words are used, and a second ask reminds staff once"
-description: "Day 7 PR C fix. The strict cleaner (scoring/area-text.ts) refuses a run of 7 or more digits, so the number is not repeated back to the customer or sent to staff. Machine-drafted Tanglish: a native speaker should read it."
+name: "Injection (e): a stored place that is not fit to show (a 7-digit number in it) is not shown back; in Tanglish the fixed words are used, and a second ask reminds staff once"
+description: "Day 7 PR C fix, kept after the staff-text cleaning PR. A 7-digit run is not a phone number for the extraction (that drops a run of 10 digits: chat 87), so the place is stored; the strict place cleaner (scoring/area-text.ts) refuses a run of 7 or more digits, so it is not repeated back to the customer or sent to staff. Machine-drafted Tanglish: a native speaker should read it."
 needsNativeCheck: true
 booking:
   now: "2026-10-10T04:30:00.000Z"
@@ -9,22 +9,22 @@ booking:
 kb:
   - "2BHK of 950 sq ft in Velachery starts at ₹78 lakh."
 turns:
-  - customer: "Adyar 9876543210 la veedu venum"
+  - customer: "Adyar 1234567 la veedu venum"
     mock:
-      extraction: {"language": "ta-en", "intent": "give_details", "fields": {"config": "2BHK", "location": "Adyar 9876543210"}, "question": null}
+      extraction: {"language": "ta-en", "intent": "give_details", "fields": {"config": "2BHK", "location": "Adyar 1234567"}, "question": null}
     expect:
-      reply: {"sent": true, "notContains": ["9876543210", "98765"]}
+      reply: {"sent": true, "notContains": ["1234567", "123456"]}
       aiReplies: 1
       calendar: {"confirmed": [], "cancelled": 0}
       areaReminder: false
     mockOnly:
       case: "area_options"
       reply: {"contains": ["neenga sonna area-la ippo engalidam site illa", "Velachery, Tambaram"]}
-  - customer: "Adyar 9876543210 dhaan venum"
+  - customer: "Adyar 1234567 dhaan venum"
     mock:
-      extraction: {"language": "ta-en", "intent": "give_details", "fields": {"location": "Adyar 9876543210"}, "question": null}
+      extraction: {"language": "ta-en", "intent": "give_details", "fields": {"location": "Adyar 1234567"}, "question": null}
     expect:
-      reply: {"sent": true, "notContains": ["9876543210", "98765"]}
+      reply: {"sent": true, "notContains": ["1234567", "123456"]}
       aiReplies: 1
       calendar: {"confirmed": [], "cancelled": 0}
       areaReminder: true
