@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
+import { serverFailureInjection, withSendFailures } from "../../lib/failure-injection";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { OutsideWindowError, registerSender, SendError, type MessageSender, type SenderFactory } from "../../notify/sender";
 import { sendInteractive, sendTemplate, sendText, type AdapterDeps, type AdapterError, type AdapterResult, type SendConnection } from "./adapter";
@@ -62,7 +63,10 @@ export function whatsAppSenderFactory(deps: AdapterDeps = {}): SenderFactory {
   return async (ids) => whatsAppSender(await loadSendConnection(supabaseAdmin(), ids), deps);
 }
 
-/** Called once at startup (server/main.ts): from then on notify.send sends through WhatsApp. */
+/**
+ * Called once at startup (server/main.ts): from then on notify.send sends through WhatsApp. On staging, failure
+ * injection may make it fail for named test businesses (lib/failure-injection.ts).
+ */
 export function registerWhatsAppSender(): void {
-  registerSender(whatsAppSenderFactory());
+  registerSender(withSendFailures(whatsAppSenderFactory(), serverFailureInjection()));
 }

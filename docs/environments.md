@@ -210,6 +210,22 @@ on the same Node as CI (`.nvmrc`).
 Check a deploy: `https://<API host>/api/health` returns
 `{"ok":true,"env":"<railway environment>","commit":"<sha>"}`.
 
+### Failure injection (staging failure tests, Day 7)
+
+For the exit test's failure checks ("with the model call forced to time out, the customer receives exactly one reply"),
+staging can break the language model or WhatsApp for named test businesses only (`backend/src/lib/failure-injection.ts`):
+
+1. Pick a test business (never a client's) and copy its id.
+2. On Railway set `FAILURE_INJECTION` (any of `llm_timeout`, `llm_bad_json`, `whatsapp_send_error`, `whatsapp_send_timeout`,
+   comma-separated) and `FAILURE_INJECTION_TENANTS` (that id; several, comma-separated), then deploy. The log says
+   `[failure-injection] ON for 1 test business(es): ...` at the first model call or send.
+3. Message the business's number and check the inbox, `messages` and `credit_ledger`: one reply (or none, for a send
+   failure), no credit spent for a message that did not go.
+4. Remove both variables and deploy again.
+
+Every other business behaves as usual. Both variables go together, an unknown failure or a business that is not an id
+fails the deploy, and so does injection alongside `PAYU_MODE=live`: a deployment that takes real money is production.
+
 ## DNS for pakkaagent.in
 
 Add at the domain's DNS provider. Vercel and Railway show the exact target for each custom domain
