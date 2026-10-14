@@ -21,6 +21,7 @@ let deps: StartTrialDeps & {
   sessionState: ReturnType<typeof vi.fn>;
   createTrialTenant: ReturnType<typeof vi.fn>;
   getBalance: ReturnType<typeof vi.fn>;
+  phoneUsed: ReturnType<typeof vi.fn>;
 };
 
 beforeEach(() => {
@@ -29,6 +30,7 @@ beforeEach(() => {
     sessionState: vi.fn().mockResolvedValue({ status: "no_membership" }),
     createTrialTenant: vi.fn().mockResolvedValue({ tenantId: TENANT, routeCode: "TRIAL-7KQM", trialEndsAt: ENDS, created: true }),
     getBalance: vi.fn().mockResolvedValue({ plan: 300, topup: 0, total: 300 }),
+    phoneUsed: vi.fn().mockResolvedValue(false),
     now: () => NOW,
   };
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -138,5 +140,40 @@ describe("startTrialFor", () => {
       status: "ready",
       trial: { routeCode: "TRIAL-7KQM", trialDays: 7, credits: null },
     });
+  });
+});
+
+describe("a WhatsApp number that already had a trial (the wizard's early warning)", () => {
+  const input = { name: "Skyline Homes", industry: "re", phone: "+919800000601" };
+
+  it("refuses with phone_used and creates nothing", async () => {
+    deps.phoneUsed.mockResolvedValue(true);
+    const result = await startTrialFor(input, deps);
+    expect(result).toEqual({ status: "phone_used", message: expect.stringContaining("already had a free trial") });
+    expect(deps.phoneUsed).toHaveBeenCalledWith("+919800000601");
+    expect(deps.createTrialTenant).not.toHaveBeenCalled();
+  });
+
+  it("starts the trial when the number is new, and checks nothing when no number is sent", async () => {
+    expect((await startTrialFor(input, deps)).status).toBe("ready");
+    expect(deps.createTrialTenant).toHaveBeenCalledTimes(1);
+    deps.phoneUsed.mockClear();
+    expect((await startTrialFor({ name: "Skyline Homes", industry: "re" }, deps)).status).toBe("ready");
+    expect(deps.phoneUsed).not.toHaveBeenCalled();
+  });
+
+  it("asks for the number with its country code, and says try again when the check fails", async () => {
+    const invalid = await startTrialFor({ ...input, phone: "98000 00601" }, deps);
+    expect(invalid).toMatchObject({ status: "invalid", fields: { phone: expect.any(String) } });
+    expect(deps.phoneUsed).not.toHaveBeenCalled();
+    deps.phoneUsed.mockRejectedValue(new Error("db down"));
+    expect(await startTrialFor(input, deps)).toMatchObject({ status: "failed" });
+    expect(deps.createTrialTenant).not.toHaveBeenCalled();
+  });
+
+  it("tells a member of a business that first, without checking the number", async () => {
+    deps.sessionState.mockResolvedValue(member("owner"));
+    expect(await startTrialFor(input, deps)).toEqual({ status: "has_business" });
+    expect(deps.phoneUsed).not.toHaveBeenCalled();
   });
 });

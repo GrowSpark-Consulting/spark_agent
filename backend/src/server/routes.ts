@@ -7,6 +7,7 @@ import { changePlan, handlePayuReturn, handlePayuWebhook, paymentStatus, startCh
 import { getBalance } from "../billing/credits";
 import { startTrialFor } from "../billing/start-trial";
 import { createTrialTenant } from "../billing/trial";
+import { trialPhoneUsed } from "../billing/trial-phone";
 import { cancelFromCalendar, completeFromCalendar, noShowFromCalendar, rescheduleFromCalendar, slotsForMove } from "../booking/actions";
 import { googleConnectUrl, handleGoogleCallback } from "../booking/google-calendar";
 import { sendTestMessage } from "../channels/whatsapp/test-message";
@@ -74,12 +75,13 @@ function health(): Response {
 const TRIAL_STATUS: Record<StartTrialResult["status"], number> = {
   ready: 200,
   has_business: 409,
+  phone_used: 409,
   unavailable: 422,
   invalid: 422,
   failed: 500,
 };
 
-// POST /api/onboarding/trial { name, industry } → StartTrialResult. A signed-in account with no
+// POST /api/onboarding/trial { name, industry, phone? } → StartTrialResult (phone_used: that WhatsApp number had a trial). A signed-in account with no
 // business yet; the user comes from the verified token, never from the body.
 async function startTrial(request: Request, deps: RouteDeps): Promise<Response> {
   const { supabase, user } = await authenticate(request, deps.userClient);
@@ -89,6 +91,7 @@ async function startTrial(request: Request, deps: RouteDeps): Promise<Response> 
     sessionState: () => resolveTenant(supabase, user),
     createTrialTenant,
     getBalance,
+    phoneUsed: (phone) => trialPhoneUsed(phone),
   });
   return Response.json(result, { status: TRIAL_STATUS[result.status] });
 }
