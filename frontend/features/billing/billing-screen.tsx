@@ -18,6 +18,7 @@ import {
   type PlanOption,
 } from "./billing-data";
 import { ActionFeedback, PhonePrompt, sameAction, useBillingActions, type BillingAction, type BillingActions, type BillingCycle } from "./billing-actions";
+import { PlanEnding } from "./billing-cancel";
 import { PaymentReturn } from "./payment-return";
 
 // /dashboard/billing (Day 6, Dev 3). Shows the plan and its status, the credit balance, the credit history (credit_ledger under RLS) and the
@@ -90,7 +91,7 @@ function BillingView({ tenantId, timeZone, isOwner, paymentId }: { tenantId: str
 
       <Section id="plan" title="Your plan">
         <Body state={status} loading="Loading your plan" missing="Your plan isn't available yet" errorTitle="Couldn't load your plan" onRetry={retryStatus}>
-          {(s) => <PlanCard status={s} timeZone={timeZone} />}
+          {(s) => <PlanCard status={s} timeZone={timeZone} tenantId={tenantId} isOwner={isOwner} onChanged={retryStatus} />}
         </Body>
       </Section>
 
@@ -173,7 +174,7 @@ function Body<T>({
 
 const date = (iso: string, timeZone: string) => new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone }).format(new Date(iso));
 
-function PlanCard({ status, timeZone }: { status: AccountStatus; timeZone: string }) {
+function PlanCard({ status, timeZone, tenantId, isOwner, onChanged }: { status: AccountStatus; timeZone: string; tenantId: string; isOwner: boolean; onChanged: () => void }) {
   const notice = pausedNotice(status.aiPausedReason);
   const trialDays = status.status === "trial" ? daysLeft(status.trialEndsAt, new Date()) : null;
   return (
@@ -194,6 +195,12 @@ function PlanCard({ status, timeZone }: { status: AccountStatus; timeZone: strin
             <dd data-testid="renews-at">{date(status.renewsAt, timeZone)}</dd>
           </div>
         ) : null}
+        {status.endsAt ? (
+          <div>
+            <dt>Ends</dt>
+            <dd data-testid="ends-at">{date(status.endsAt, timeZone)}</dd>
+          </div>
+        ) : null}
         {status.status === "trial" && status.trialEndsAt ? (
           <div>
             <dt>Trial ends</dt>
@@ -208,6 +215,9 @@ function PlanCard({ status, timeZone }: { status: AccountStatus; timeZone: strin
         <p role="alert" data-testid="billing-paused" data-reason={notice.reason} className="app-notice" style={{ margin: 0 }}>
           <strong>{notice.title}.</strong> {notice.detail}
         </p>
+      ) : null}
+      {isOwner && status.status === "active" ? (
+        <PlanEnding tenantId={tenantId} timeZone={timeZone} renewsAt={status.renewsAt} endsAt={status.endsAt ?? null} onChanged={onChanged} />
       ) : null}
       {status.status === "trial" && !notice ? (
         <p className="app-card-text" data-testid="trial-prompt">

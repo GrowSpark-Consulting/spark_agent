@@ -73,6 +73,8 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
   { call: "POST /api/billing/topup", file: "features/billing/billing-data.ts" },
   { call: "POST /api/billing/setup-fee", file: "features/billing/billing-data.ts" },
   { call: "POST /api/billing/change-plan", file: "features/billing/billing-data.ts" },
+  { call: "POST /api/billing/cancel", file: "features/billing/billing-data.ts" },
+  { call: "POST /api/billing/resume", file: "features/billing/billing-data.ts" },
   { call: "GET /api/billing/payments/:id", file: "features/billing/billing-data.ts" },
   { call: "GET /api/conversations/:id/templates", file: "features/inbox/template-reply.ts" },
   // Registered behind EMBEDDED_SIGNUP_ENABLED (not_available while off). It refuses connectToken (validation_failed) until the assisted-link PR.
@@ -110,8 +112,6 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   // PayU billing (Dev 2, decision 20): the routes PayU itself calls. The ones the Billing screen calls are in FRONTEND_CALLS.
   "POST /api/billing/payu/return": "PayU's checkout page posts the payer's browser here (a navigation); it redirects to /dashboard/billing",
   "POST /api/webhooks/payu": "PayU calls it: payment results (verified with PayU before anything changes)",
-  "POST /api/billing/cancel": "the Billing screen's Cancel plan button is not built yet (Dhatri)",
-  "POST /api/billing/resume": "the Billing screen's Keep my plan button is not built yet (Dhatri)",
 };
 
 function sourceFiles(dir: string): string[] {
