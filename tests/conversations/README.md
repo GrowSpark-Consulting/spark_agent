@@ -91,8 +91,8 @@ A STOP chat's later turns show the gate's opted-out outcome.
   helping and books the visit (63).
 - `64`: a voice note (Day 4, Raja, 11 Oct): one polite line asking the customer to type, once however many voice notes follow, staff told, the chat stays
   with the AI, and a later voice note after the customer typed is answered again.
-- `65`: an area the business has no homes in (Day 5, out-of-area): the pack has an area rule worth 20 points and no area hard fail, so the customer scores 55 (warm) instead of
-  75, is not turned away, and is still offered times because warm passes the offer threshold. This is what the code does today, recorded for Raja to confirm.
+- `65`-`70`: an area the business has no sites in (Day 7, Raja 14 Oct). The first reply always lists the areas the business does have (a fixed line, no model call, no time offered, lead open, nobody reminded); the same area named again gets "nothing there for now" and one staff reminder (`areaReminder` in `expect`); choosing a served area resumes the normal flow and ends the state (67); Tamil and Tanglish machine drafts (68, 69, `needsNativeCheck`); a booking or price asked for the unserved area (70); repeats the model returned no field for, read from the customer's own words (71, 73 Tamil, 74 Tanglish, interiors/05 a pincode), with the near-match and another-place cases that must not count (72). 65 replaces the Day 5 chat that recorded the old behaviour (three times offered for Adyar).
+- `interiors/01`-`04`: the same for a pincode (the interiors pack judges it against the catalog's areas): not served, insisted (typed with a space), served, and no areas listed (nobody is turned away).
 - Wording a real model varies: `matches` is a list of regular expressions (any letter case) the reply must each match. Use it under `expect` for wording a real model varies ("10 am" and "10:00 am"), and keep the exact words under `mockOnly` as `contains`, so mock mode stays strict. Chat 51 does this.
 
 ## Latency (Day 6, local only)

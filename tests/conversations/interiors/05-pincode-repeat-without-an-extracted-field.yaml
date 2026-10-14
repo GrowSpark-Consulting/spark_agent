@@ -1,0 +1,27 @@
+name: "A repeat of an unserved pincode, spaced differently, is read from the customer's own words when the model returns no field"
+description: "Raja, 14 Oct. The pincode was given as 641001 and the options were shown; the customer says 'the flat is at 641 001, that is where I need it' and the model returns no field (the pincode is already on the lead). Compared as digits, it counts as insisting: 'nothing there for now' and one staff reminder."
+pack: interiors
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { type: service, priceFrom: 1000000, attributes: { price_to: 3000000, areas: ["600042", "600020"] } }
+turns:
+  - customer: "Full home interiors, apartment, 1150 sq ft, pincode 641001, budget 12 to 15 lakh"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { property_type: apartment, area_sqft: 1150, scope: full_home, budget: 12-15L, pincode: "641001" }, question: null }
+    expect:
+      reply: { sent: true, contains: ["641001", "600042, 600020"] }
+      areaReminder: false
+    mockOnly:
+      case: area_options
+  - customer: "the flat is at 641 001, that is where I need it"
+    mock:
+      extraction: { language: en, intent: give_details, fields: {}, question: null }
+    expect:
+      reply: { sent: true, contains: ["any property in 641001 for now"], notContains: ["600042"] }
+      aiReplies: 1
+      handoff: null
+      leadStage: engaged
+      areaReminder: true
+    mockOnly:
+      case: area_unavailable

@@ -613,3 +613,32 @@ describe("markLeadLost", () => {
     expect(await createPipelineStore(fakeDb(() => ({ data: [] })).db).markLeadLost(T, LEAD)).toBe(false);
   });
 });
+
+describe("getPreviousCoverage", () => {
+  const rows = (...metas: unknown[]) => ({ data: metas.map((meta) => ({ meta })) });
+  const options = { area: "adyar", stage: "options" };
+
+  it("reads the newest earlier customer messages of this chat, for this business", async () => {
+    const { db, calls } = fakeDb(() => rows({}));
+    await createPipelineStore(db).getPreviousCoverage(T, CONV, "2026-10-08T10:00:00.000Z");
+    tenantFilter(calls[0]);
+    expect(filter(calls[0], "conversation_id")).toEqual(["conversation_id", "eq", CONV]);
+    expect(filter(calls[0], "sender")).toEqual(["sender", "eq", "customer"]);
+    expect(filter(calls[0], "created_at")).toEqual(["created_at", "lt", "2026-10-08T10:00:00.000Z"]);
+    expect(calls[0].limit).toBe(20);
+  });
+
+  it("is what the latest turn that spoke of an unserved area left, skipping messages that say nothing about it", async () => {
+    const store = createPipelineStore(fakeDb(() => rows({ agent: { planCase: "kb_miss" } }, { agent: { coverage: options } }, { agent: { coverage: { area: "mylapore", stage: "options" } } })).db);
+    expect(await store.getPreviousCoverage(T, CONV, "2026-10-09T00:00:00.000Z")).toEqual(options);
+  });
+
+  it("is nothing when the newest turn that spoke of it ended it, even if an older one set it", async () => {
+    expect(await createPipelineStore(fakeDb(() => rows({ agent: { coverage: null } }, { agent: { coverage: options } })).db).getPreviousCoverage(T, CONV, "2026-10-09T00:00:00.000Z")).toBeNull();
+  });
+
+  it("is nothing for a value it cannot read, and nothing when there is none", async () => {
+    expect(await createPipelineStore(fakeDb(() => rows({ agent: { coverage: { area: "adyar", stage: "later" } } }, { agent: { coverage: options } })).db).getPreviousCoverage(T, CONV, "2026-10-09T00:00:00.000Z")).toBeNull();
+    expect(await createPipelineStore(fakeDb(() => rows({}, null, { agent: { planCase: "x" } })).db).getPreviousCoverage(T, CONV, "2026-10-09T00:00:00.000Z")).toBeNull();
+  });
+});

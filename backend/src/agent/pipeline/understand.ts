@@ -5,6 +5,7 @@ import type { LlmClient, LlmMessage } from "../llm/anthropic";
 import { LlmError } from "../llm/anthropic";
 import { PackError, resolvePack } from "../packs/load";
 import { buildExtractionMessages, buildExtractionSystem, EXTRACTION_PROMPT } from "../prompts/extraction_v2";
+import { coverageRule, normaliseArea, readCoverage } from "../scoring/coverage";
 import { qualify, type AskField, type Qualification } from "../scoring/qualify";
 import { buildReferences, type CatalogRow } from "../scoring/references";
 import { interpretExtraction } from "./extraction";
@@ -297,7 +298,21 @@ export async function understandTurn(step: StepRunner, turn: TurnContext, deps: 
             // A catalog that cannot be read is not worth failing the customer's message for: the rules that need it earn nothing.
             console.error(`${TAG} the catalog could not be read (${error instanceof Error ? error.name : "unknown"}; ${where(turn)})`);
           }
-          const result = qualify(loaded.pack, lead.fields, { references: buildReferences(loaded.pack, rows) });
+          const references = buildReferences(loaded.pack, rows);
+          const result = qualify(loaded.pack, lead.fields, { references });
+          // Where the customer wants to be against where the business has sites: kept on the message for the reply step, never in the
+          // step's result (it holds the customer's place and the business's places).
+          const rule = coverageRule(loaded.pack);
+          if (rule) {
+            // What the lead holds now (after save-fields) is the place. The customer NAMED it this time when the message gave a place and it is the
+            // one that was saved: a doubtful reading that did not replace the lead's own place is not taken as what they said.
+            const stored = lead.fields[rule.field];
+            const said = summary.fieldKeys.includes(rule.field) ? ((await store.getAgentMeta(turn.tenantId, turn.conversationId, lastMessageId))?.extraction as { fields?: Record<string, unknown> } | undefined)?.fields?.[rule.field] : undefined;
+            const named = !isBlank(said) && normaliseArea(String(said)) === normaliseArea(String(stored ?? ""));
+            const read = readCoverage(rule, references, stored);
+            const kept = await store.saveAgentMeta(turn.tenantId, turn.conversationId, lastMessageId, { coverageReading: read ? { ...read, named } : null, at: new Date().toISOString() });
+            if (!kept) throw new NonRetriableError("The message was not found.");
+          }
           await store.saveLeadScore(turn.tenantId, turn.leadId, { score: result.score, temperature: result.temperature });
           const bookingKind = loaded.pack.bookingModes.find((mode): mode is "slot" | "site_visit" => mode === "slot" || mode === "site_visit") ?? null;
           return { score: result.score, temperature: result.temperature, ask: result.ask, missingRequired: result.missingRequired, readyForSlots: result.readyForSlots, hardFail: result.hardFail, bookingKind };
