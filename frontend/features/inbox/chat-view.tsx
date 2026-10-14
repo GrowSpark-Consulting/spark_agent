@@ -107,10 +107,16 @@ export function ChatView({
   const windowOpen = isWindowOpen(conversation.lastCustomerMsgAt, now);
 
   // Keep the newest message in view, as the prototype does.
+  // A new message only pulls the view down when the reader is already near the bottom (or opened another chat),
+  // so someone reading older messages is not thrown to the end.
   const lastId = messages?.[messages.length - 1]?.id;
+  const shownChat = useRef<string | null>(null);
   useEffect(() => {
     const el = messagesRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el || lastId === undefined) return;
+    const switched = shownChat.current !== conversation.id;
+    shownChat.current = conversation.id;
+    if (switched || el.scrollHeight - el.scrollTop - el.clientHeight < 120) el.scrollTop = el.scrollHeight;
   }, [conversation.id, lastId]);
 
   return (

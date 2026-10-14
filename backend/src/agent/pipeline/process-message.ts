@@ -1,4 +1,5 @@
 import { NonRetriableError } from "inngest";
+import type { AiLimit } from "../../lib/ai-limits";
 import { MessageReceived } from "./events";
 import { decideGate, isAnswerable, type GateReason } from "./gate";
 import type { PendingMessage, PipelineStore } from "./store";
@@ -32,6 +33,8 @@ export interface TurnDeps {
   store: PipelineStore;
   /** isEnabled(tenantId, "ai_auto_reply"): the plan has it, the business switched it on and is live. */
   isEnabled: (tenantId: string, feature: "ai_auto_reply") => Promise<boolean>;
+  /** The rate limit or daily AI spend cap the chat has reached (lib/ai-limits.ts aiLimitFor), or null. Without it, no limits apply. */
+  aiLimit?: (tenantId: string, conversationId: string) => Promise<AiLimit | null>;
 }
 
 /**
@@ -132,11 +135,12 @@ export async function runTurn(step: StepRunner, rawEvent: unknown, deps: TurnDep
   });
 
   // Step 3: the gate, for the conversation. isEnabled (a database read, cached for a minute) is only asked when no
-  // earlier reason already decides.
+  // earlier reason already decides, and the limits (rate limits, the daily AI spend cap) only when the AI would answer.
   const gate = await step.run("gate", async () => {
     const needsFeature = !resolved.optedOut && resolved.mode === "ai";
     const featureEnabled = needsFeature ? await deps.isEnabled(tenantId, "ai_auto_reply") : true;
-    return decideGate({ optedOut: resolved.optedOut, mode: resolved.mode, featureEnabled });
+    const limit = needsFeature && featureEnabled && deps.aiLimit ? await deps.aiLimit(tenantId, conversationId) : null;
+    return decideGate({ optedOut: resolved.optedOut, mode: resolved.mode, featureEnabled, limit });
   });
   if (!gate.open) return { status: "gated_off", reason: gate.reason, leadId: lead.leadId };
 
