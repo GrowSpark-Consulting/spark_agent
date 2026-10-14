@@ -88,3 +88,27 @@ export function webhookUnconfirmed(last: ParsedLastCheck): boolean {
   if (last.state !== "checked") return false;
   return last.checks.find((c) => c.key === "webhook_subscribed")?.status !== "pass";
 }
+
+export interface WebhookBanner {
+  /** `blocked`: the check says delivery isn't working. `unconfirmed`: nothing has proved it works yet. */
+  kind: "blocked" | "unconfirmed";
+  message: string;
+  /** The API's own sentence for the check, when it wrote one. */
+  detail: string | null;
+}
+
+/**
+ * What an ACTIVE number's card says loudly about webhook delivery. Found by key (`webhook_subscribed`), never by position. A `warn` or `fail`
+ * means the business's Meta app is not subscribed, so customers' messages cannot arrive: say so plainly. A check that never ran, never got a
+ * webhook (`not_verified`) or is missing proves nothing either way: say that, and do not call it healthy. `pass` and a number that was never
+ * checked (or whose result is unreadable) get no banner; a `skipped` check belongs to a failed earlier check that the card already shows.
+ */
+export function webhookBanner(last: ParsedLastCheck): WebhookBanner | null {
+  if (last.state !== "checked") return null;
+  const webhook = last.checks.find((c) => c.key === "webhook_subscribed");
+  if (webhook?.status === "pass" || webhook?.status === "skipped") return null;
+  if (webhook?.status === "warn" || webhook?.status === "fail") {
+    return { kind: "blocked", message: "Messages can't arrive until your Meta app is subscribed.", detail: webhook.message || null };
+  }
+  return { kind: "unconfirmed", message: "We haven't confirmed that your Meta app is subscribed, so customers' messages may not arrive yet.", detail: webhook?.message || null };
+}
