@@ -86,7 +86,17 @@ describe("handleHandoffSla", () => {
       ],
     });
     expect(journal).toEqual(["sla", "wait-sla:15m", "check", "owners", "escalate-owner-1", "escalate-owner-2"]);
-    expect(alert).toHaveBeenCalledWith(TENANT, "owner-1", { kind: "handoff_waiting", conversationId: CONVERSATION, waitedMinutes: 15 });
+    expect(alert).toHaveBeenCalledWith(TENANT, "owner-1", { kind: "handoff_waiting", conversationId: CONVERSATION, waitedMinutes: 15 }, `handoff_sla:${HANDOFF}:owner-1`);
+  });
+
+  // Exit test 1 (Day 7; inngest/replay-coverage.test.ts): notify.send keeps one message per key (notify/send.test.ts).
+  it("replay: the same event twice escalates to each owner under the same key, so each hears once", async () => {
+    await handleHandoffSla({ event, step }, deps());
+    const first = alert.mock.calls.map((c) => c[3]);
+    alert.mockClear();
+    await handleHandoffSla({ event, step }, deps());
+    expect(alert.mock.calls.map((c) => c[3])).toEqual(first);
+    expect(first).toEqual([`handoff_sla:${HANDOFF}:owner-1`, `handoff_sla:${HANDOFF}:owner-2`]);
   });
 
   it("does nothing once someone has the chat, or when it is gone", async () => {

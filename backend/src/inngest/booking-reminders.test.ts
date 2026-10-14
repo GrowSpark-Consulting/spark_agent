@@ -78,6 +78,16 @@ describe("handleBookingConfirmed", () => {
     expect(send.mock.calls[1][2].idempotencyKey).toBe(`reminder_2h:${BOOKING}:${START}`);
   });
 
+  // Exit test 1 (Day 7; inngest/replay-coverage.test.ts): notify.send keeps one message per key (notify/send.test.ts).
+  it("replay: the same event twice sends under the same keys, so the customer gets each reminder once", async () => {
+    await handleBookingConfirmed({ event, step }, deps());
+    const first = send.mock.calls.map((c) => c[2].idempotencyKey);
+    send.mockClear();
+    await handleBookingConfirmed({ event, step }, deps());
+    expect(send.mock.calls.map((c) => c[2].idempotencyKey)).toEqual(first);
+    expect(first).toEqual([`reminder_24h:${BOOKING}:${START}`, `reminder_2h:${BOOKING}:${START}`]);
+  });
+
   it("uses the business's offsets (a test can set minutes)", async () => {
     await handleBookingConfirmed({ event, step }, deps({ offsets: async () => ({ reminder_24h: 3, reminder_2h: 1 }) }));
     expect(journal.filter((j) => j.startsWith("wait-"))).toEqual(["wait-reminder_24h@2026-10-10T11:27:00.000Z", "wait-reminder_2h@2026-10-10T11:29:00.000Z"]);

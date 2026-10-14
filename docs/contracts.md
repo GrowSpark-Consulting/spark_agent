@@ -215,6 +215,8 @@ request, credits out) starts "Priority: ". Outside the window the template's `{{
 `API_PUBLIC_URL` (or `ENCRYPTION_KEY`) there are no take-over links, and a card that cannot be built is left out: the
 alert is then the headline and the dashboard link, as before.
 
+**Each alert is keyed (Day 7).** Every staff alert goes through `notify.send` with an idempotency key that names that exact alert and member, so a retried step, a repeat run or a replayed event never sends it twice: `handoff_alert:<handoff>:<member>`, `handoff_sla:<handoff>:<member>`, `visit_outcome:<booking>:<member>`, `low_rating:<booking>:<member>` (added 14 Oct; before, these three jobs relied on Inngest dropping a repeated event id within 24 hours), `credit_alert:<level>:<grant>:<member>`, `<event id>:<member>` (event-alerts), `own_number_outcome:<handoff>`. Every Inngest function and both webhooks name the test that proves a replay changes nothing in `backend/src/inngest/replay-coverage.test.ts` (exit test 1); a new function fails it until its replay is proved.
+
 | Alert | When | Headline | Link |
 |---|---|---|---|
 | `handoff_opened` | a handoff that is not one of the two below | "{name} is waiting for a person on WhatsApp." | `/dashboard/inbox?chat=<id>` |

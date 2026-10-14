@@ -45,20 +45,30 @@ describe("handleHandoffOpened", () => {
         { userId: "admin-2", status: "sent" },
       ],
     });
-    expect(alert).toHaveBeenCalledWith(TENANT, "owner-1", { kind: "handoff_opened", conversationId: CONVERSATION, handoffId: HANDOFF, priority: "normal" });
+    expect(alert).toHaveBeenCalledWith(TENANT, "owner-1", { kind: "handoff_opened", conversationId: CONVERSATION, handoffId: HANDOFF, priority: "normal" }, `handoff_alert:${HANDOFF}:owner-1`);
     expect(stepIds).toEqual(["load-handoff", "recipients", "alert-owner-1", "alert-admin-2"]);
   });
 
   it("sends the credits alert for a credits handoff", async () => {
     handoff = { trigger: "credits_exhausted", priority: "high", resolved_at: null };
     await handleHandoffOpened({ event, step }, deps());
-    expect(alert).toHaveBeenCalledWith(TENANT, "owner-1", { kind: "credits_exhausted", conversationId: CONVERSATION, handoffId: HANDOFF, priority: "high" });
+    expect(alert).toHaveBeenCalledWith(TENANT, "owner-1", { kind: "credits_exhausted", conversationId: CONVERSATION, handoffId: HANDOFF, priority: "high" }, `handoff_alert:${HANDOFF}:owner-1`);
   });
 
   it("passes the handoff and its priority, so each alert carries the member's take-over links and says when it is urgent", async () => {
     handoff = { trigger: "negotiation", priority: "high", resolved_at: null };
     await handleHandoffOpened({ event, step }, deps());
-    expect(alert).toHaveBeenCalledWith(TENANT, "admin-2", { kind: "handoff_opened", conversationId: CONVERSATION, handoffId: HANDOFF, priority: "high" });
+    expect(alert).toHaveBeenCalledWith(TENANT, "admin-2", { kind: "handoff_opened", conversationId: CONVERSATION, handoffId: HANDOFF, priority: "high" }, `handoff_alert:${HANDOFF}:admin-2`);
+  });
+
+  // Exit test 1 (Day 7; inngest/replay-coverage.test.ts): notify.send keeps one message per key (notify/send.test.ts).
+  it("replay: the same event twice alerts each member under the same key, so each hears once", async () => {
+    await handleHandoffOpened({ event, step }, deps());
+    const first = alert.mock.calls.map((c) => c[3]);
+    alert.mockClear();
+    await handleHandoffOpened({ event, step }, deps());
+    expect(alert.mock.calls.map((c) => c[3])).toEqual(first);
+    expect(first).toEqual([`handoff_alert:${HANDOFF}:owner-1`, `handoff_alert:${HANDOFF}:admin-2`]);
   });
 
   it("does nothing for a handoff that is gone or already resolved", async () => {
