@@ -63,6 +63,8 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
   { call: "POST /api/admin/tenants/:id/extend-trial", file: "lib/admin/billing.ts" },
   { call: "POST /api/admin/tenants/:id/credits", file: "lib/admin/billing.ts" },
   { call: "GET /api/admin/payments/refunds", file: "lib/admin/billing.ts" },
+  { call: "GET /api/contacts/:id/deletion", file: "lib/privacy/deletion.ts" },
+  { call: "POST /api/contacts/:id/deletion", file: "lib/privacy/deletion.ts" },
   { call: "GET /api/features", file: "features/toggles/feature-api.ts" },
   { call: "PATCH /api/features/:key", file: "features/toggles/feature-api.ts" },
   { call: "POST /api/bookings/:id/reschedule", file: "features/calendar/booking-actions.ts" },
@@ -114,8 +116,6 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   "POST /api/webhooks/payu": "PayU calls it: payment results (verified with PayU before anything changes)",
   "POST /api/billing/cancel": "the Billing screen's Cancel plan button is not built yet (Dhatri)",
   "POST /api/billing/resume": "the Billing screen's Keep my plan button is not built yet (Dhatri)",
-  "GET /api/contacts/:id/deletion": "not called yet: the Data & privacy screen's deletion confirmation (Dhatri)",
-  "POST /api/contacts/:id/deletion": "not called yet: the Data & privacy screen's Delete data button (Dhatri)",
 };
 
 function sourceFiles(dir: string): string[] {
