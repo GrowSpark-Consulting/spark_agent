@@ -92,10 +92,19 @@ const WEBHOOKS: Record<string, Proof[]> = {
 };
 
 /**
- * Where a replay is NOT yet safe, pinned by a test that passes while the gap exists. A crash after WhatsApp accepted a reply and before
- * notify.send recorded it: the key was never written, so the step's retry sends again. Inside Dev 2's notify.send; listed until it is closed.
+ * Where a replay is NOT yet safe, pinned by a test that passes while the gap exists; remove the entry when the gap is closed. The crash
+ * after WhatsApp accepted a reply and before notify.send recorded it was closed on Day 7 by claiming the send first (0045, below). What
+ * remains: a reply delivered with nothing of ours recording it, whose step then fails for good, still gets the failure handler's safe
+ * line on top, because the handler cannot see the claim yet (Dev 1's reply-record.ts).
  */
-const KNOWN_GAPS: Proof[] = [{ file: "backend/src/agent/pipeline/whole-turn-matrix.test.ts", test: "a crash after WhatsApp accepted the reply and before notify.send records it sends the reply TWICE" }];
+const KNOWN_GAPS: Proof[] = [{ file: "backend/src/agent/pipeline/whole-turn-protections.test.ts", test: "but the handler, which cannot see the claim yet, adds one safe line" }];
+
+/** The claim that makes a keyed send go at most once, even when its process dies after WhatsApp accepted it (0045). */
+const CLAIM: Proof[] = [
+  { file: "backend/src/agent/pipeline/whole-turn-matrix.test.ts", test: "the retry finds the claim and does not send again, so the reply goes ONCE" },
+  { file: "backend/src/notify/send.test.ts", test: "an earlier attempt that never recorded or released its claim: nothing is sent or charged, and the outcome is unknown" },
+  { file: "supabase/tests/notify_attempts.test.sql", test: "a repeat while it is claimed and not recorded (the attempt died, or its record failed) may not send" },
+];
 
 const contents = new Map<string, string>();
 const read = (file: string) => {
@@ -114,8 +123,9 @@ describe("replay coverage (exit test 1)", () => {
     for (const proof of proofs) expect(read(proof.file), `${proof.file} should have "${proof.test}"`).toContain(proof.test);
   });
 
-  it("the sink the keys rely on still proves a repeated key sends nothing", () => {
+  it("the sink the keys rely on still proves a repeated key sends nothing, even after an attempt that died (the claim)", () => {
     expect(read(SINK.file)).toContain(SINK.test);
+    for (const proof of CLAIM) expect(read(proof.file), `${proof.file} should have "${proof.test}"`).toContain(proof.test);
   });
 
   it("lists every known gap, each pinned by a test that still exists (remove the entry when the gap is closed)", () => {
