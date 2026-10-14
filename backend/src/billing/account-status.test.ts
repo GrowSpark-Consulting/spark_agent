@@ -27,7 +27,7 @@ function deps(
       ],
       error: null,
     },
-    subscriptions: { data: over.subscription ?? [{ status: "active", current_period_end: "2026-10-31T18:30:00+00:00" }], error: null },
+    subscriptions: { data: over.subscription ?? [{ status: "active", current_period_end: "2026-10-31T18:30:00+00:00", cancel_at: null }], error: null },
     // Active WhatsApp numbers, counted.
     whatsapp_connections: over.numbers ?? { data: null, error: null, count: 1 },
   });
@@ -45,6 +45,7 @@ describe("GET /api/billing/balance", () => {
       // The 500 that expired on 1 Oct is not this cycle's.
       creditsGranted: 3000,
       renewsAt: "2026-10-31T18:30:00.000Z",
+      endsAt: null,
       trialEndsAt: null,
       aiPaused: false,
       aiPausedReason: null,
@@ -56,6 +57,11 @@ describe("GET /api/billing/balance", () => {
     expect(calls).toContainEqual({ table: "subscriptions", method: "eq", args: ["tenant_id", TENANT] });
     // Only the live plan: a pending checkout or upgrade has no period yet, and a descending sort puts its empty one first.
     expect(calls).toContainEqual({ table: "subscriptions", method: "in", args: ["status", ["active", "past_due"]] });
+  });
+
+  it("gives a cancelled plan's end instead of a renewal date", async () => {
+    const cancelled = [{ status: "active", current_period_end: "2026-10-31T18:30:00+00:00", cancel_at: "2026-10-31T18:30:00+00:00" }];
+    expect(await accountStatus(context(), deps({ subscription: cancelled }).d)).toMatchObject({ renewsAt: null, endsAt: "2026-10-31T18:30:00.000Z", aiPaused: false });
   });
 
   it("says credits are low at a fifth of the month's credits, and paused at none", async () => {

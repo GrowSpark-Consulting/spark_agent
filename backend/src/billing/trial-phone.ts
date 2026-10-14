@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { supabaseAdmin } from "../lib/supabase-admin";
@@ -19,4 +20,19 @@ export async function claimTrialPhone(tenantId: string, phone: string, db: Supab
   const { data, error } = await db.rpc("claim_trial_phone", { p_tenant_id: tenantId, p_phone: phone });
   if (error) throw new Error(`claim_trial_phone failed: ${error.message}`);
   return TrialPhoneClaim.parse(data);
+}
+
+/** The key trial_phones keeps for a number: a SHA-256 of its digits, as claim_trial_phone computes it (0033). */
+export function trialPhoneHash(phone: string): string {
+  return createHash("sha256").update(phone.replace(/[^0-9]/g, ""), "utf8").digest("hex");
+}
+
+/**
+ * Whether a number has already had a free trial, for the onboarding wizard's early warning (POST /api/onboarding/trial).
+ * Reads only: the claim itself happens on the WhatsApp TRIAL-code message, the one verified number.
+ */
+export async function trialPhoneUsed(phone: string, db: SupabaseClient = supabaseAdmin()): Promise<boolean> {
+  const { data, error } = await db.from("trial_phones").select("phone_hash").eq("phone_hash", trialPhoneHash(phone)).limit(1);
+  if (error) throw new Error(`trial phone check failed: ${error.message}`);
+  return (data ?? []).length > 0;
 }

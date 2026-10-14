@@ -1,9 +1,9 @@
-import { chargeDueRenewals, grantAnnualMonths, lapseOverdue, renewalDeps, resolvePendingRenewals, sendRenewalNotices, type RenewalDeps } from "../billing/renewals";
+import { chargeDueRenewals, endCancelledPlans, grantAnnualMonths, lapseOverdue, renewalDeps, resolvePendingRenewals, sendRenewalNotices, type RenewalDeps } from "../billing/renewals";
 import { inngest } from "./client";
 
 // billing-renewals (decision 20; billing/renewals.ts): once a day at 06:00 in India, outside NPCI's busy hours for UPI
 // debits. Each step is its own Inngest step, so a retry repeats only the step that failed, and every step is safe to
-// repeat: the database decides what is due, and each payment applies once.
+// repeat: the database decides what is due, each payment applies once, and each owner alert is keyed so it goes once.
 
 interface Step {
   run<T>(id: string, fn: () => Promise<T>): Promise<T>;
@@ -14,8 +14,9 @@ export async function handleBillingRenewals({ step }: { step: Step }, deps: () =
   const charges = await step.run("charges", () => chargeDueRenewals(deps()));
   const pending = await step.run("pending", () => resolvePendingRenewals(deps()));
   const annual = await step.run("annual-months", () => grantAnnualMonths(deps()));
+  const ended = await step.run("ended", () => endCancelledPlans(deps()));
   const lapsed = await step.run("lapse", () => lapseOverdue(deps()));
-  return { notices, charges, pending, annual, lapsed };
+  return { notices, charges, pending, annual, ended, lapsed };
 }
 
 export const billingRenewals = inngest.createFunction({ id: "billing-renewals", triggers: [{ cron: "TZ=Asia/Kolkata 0 6 * * *" }] }, (ctx) =>

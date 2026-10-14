@@ -80,7 +80,8 @@ interface AccountStatus {
   plan: { key: 'trial' | 'starter' | 'growth' | 'pro'; name: string; monthlyCredits: number };
   credits: { plan: number; topup: number; total: number };   // getBalance()
   creditsGranted: number;            // denominator for the meter this cycle
-  renewsAt: string | null;           // "Resets 1 Nov"
+  renewsAt: string | null;           // "Resets 1 Nov"; null once the owner cancels
+  endsAt?: string | null;            // built 14 Oct (0042): the owner cancelled, "Your plan ends on 1 Nov" + Keep my plan (POST /api/billing/resume)
   trialEndsAt: string | null;        // "4 days left in your trial"
   aiPaused: boolean;                 // server decides (zero credits, trial ended, disconnected)
   lowCredits: boolean;               // server decides the 80 % / 20 %-left threshold

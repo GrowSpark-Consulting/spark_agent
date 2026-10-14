@@ -1,8 +1,9 @@
--- 0032: a business routed through one of our platform numbers (a trial on the shared demo number) is answered, and its
--- staff alerted, through that number; another business's own number is never used. Run: pnpm db:test
+-- 0032 and 0040: a business routed through one of our platform numbers (a trial on the shared demo number) is answered,
+-- and its staff alerted, through that number; a business with no working number of its own is alerted through our
+-- platform number (0040); another business's own number is never used. Run: pnpm db:test
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(10);
+select plan(13);
 
 insert into auth.users (id, email) values
   ('0f000000-0000-0000-0000-0000000000a1', 'fallback-trial@test.local'),
@@ -65,8 +66,23 @@ select results_eq(
   'the alert is stored in the trial''s own business, on the demo number''s channel, in human mode with a staff contact');
 select is((select connection_id from public.notify_staff_target('0f100000-0000-0000-0000-00000000000e', '0f000000-0000-0000-0000-0000000000a2')),
   '0f300000-0000-0000-0000-00000000000e'::uuid, 'a business with its own number alerts through it, even with an old demo chat');
+select is((select connection_id from public.notify_staff_target('0f100000-0000-0000-0000-00000000000f', '0f000000-0000-0000-0000-0000000000a3')),
+  '0f300000-0000-0000-0000-00000000000b'::uuid, 'a business with no number and no chats is alerted through our platform number (0040)');
+select results_eq(
+  $$select c.channel_id, 'staff' = any(ct.tags) from public.conversations c join public.contacts ct on ct.id = c.contact_id
+     where c.tenant_id = '0f100000-0000-0000-0000-00000000000f' and ct.phone = '+919800000913'$$,
+  $$values ('0f200000-0000-0000-0000-00000000000b'::uuid, true)$$,
+  'its alert is stored in its own business, on the platform number''s channel, with a staff contact');
+-- A business whose own number has failed: the platform number too.
+update public.whatsapp_connections set status = 'failed' where id = '0f300000-0000-0000-0000-00000000000d';
+insert into public.memberships (tenant_id, user_id, role, whatsapp_phone) values ('0f100000-0000-0000-0000-00000000000d', '0f000000-0000-0000-0000-0000000000a3', 'owner', '+919800000914');
+select is((select connection_id from public.notify_staff_target('0f100000-0000-0000-0000-00000000000d', '0f000000-0000-0000-0000-0000000000a3')),
+  '0f300000-0000-0000-0000-00000000000b'::uuid, 'a business whose only number failed is alerted through the platform number');
+-- With no platform number active either, there is nothing to send through.
+update public.whatsapp_connections set status = 'failed' where id = '0f300000-0000-0000-0000-00000000000b';
 select throws_ok($$select * from public.notify_staff_target('0f100000-0000-0000-0000-00000000000f', '0f000000-0000-0000-0000-0000000000a3')$$,
-  'PA409', null, 'a business with no number and no chats has nothing to alert through');
+  'PA409', null, 'with no number of its own and no active platform number, nothing to alert through');
+update public.whatsapp_connections set status = 'active' where id = '0f300000-0000-0000-0000-00000000000b';
 
 set local role authenticated;
 select throws_ok($$select * from public.notify_target('0f100000-0000-0000-0000-00000000000c', '0f500000-0000-0000-0000-0000000000c1')$$,
