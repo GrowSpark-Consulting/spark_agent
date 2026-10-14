@@ -210,6 +210,15 @@ const WEBHOOK_WAITING = lastCheck("warn", [
   check("payment_method", "warn", SAFE.paymentWarn),
   check("test_message_delivered", "not_verified", SAFE.testWaiting),
 ]);
+/** The business's Meta app is not subscribed: the webhook check warns, everything else passed. */
+const WEBHOOK_WARN = lastCheck("warn", [
+  check("token_permissions", "pass", SAFE.tokenPass),
+  check("number_registered", "pass", SAFE.numberPass),
+  check("webhook_subscribed", "warn", "Subscribe your Meta app to this account's messages."),
+  check("display_name_approved", "pass", SAFE.namePass),
+  check("payment_method", "pass", SAFE.paymentPass),
+  check("test_message_delivered", "pass", SAFE.testPass),
+]);
 /** A wrong token: the first check fails and the ones that need it are skipped. */
 const TOKEN_FAILED = lastCheck("fail", [
   check("token_permissions", "fail", SAFE.tokenFail),
@@ -301,6 +310,43 @@ test.describe("WhatsApp connection checks", () => {
     // The home card is a summary and carries the same caveat.
     await page.goto("/dashboard");
     await expect(page.getByRole("listitem").filter({ hasText: "+91 98400 12345" })).toContainText("Connected, webhook not confirmed");
+  });
+
+  test("a webhook warning on an active number is a banner: messages can't arrive until the app is subscribed", async ({ page, request }) => {
+    const account = await newWhatsappAccount(request, { lastCheck: WEBHOOK_WARN });
+    await signIn(page, account.email, "/dashboard/whatsapp");
+    const banner = card(page).getByTestId("webhook-banner");
+    await expect(banner).toHaveAttribute("data-kind", "blocked");
+    await expect(banner).toContainText("Messages can't arrive until your Meta app is subscribed.");
+    await expect(banner).toContainText("Subscribe your Meta app to this account's messages.");
+    await expect(card(page)).toContainText("Connected, webhook not confirmed");
+    await expect(card(page)).not.toContainText("Your assistant replies to customers from this number.");
+    await expectNoHorizontalOverflow(page);
+
+    // Home's card carries the same warning, shorter.
+    await page.goto("/dashboard");
+    await expect(page.getByTestId("webhook-banner")).toContainText("Messages can't arrive until your Meta app is subscribed.");
+  });
+
+  test("a webhook nobody has seen yet is 'unconfirmed', not the blocked warning", async ({ page, request }) => {
+    const account = await newWhatsappAccount(request, { lastCheck: WEBHOOK_WAITING });
+    await signIn(page, account.email, "/dashboard/whatsapp");
+    const banner = card(page).getByTestId("webhook-banner");
+    await expect(banner).toHaveAttribute("data-kind", "unconfirmed");
+    await expect(banner).toContainText("We haven't confirmed that your Meta app is subscribed");
+    await expect(banner).not.toContainText("can't arrive");
+  });
+
+  test("a healthy webhook has no banner; a failed number shows its own failure, not the webhook banner", async ({ page, request }) => {
+    const healthy = await newWhatsappAccount(request, { lastCheck: ALL_PASS });
+    await signIn(page, healthy.email, "/dashboard/whatsapp");
+    await expect(card(page).locator(".app-status").first()).toHaveText("Connected");
+    await expect(page.getByTestId("webhook-banner")).toHaveCount(0);
+
+    const failed = await newWhatsappAccount(request, { status: "failed", lastCheck: TOKEN_FAILED });
+    await signIn(page, failed.email, "/dashboard/whatsapp");
+    await expect(card(page)).toContainText("Needs attention");
+    await expect(page.getByTestId("webhook-banner")).toHaveCount(0);
   });
 
   test("says plain Connected and all checks passed only when they all did", async ({ page, request }) => {

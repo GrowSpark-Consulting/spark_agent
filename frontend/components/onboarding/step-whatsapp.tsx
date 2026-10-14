@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { SetupCall } from "@/features/connect/connect-screen";
+import { setupCallUrl } from "@/lib/env";
 import { FacebookConnect } from "@/components/onboarding/facebook-connect";
 import { OwnAppConnect } from "@/components/onboarding/own-app-connect";
 import { loadWebhookConfig, resolveWhatsAppTenant, type WebhookConfigResult } from "@/lib/whatsapp/manual-connect";
@@ -177,6 +179,13 @@ export function StepWhatsApp({
             );
           })}
         </div>
+      )}
+
+      {idle && (
+        <SetupCall
+          url={setupCallUrl()}
+          fallback="Want a hand? Ask the Spark Agent team to set it up with you on a call."
+        />
       )}
 
       {/* ── Connect with Facebook ── */}

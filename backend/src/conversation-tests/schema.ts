@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { INJECTABLE_FAILURES } from "../lib/env";
 
 // One scripted chat (tests/conversations/<pack>/*.yaml, docs/handover.md "Conversation test suite"). A chat is a
 // business setup and a list of customer turns. Each turn can say what the MOCKED models answer (the default, used in CI)
@@ -67,6 +68,8 @@ const Expect = z
     hotLead: z.boolean().optional(),
     /** Staff were told this turn that a voice note is waiting (a voice_note.received event), or were not. */
     voiceNoteAlert: z.boolean().optional(),
+    /** Staff were reminded this turn to record an area the business has no sites in (a staff alert), or were not. */
+    areaReminder: z.boolean().optional(),
     leadTemperature: z.string().optional(),
     leadScore: z.number().optional(),
     /** The calendar after this turn (needs the chat's `booking`): the start of every confirmed booking, soonest first, and how many were cancelled so far. */
@@ -95,6 +98,12 @@ const Turn = z
         kb: z.array(z.string()).optional(),
         /** The business is out of credits this turn: notify.send refuses the reply (insufficient_credits) and spends nothing. */
         credits: z.literal("zero").optional(),
+        /**
+         * Failures injected this turn (lib/failure-injection.ts), as they would happen for real: llm_timeout (every model
+         * call times out), llm_bad_json (the extraction answers a cut-off object, every try), whatsapp_send_error (WhatsApp
+         * refuses the reply) or whatsapp_send_timeout (WhatsApp never answers; the reply may have gone, so never resend).
+         */
+        inject: z.array(z.enum(INJECTABLE_FAILURES)).min(1).optional(),
       })
       .strict()
       .optional(),

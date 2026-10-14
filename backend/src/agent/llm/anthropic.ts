@@ -65,7 +65,8 @@ export type LlmErrorCode =
   | "truncated" // the answer hit max_tokens
   | "empty" // the answer had no text
   | "aborted" // the caller's own deadline passed
-  | "invalid_request"; // refused before anything was sent
+  | "invalid_request" // refused before anything was sent
+  | "over_budget"; // the business reached today's AI spend cap (lib/ai-limits.ts): not sent
 
 const MESSAGES: Record<LlmErrorCode, string> = {
   rate_limited: "The language model is busy right now.",
@@ -77,6 +78,7 @@ const MESSAGES: Record<LlmErrorCode, string> = {
   empty: "The language model gave no answer.",
   aborted: "The call was stopped before the language model answered.",
   invalid_request: "The request to the language model is not valid.",
+  over_budget: "The business reached its daily AI limit.",
 };
 
 /** What a caller needs: a fixed code and message, the provider's HTTP status when there was one, and how many tries were made. */

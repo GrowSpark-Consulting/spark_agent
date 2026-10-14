@@ -92,8 +92,8 @@ function areasOf(references: Record<string, unknown> | undefined, name: string):
 
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** The matcher a pack names, judged against one answer. */
-function judge(match: string, answer: unknown, context: ScoringContext): Verdict {
+/** The matcher a pack names, judged against one answer. Also how a pack's coverage is judged (coverage.ts). */
+export function judge(match: string, answer: unknown, context: ScoringContext): Verdict {
   const band = /^within_(?:([a-z][a-z0-9]*)_)?band$/.exec(match);
   if (band) {
     const bands = bandsOf(context.references, `${band[1] ? `${band[1]}_` : ""}bands`);

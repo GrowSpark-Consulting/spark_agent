@@ -7,7 +7,7 @@ import type { Extraction } from "@pakka/types";
 //
 // The wording is Dev 1's (docs/task-notes, "Decisions"); Raja is welcome to change it, and a change is only an edit here.
 
-export type FixedTextKey = "fallback" | "clarify" | "handoff" | "handoff_sorry" | "voice_note" | "stop_hint" | "credits_holding" | "consent_notice" | "opt_out_confirmation" | "exit_question" | "exit_prompt";
+export type FixedTextKey = "fallback" | "clarify" | "handoff" | "handoff_sorry" | "voice_note" | "stop_hint" | "credits_holding" | "consent_notice" | "opt_out_confirmation" | "exit_question" | "exit_prompt" | "area_options" | "area_unavailable";
 export type TextLanguage = "en" | "ta" | "ta-en" | "hi";
 
 /** The safe line when a reply cannot be trusted (docs/handover.md, post-check): exactly these words in English. */
@@ -60,6 +60,22 @@ export const FIXED_TEXTS: Record<FixedTextKey, Record<TextLanguage, string>> = {
     ta: "இந்த உரையாடலுக்கு AI உதவியாளர் பதிலளிக்கிறது. நிறுத்த STOP என்று அனுப்புங்கள். தனியுரிமைக் கொள்கை: {url}",
     "ta-en": "Indha chat-ku AI assistant bathil solluthu. Nirutha STOP nu reply pannunga. Privacy policy: {url}",
     hi: "इस चैट का जवाब AI असिस्टेंट देता है। बंद करने के लिए STOP लिखें। गोपनीयता नीति: {url}",
+  },
+  // A customer asks about an area the business has no sites in (Raja, 14 Oct). First, the areas it does have, so they can choose; only
+  // when they name the same area again, that there is nothing there for now and that they will be told when that changes (no visit is
+  // offered for it, and staff are reminded to record it in the CRM). `{area}` is the customer's own place, `{areas}` the business's
+  // (areaText fills them). MACHINE DRAFTS in Tamil, Tanglish and Hindi: Raja and a native speaker must check them before they are final.
+  area_options: {
+    en: "We don't have sites in {area} right now. We do have sites in {areas}. Would any of these suit you?",
+    ta: "{area} பகுதியில் தற்போது எங்களிடம் இடங்கள் இல்லை. {areas} பகுதிகளில் உள்ளன. இவற்றில் ஏதாவது உங்களுக்குப் பொருந்துமா?",
+    "ta-en": "{area}-la ippo engalidam site illa. {areas}-la irukku. Idhula edhavadhu ungalukku set aagumaa?",
+    hi: "फ़िलहाल {area} में हमारी कोई साइट नहीं है। हमारी साइटें {areas} में हैं। क्या इनमें से कोई आपके लिए ठीक रहेगा?",
+  },
+  area_unavailable: {
+    en: "Sorry, we don't have any property in {area} for now. We'll update you when that changes.",
+    ta: "மன்னிக்கவும், {area} பகுதியில் தற்போது எங்களிடம் சொத்துகள் இல்லை. மாற்றம் இருந்தால் உங்களுக்குத் தெரிவிப்போம்.",
+    "ta-en": "Sorry, {area}-la ippo engalidam property illa. Maaruna ungalukku update pannuvom.",
+    hi: "माफ़ कीजिए, फ़िलहाल {area} में हमारे पास कोई प्रॉपर्टी नहीं है। कुछ बदलने पर हम आपको बताएँगे।",
   },
   // The one last message after STOP (through the system-notice port).
   opt_out_confirmation: {
@@ -127,4 +143,16 @@ export function fixedText(key: FixedTextKey, language: TextLanguage): string {
 /** The privacy notice with its link. The link is ours (env, https): it is put in as text, never interpreted. */
 export function consentNotice(language: TextLanguage, privacyPolicyUrl: string): string {
   return FIXED_TEXTS.consent_notice[language].split("{url}").join(privacyPolicyUrl);
+}
+
+/** What a line about an area is filled in with: the customer's own place, and the places the business has. */
+export interface AreaWords {
+  area: string;
+  areas: string[];
+}
+
+/** An area line with the customer's place and the business's places put in, in one pass (what is put in is never read as a place to fill). */
+export function areaText(key: "area_options" | "area_unavailable", language: TextLanguage, words: AreaWords): string {
+  const values: Record<string, string> = { area: words.area, areas: words.areas.join(", ") };
+  return FIXED_TEXTS[key][language].replace(/\{(areas?)\}/g, (_match, name: string) => values[name]);
 }

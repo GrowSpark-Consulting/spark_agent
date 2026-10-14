@@ -227,6 +227,17 @@ describe("step 3: pending renewals", () => {
     expect(last.alert).toHaveBeenCalledWith(TENANT, expect.objectContaining({ text: expect.stringContaining("pauses on 24 Oct 2026") }), `renewal_failed:${PAYMENT}`);
   });
 
+  it("never fails a pending charge while PayU refuses our key and salt", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const refusing = fakePayu({ verify_payment: () => ({ status: 0, msg: "Invalid Hash." }) });
+    const { d, calls, alert } = deps({ payments: [pending("2026-10-12T23:00:00Z"), { data: { id: PAYMENT, status: "pending" }, error: null }] }, { fetch: refusing.impl });
+    expect(await resolvePendingRenewals(d)).toEqual({ checked: 1, settled: 0 });
+    expect(calls.some((c) => c.table === "rpc:settle_payment")).toBe(false);
+    expect(alert).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("Invalid Hash. (check PAYU_MERCHANT_KEY"));
+    error.mockRestore();
+  });
+
   it("tells the owners about a failure PayU reports for a pending charge", async () => {
     const payuFake = fakePayu({ verify_payment: (txnid) => ({ status: 1, transaction_details: { [txnid]: { mihpayid: "999", status: "failure", error_Message: "Insufficient balance" } } }) });
     const { d, alert } = deps(
