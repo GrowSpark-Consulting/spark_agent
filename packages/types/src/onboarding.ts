@@ -26,14 +26,19 @@ export const TrialInfo = z.object({
 });
 export type TrialInfo = z.infer<typeof TrialInfo>;
 
-/** POST /api/onboarding/trial's answer. The HTTP status follows `status`: 200, 409, 422 or 500. */
+/** POST /api/onboarding/trial's answer. The HTTP status follows `status`: 200, 409 (has_business, phone_used), 422 or 500. */
 export const StartTrialResult = z.discriminatedUnion("status", [
   z.object({ status: z.literal("ready"), trial: TrialInfo }),
   /** The account already belongs to a business (any role): nothing was created. */
   z.object({ status: z.literal("has_business") }),
   /** The trade has no pack yet: nothing was created. */
   z.object({ status: z.literal("unavailable") }),
-  z.object({ status: z.literal("invalid"), fields: z.object({ name: z.string().optional(), industry: z.string().optional() }) }),
+  z.object({ status: z.literal("invalid"), fields: z.object({ name: z.string().optional(), industry: z.string().optional(), phone: z.string().optional() }) }),
+  /**
+   * The WhatsApp number sent with the request (`phone`, E.164) has already had a free trial: nothing was created. An early
+   * warning only, since a typed number is not verified; the WhatsApp check on the TRIAL code is the real one (0033).
+   */
+  z.object({ status: z.literal("phone_used"), message: z.string() }),
   z.object({ status: z.literal("failed"), message: z.string() }),
 ]);
 export type StartTrialResult = z.infer<typeof StartTrialResult>;

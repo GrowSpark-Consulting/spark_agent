@@ -5,9 +5,11 @@ import {
   SETUP_FEE_INR,
   TOPUP_PACK,
   redactSecrets,
+  type CancelPlanResult,
   type ChangePlanResult,
   type PaymentView,
   type PayuCheckout,
+  type ResumePlanResult,
   type TenantContext,
 } from "@pakka/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -26,6 +28,8 @@ import { indiaDate, newTxnid, payuConfig, paymentRequest, PayuError, revokeManda
 //   POST /api/billing/checkout   { planKey, cycle, phone? } → PayuCheckout: the plan, its first payment and the auto-debit
 //   POST /api/billing/topup      { phone? } → PayuCheckout: 1,000 credits (a business on a paid plan)
 //   POST /api/billing/setup-fee  { phone? } → PayuCheckout: the assisted-onboarding setup fee, once
+//   POST /api/billing/cancel     no body → CancelPlanResult: the plan stops renewing (a past-due one ends now)
+//   POST /api/billing/resume     no body → ResumePlanResult: a cancelled plan renews again, while its period lasts
 //   POST /api/billing/change-plan { planKey, cycle?, phone? } → ChangePlanResult: an upgrade now (prorated, new mandate),
 //                                a downgrade at the next renewal
 //   GET  /api/billing/payments/:id → PaymentView (any member; asks PayU again while it is not final)
@@ -194,10 +198,12 @@ export function startSetupFee(context: TenantContext, rawInput: unknown, deps: B
 export async function changePlan(context: TenantContext, rawInput: unknown, deps: BillingDeps = billingDeps()): Promise<ChangePlanResult> {
   requireOwner(context, "change the plan");
   const input = ChangePlanInput.parse(rawInput);
-  const current = await deps.db.from("subscriptions").select("billing_cycle").eq("tenant_id", context.tenant.id).in("status", ["active", "past_due"]).maybeSingle();
+  const current = await deps.db.from("subscriptions").select("billing_cycle, cancel_at").eq("tenant_id", context.tenant.id).in("status", ["active", "past_due"]).maybeSingle();
   if (current.error) throw new Error(`billing: plan read failed: ${current.error.message}`);
   if (!current.data) throw new AppError("conflict", "Your business has no plan to change yet. Choose a plan first.");
-  const cycle = z.object({ billing_cycle: z.enum(["monthly", "yearly"]) }).parse(current.data).billing_cycle;
+  const { billing_cycle: cycle, cancel_at } = z.object({ billing_cycle: z.enum(["monthly", "yearly"]), cancel_at: z.string().nullable() }).parse(current.data);
+  // A cancelled plan has no next renewal for a downgrade to start at (0042): the owner keeps it first.
+  if (cancel_at) throw new AppError("conflict", "Your plan is cancelled. Keep your plan in Billing first, then change it.");
   if (input.cycle && input.cycle !== cycle) throw new AppError("not_available", "Switching between monthly and yearly billing isn't available yet.");
   const planRead = await deps.db.from("plans").select("key, name, price_inr, monthly_credits").eq("key", input.planKey).maybeSingle();
   if (planRead.error) throw new Error(`billing: plan read failed: ${planRead.error.message}`);
@@ -238,6 +244,49 @@ export async function changePlan(context: TenantContext, rawInput: unknown, deps
       mandate: { amountPaise: change.mandate_paise, cycle, startDate: indiaDate(now), endDate: indiaDate(until) },
     }),
   };
+}
+
+/**
+ * The owner cancels (0042). A plan in good standing stops renewing and ends at the end of the period already paid (the
+ * renewal job ends it then, pauses the business and revokes its mandate). A past-due plan ends now: the business is
+ * paused and its mandate revoked here. Asking again changes nothing.
+ */
+export async function cancelPlan(context: TenantContext, deps: BillingDeps = billingDeps()): Promise<CancelPlanResult> {
+  requireOwner(context, "cancel the plan");
+  const { data, error } = await deps.db.rpc("cancel_subscription", { p_tenant_id: context.tenant.id, p_actor: context.user.id });
+  if (error) {
+    if (error.code === "PA409") throw new AppError("conflict", "Your business has no plan to cancel.");
+    throw new Error(`cancel_subscription failed: ${error.message}`);
+  }
+  const [row] = z
+    .array(z.object({ outcome: z.enum(["scheduled", "ended"]), ends_at: z.string(), mandate_id: z.string().nullable(), mandate_method: z.string().nullable() }))
+    .length(1)
+    .parse(data);
+  if (row.outcome === "scheduled") return { status: "scheduled", endsAt: new Date(row.ends_at).toISOString() };
+  invalidateFeatureCache(context.tenant.id);
+  if (row.mandate_id) await revokeQuietly(row.mandate_id, row.mandate_method, deps, `cancelled plan of business ${context.tenant.id}`);
+  return { status: "ended" };
+}
+
+/** The owner keeps a cancelled plan after all, while its paid period lasts: it renews again. */
+export async function resumePlan(context: TenantContext, deps: BillingDeps = billingDeps()): Promise<ResumePlanResult> {
+  requireOwner(context, "keep the plan");
+  const { data, error } = await deps.db.rpc("resume_subscription", { p_tenant_id: context.tenant.id, p_actor: context.user.id });
+  if (error) {
+    if (error.code === "PA409") throw new AppError("conflict", "There's no cancelled plan to keep. Choose a plan in Billing instead.");
+    throw new Error(`resume_subscription failed: ${error.message}`);
+  }
+  return { renewsAt: new Date(z.string().parse(data)).toISOString() };
+}
+
+/** Revokes a mandate at PayU, logging rather than throwing: the plan is already cancelled here, so it is never charged again. */
+export async function revokeQuietly(mandateId: string, method: string | null, deps: BillingDeps, what: string): Promise<void> {
+  if (!deps.payu) return;
+  try {
+    await revokeMandate(deps.payu, { mandateId, method, requestId: newTxnid("plan_change") }, deps.fetch);
+  } catch (e) {
+    console.error(`[billing] ${what}: the mandate was not revoked at PayU: ${redactSecrets(e instanceof Error ? e.message : String(e))}`);
+  }
 }
 
 /** After a paid upgrade: the mandate of the plan it replaced is revoked at PayU, so it can never charge again. Logged, not thrown. */
@@ -294,7 +343,8 @@ export async function syncPayment(txnid: string, deps: BillingDeps): Promise<Syn
   const [row] = Settled.parse(data);
   // A new plan changes which features are on; an upgrade also ends the old mandate at PayU.
   if (row.applied && row.status === "success" && (row.kind === "subscribe" || row.kind === "plan_change")) invalidateFeatureCache(row.tenant_id);
-  if (row.applied && row.status === "success" && row.kind === "plan_change") await revokeReplacedMandate(row.payment_id, deps);
+  // An upgrade, or a new checkout for a past-due plan, replaces a mandate: revoke the old one at PayU.
+  if (row.applied && row.status === "success" && (row.kind === "plan_change" || row.kind === "subscribe")) await revokeReplacedMandate(row.payment_id, deps);
   return { paymentId: row.payment_id, status: row.status };
 }
 

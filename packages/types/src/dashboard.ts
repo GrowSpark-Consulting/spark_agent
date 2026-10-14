@@ -14,8 +14,10 @@ export const AccountStatus = z.object({
   credits: z.object({ plan: z.number().int(), topup: z.number().int(), total: z.number().int() }),
   /** The meter's denominator: credits granted in the buckets still live (this month, last month's rollover, top-ups). */
   creditsGranted: z.number().int().nonnegative(),
-  /** When the paid plan renews (the subscription's period end); null on a trial or with no subscription. */
+  /** When the paid plan renews (the subscription's period end); null on a trial, with no subscription, or once cancelled. */
   renewsAt: z.string().nullable(),
+  /** The owner cancelled: the plan ends here and is not renewed (POST /api/billing/resume keeps it). Absent or null otherwise. */
+  endsAt: z.string().nullable().optional(),
   trialEndsAt: z.string().nullable(),
   /** True when the assistant cannot reply: the business is paused or cancelled, the trial has ended, or no credits are left. */
   aiPaused: z.boolean(),

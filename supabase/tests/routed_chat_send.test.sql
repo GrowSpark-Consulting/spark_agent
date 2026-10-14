@@ -32,8 +32,9 @@ select is((select connection_id from public.notify_target('c1000000-0000-0000-00
   'c3000000-0000-0000-0000-00000000000a'::uuid, 'an answer in that chat goes out on the platform connection');
 select is((select connection_id from public.notify_staff_target('c1000000-0000-0000-0000-00000000000b', 'c9000000-0000-0000-0000-000000000001')),
   'c3000000-0000-0000-0000-00000000000a'::uuid, 'an alert to that business''s staff goes out on the platform connection too');
-select throws_ok($$select * from public.notify_staff_target('c1000000-0000-0000-0000-00000000000c', 'c9000000-0000-0000-0000-000000000001')$$,
-  'PA409', null, 'a business with no chat on the platform number has no connection to send an alert on');
+-- 0040 (Dev 2, at Dev 1's request): with no number of its own and no chat on ours, the alert goes through the platform number.
+select is((select connection_id from public.notify_staff_target('c1000000-0000-0000-0000-00000000000c', 'c9000000-0000-0000-0000-000000000001')),
+  'c3000000-0000-0000-0000-00000000000a'::uuid, 'a business with no chat on the platform number is alerted through it all the same (0040)');
 
 -- The front desk: a visitor with no route is stored with the business that owns the connection, which answers on its own row.
 create temp table desk as

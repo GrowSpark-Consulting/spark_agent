@@ -3,10 +3,12 @@ import { handleHandoffLink } from "../agent/handoff/takeover";
 import { getLeadCard } from "../agent/leadcard/route";
 import { suggestReply } from "../agent/leadcard/suggest";
 import { accountStatus } from "../billing/account-status";
-import { changePlan, handlePayuReturn, handlePayuWebhook, paymentStatus, startCheckout, startSetupFee, startTopup } from "../billing/checkout";
+import { editFeature, editPlan, extendTrial, grantCredits, listTenants, refundCandidates } from "../billing/admin";
+import { cancelPlan, changePlan, handlePayuReturn, handlePayuWebhook, paymentStatus, resumePlan, startCheckout, startSetupFee, startTopup } from "../billing/checkout";
 import { getBalance } from "../billing/credits";
 import { startTrialFor } from "../billing/start-trial";
 import { createTrialTenant } from "../billing/trial";
+import { trialPhoneUsed } from "../billing/trial-phone";
 import { cancelFromCalendar, completeFromCalendar, noShowFromCalendar, rescheduleFromCalendar, slotsForMove } from "../booking/actions";
 import { googleConnectUrl, handleGoogleCallback } from "../booking/google-calendar";
 import { sendTestMessage } from "../channels/whatsapp/test-message";
@@ -74,12 +76,13 @@ function health(): Response {
 const TRIAL_STATUS: Record<StartTrialResult["status"], number> = {
   ready: 200,
   has_business: 409,
+  phone_used: 409,
   unavailable: 422,
   invalid: 422,
   failed: 500,
 };
 
-// POST /api/onboarding/trial { name, industry } → StartTrialResult. A signed-in account with no
+// POST /api/onboarding/trial { name, industry, phone? } → StartTrialResult (phone_used: that WhatsApp number had a trial). A signed-in account with no
 // business yet; the user comes from the verified token, never from the body.
 async function startTrial(request: Request, deps: RouteDeps): Promise<Response> {
   const { supabase, user } = await authenticate(request, deps.userClient);
@@ -89,6 +92,7 @@ async function startTrial(request: Request, deps: RouteDeps): Promise<Response> 
     sessionState: () => resolveTenant(supabase, user),
     createTrialTenant,
     getBalance,
+    phoneUsed: (phone) => trialPhoneUsed(phone),
   });
   return Response.json(result, { status: TRIAL_STATUS[result.status] });
 }
@@ -134,6 +138,16 @@ const billingSetupFee: RouteHandler = async (request, deps) => {
 // { planKey, cycle?, phone? } → ChangePlanResult: an upgrade now (PayU: the rest of the period's difference and a new
 // auto-debit), a downgrade at the next renewal, or cancelling a scheduled downgrade. Owner only.
 const billingChangePlan = tenantRoute(({ context, body }) => changePlan(context, body));
+// no body → CancelPlanResult: the plan stops renewing and ends with the period already paid (a past-due one ends now). Owner only.
+const billingCancel: RouteHandler = async (request, deps) => {
+  const { context } = await requireTenant(request, deps.userClient);
+  return Response.json(await cancelPlan(context));
+};
+// no body → ResumePlanResult: a cancelled plan renews again, while its period lasts. Owner only.
+const billingResume: RouteHandler = async (request, deps) => {
+  const { context } = await requireTenant(request, deps.userClient);
+  return Response.json(await resumePlan(context));
+};
 // → PaymentView: one payment, for the Billing screen after PayU sends the payer back (asks PayU again while not final). Any member.
 const billingPayment: RouteHandler = (request, deps, params) =>
   tenantRoute(({ context, params: p }) => paymentStatus(context, p.id))(request, deps.userClient, params);
@@ -248,6 +262,24 @@ const whatsappDisconnect: RouteHandler = async (request, deps, params) => {
 // { tenantId, ... } → 201 connection. Platform admin only (docs/whatsapp-connection-contract.md).
 const adminManualConnect = adminRoute(({ admin, body }) => connectManual(body, admin.actor), { status: 201 });
 
+// The admin panel's billing routes (billing/admin.ts, 0041). Platform admins only; every change audited with the admin.
+// → AdminTenant[]: every business with status, plan, credits, trial end, subscription, setup-fee flag.
+const adminTenants = adminRoute(({ admin }) => listTenants(admin));
+// { days } → { trialEndsAt }: a trial extended (one paused at its end reopens).
+const adminExtendTrial: RouteHandler = (request, deps, params) =>
+  adminRoute(({ admin, body, params: p }) => extendTrial(admin, p.id, body))(request, deps.userClient, params);
+// { amount, expiresInDays?, note?, requestId? } → { granted, credits }.
+const adminGrantCredits: RouteHandler = (request, deps, params) =>
+  adminRoute(({ admin, body, params: p }) => grantCredits(admin, p.id, body))(request, deps.userClient, params);
+// { name?, priceInr?, monthlyCredits?, seats?, whatsappNumbers?, featureKeys? } → AdminPlan.
+const adminUpdatePlan: RouteHandler = (request, deps, params) =>
+  adminRoute(({ admin, body, params: p }) => editPlan(admin, p.key, body))(request, deps.userClient, params);
+// { name?, description?, defaultOn? } → AdminFeature.
+const adminUpdateFeature: RouteHandler = (request, deps, params) =>
+  adminRoute(({ admin, body, params: p }) => editFeature(admin, p.key, body))(request, deps.userClient, params);
+// → RefundCandidate[]: payments flagged for a refund.
+const adminRefunds = adminRoute(({ admin }) => refundCandidates(admin));
+
 export const ROUTES: readonly Route[] = [
   { path: "/api/health", methods: { GET: health } },
   { path: "/api/templates", browser: true, methods: { POST: (request, deps) => templates(request, deps.userClient) } },
@@ -265,6 +297,8 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/billing/topup", browser: true, methods: { POST: billingTopup } },
   { path: "/api/billing/setup-fee", browser: true, methods: { POST: billingSetupFee } },
   { path: "/api/billing/change-plan", browser: true, methods: { POST: (request, deps) => billingChangePlan(request, deps.userClient) } },
+  { path: "/api/billing/cancel", browser: true, methods: { POST: billingCancel } },
+  { path: "/api/billing/resume", browser: true, methods: { POST: billingResume } },
   { path: "/api/billing/payments/:id", browser: true, methods: { GET: billingPayment } },
   // PayU's surl and furl: the payer's browser posts here from PayU's page (a navigation, not a fetch, so not `browser`).
   // Nothing posted is trusted: the server asks PayU, then redirects to the Billing screen.
@@ -288,6 +322,12 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/admin/whatsapp/connect-link", browser: true, methods: { POST: adminConnectLink } },
   { path: "/api/whatsapp/connections/:id/recheck", browser: true, methods: { POST: whatsappRecheck } },
   { path: "/api/whatsapp/connections/:id/disconnect", browser: true, methods: { POST: whatsappDisconnect } },
+  { path: "/api/admin/tenants", browser: true, methods: { GET: (request, deps) => adminTenants(request, deps.userClient) } },
+  { path: "/api/admin/tenants/:id/extend-trial", browser: true, methods: { POST: adminExtendTrial } },
+  { path: "/api/admin/tenants/:id/credits", browser: true, methods: { POST: adminGrantCredits } },
+  { path: "/api/admin/plans/:key", browser: true, methods: { PATCH: adminUpdatePlan } },
+  { path: "/api/admin/features/:key", browser: true, methods: { PATCH: adminUpdateFeature } },
+  { path: "/api/admin/payments/refunds", browser: true, methods: { GET: (request, deps) => adminRefunds(request, deps.userClient) } },
   { path: "/api/admin/whatsapp/manual", browser: true, methods: { POST: (request, deps) => adminManualConnect(request, deps.userClient) } },
   // The two buttons of a staff alert (module 6). No login: the signed token says who tapped and which handoff. Answers are redirects or friendly pages.
   { path: "/h/:token", secretParams: ["token"], methods: { GET: (request, _deps, params) => handleHandoffLink(request, { token: params.token }) } },

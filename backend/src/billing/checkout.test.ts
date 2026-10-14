@@ -6,7 +6,7 @@ import type { FetchLike, PayuConfig } from "./payu";
 const invalidateFeatureCache = vi.fn<(tenantId?: string) => void>();
 vi.mock("../features/is-enabled", () => ({ invalidateFeatureCache }));
 
-const { changePlan, handlePayuReturn, handlePayuWebhook, paymentStatus, startCheckout, startSetupFee, startTopup, syncPayment } = await import("./checkout");
+const { cancelPlan, changePlan, handlePayuReturn, handlePayuWebhook, paymentStatus, resumePlan, startCheckout, startSetupFee, startTopup, syncPayment } = await import("./checkout");
 type Deps = Parameters<typeof startCheckout>[2] & object;
 
 const TENANT = "5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d";
@@ -138,7 +138,7 @@ describe("verifying a payment with PayU", () => {
   const paid = { mihpayid: "25599222315", status: "success", unmappedstatus: "captured", mode: "UPI", amt: "2948.82", transaction_amount: "2948.82" };
 
   it("applies what PayU says, passing the amount only for a success, and refreshes features after a new plan", async () => {
-    const { d, calls } = deps({ payments: open, "rpc:settle_payment": settled("subscribe", "success") }, { fetch: payuAnswering(paid) });
+    const { d, calls } = deps({ payments: [open, { data: { subscriptions: { replaces_subscription_id: null } }, error: null }], "rpc:settle_payment": settled("subscribe", "success") }, { fetch: payuAnswering(paid) });
     expect(await syncPayment("S1abc", d)).toEqual({ paymentId: PAYMENT, status: "success" });
     expect(rpcArgs(calls, "settle_payment")).toEqual({ p_txnid: "S1abc", p_state: "success", p_provider_payment_id: "25599222315", p_method: "UPI", p_amount_paise: 2948_82, p_reason: null });
     expect(invalidateFeatureCache).toHaveBeenCalledWith(TENANT);
@@ -245,7 +245,7 @@ describe("GET /api/billing/payments/:id", () => {
 });
 
 describe("POST /api/billing/change-plan", () => {
-  const live = (cycle = "monthly"): FakeDbResponse => ({ data: { billing_cycle: cycle }, error: null });
+  const live = (cycle = "monthly", cancelAt: string | null = null): FakeDbResponse => ({ data: { billing_cycle: cycle, cancel_at: cancelAt }, error: null });
   const change = (action: string, extra: Record<string, unknown> = {}): FakeDbResponse => ({
     data: [{ action, payment_id: null, amount_paise: null, mandate_paise: null, effective_at: "2026-10-28T06:00:00+00:00", ...extra }],
     error: null,
@@ -275,31 +275,93 @@ describe("POST /api/billing/change-plan", () => {
     await expect(changePlan(context("admin"), { planKey: "pro" }, deps(tables()).d)).rejects.toMatchObject({ code: "forbidden" });
     await expect(changePlan(context(), { planKey: "pro" }, deps(tables({ subscriptions: { data: null, error: null } })).d)).rejects.toMatchObject({ code: "conflict" });
     await expect(changePlan(context(), { planKey: "pro", cycle: "yearly" }, deps(tables()).d)).rejects.toMatchObject({ code: "not_available" });
+    const cancelled = deps(tables({ subscriptions: live("monthly", "2026-10-28T06:00:00+00:00") }));
+    await expect(changePlan(context(), { planKey: "starter" }, cancelled.d)).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("Keep your plan") });
+    expect(cancelled.calls.some((c) => c.table === "rpc:begin_plan_change")).toBe(false);
     const behind = deps(tables({ "rpc:begin_plan_change": { data: null, error: { code: "PA428", message: "a renewal is past due" } } }));
     await expect(changePlan(context(), { planKey: "pro" }, behind.d)).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("try it again automatically") });
   });
 
-  it("revokes the replaced mandate at PayU once the upgrade is paid", async () => {
-    const posted: { command: string; var1: string }[] = [];
-    const fetch = vi.fn<FetchLike>(async (_url, init) => {
-      const body = new URLSearchParams(init.body);
-      const command = body.get("command") ?? "";
-      const var1 = body.get("var1") ?? "";
-      posted.push({ command, var1 });
-      const answer = command === "verify_payment" ? { status: 1, transaction_details: { [var1]: { mihpayid: "new-m", status: "success", mode: "CC", amt: "2065.00" } } } : { status: 1, message: "Mandate Revoke request processed successfully" };
-      return { ok: true, status: 200, json: async () => answer };
-    });
+  it.each([
+    ["an upgrade", "plan_change", "upi", "upi_mandate_revoke"],
+    ["a past-due plan chosen again", "subscribe", "card", "mandate_revoke"],
+  ])("revokes the replaced mandate at PayU once %s is paid", async (_what, kind, method, command) => {
+    const { fetch, posted } = payuRevoking();
     const { d } = deps(
       {
         payments: [{ data: { id: PAYMENT, status: "created" }, error: null }, { data: { subscriptions: { replaces_subscription_id: "old-sub" } }, error: null }],
-        subscriptions: { data: { mandate_id: "old-m", mandate_method: "upi" }, error: null },
-        "rpc:settle_payment": { data: [{ payment_id: PAYMENT, tenant_id: TENANT, kind: "plan_change", status: "success", applied: true }], error: null },
+        subscriptions: { data: { mandate_id: "old-m", mandate_method: method }, error: null },
+        "rpc:settle_payment": { data: [{ payment_id: PAYMENT, tenant_id: TENANT, kind, status: "success", applied: true }], error: null },
       },
       { fetch },
     );
     expect(await syncPayment("C1abc", d)).toEqual({ paymentId: PAYMENT, status: "success" });
     expect(invalidateFeatureCache).toHaveBeenCalledWith(TENANT);
-    expect(posted.map((p) => p.command)).toEqual(["verify_payment", "upi_mandate_revoke"]);
+    expect(posted.map((p) => p.command)).toEqual(["verify_payment", command]);
     expect(JSON.parse(posted[1].var1)).toMatchObject({ authpayuid: "old-m" });
+  });
+});
+
+/** A PayU that verifies any payment as paid and accepts a mandate revoke; records the commands posted. */
+function payuRevoking() {
+  const posted: { command: string; var1: string }[] = [];
+  const fetch = vi.fn<FetchLike>(async (_url, init) => {
+    const body = new URLSearchParams(init.body);
+    const command = body.get("command") ?? "";
+    const var1 = body.get("var1") ?? "";
+    posted.push({ command, var1 });
+    const answer = command === "verify_payment" ? { status: 1, transaction_details: { [var1]: { mihpayid: "new-m", status: "success", mode: "CC", amt: "2065.00" } } } : { status: 1, message: "Mandate Revoke request processed successfully" };
+    return { ok: true, status: 200, json: async () => answer };
+  });
+  return { fetch, posted };
+}
+
+describe("POST /api/billing/cancel and /resume", () => {
+  const outcome = (o: "scheduled" | "ended", mandate: string | null = null, method: string | null = null): FakeDbResponse => ({
+    data: [{ outcome: o, ends_at: "2026-10-28T06:00:00+00:00", mandate_id: mandate, mandate_method: method }],
+    error: null,
+  });
+
+  it("schedules the end of a plan in good standing for its period end, touching nothing at PayU yet", async () => {
+    const { fetch, posted } = payuRevoking();
+    const { d, calls } = deps({ "rpc:cancel_subscription": outcome("scheduled") }, { fetch });
+    expect(await cancelPlan(context(), d)).toEqual({ status: "scheduled", endsAt: "2026-10-28T06:00:00.000Z" });
+    expect(rpcArgs(calls, "cancel_subscription")).toEqual({ p_tenant_id: TENANT, p_actor: OWNER });
+    expect(posted).toEqual([]);
+    expect(invalidateFeatureCache).not.toHaveBeenCalled();
+  });
+
+  it("ends a past-due plan now: features refreshed and its mandate revoked at PayU", async () => {
+    const { fetch, posted } = payuRevoking();
+    const { d } = deps({ "rpc:cancel_subscription": outcome("ended", "m-2", "card") }, { fetch });
+    expect(await cancelPlan(context(), d)).toEqual({ status: "ended" });
+    expect(invalidateFeatureCache).toHaveBeenCalledWith(TENANT);
+    expect(posted.map((p) => p.command)).toEqual(["mandate_revoke"]);
+    expect(JSON.parse(posted[0].var1)).toMatchObject({ authpayuid: "m-2" });
+  });
+
+  it("still ends the plan when PayU refuses the revoke, and says so in the log", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const refusing = vi.fn<FetchLike>(async () => ({ ok: true, status: 200, json: async () => ({ status: 0, message: "Something went wrong" }) }));
+    expect(await cancelPlan(context(), deps({ "rpc:cancel_subscription": outcome("ended", "m-2", "upi") }, { fetch: refusing }).d)).toEqual({ status: "ended" });
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("the mandate was not revoked at PayU"));
+    error.mockRestore();
+  });
+
+  it("is for the owner, and needs a plan to cancel", async () => {
+    for (const role of ["admin", "staff"] as const) {
+      await expect(cancelPlan(context(role), deps({ "rpc:cancel_subscription": outcome("scheduled") }).d)).rejects.toMatchObject({ code: "forbidden" });
+    }
+    const none = deps({ "rpc:cancel_subscription": { data: null, error: { code: "PA409", message: "cancel_subscription: the business has no plan" } } });
+    await expect(cancelPlan(context(), none.d)).rejects.toMatchObject({ code: "conflict", message: "Your business has no plan to cancel." });
+  });
+
+  it("resumes a cancelled plan while its period lasts", async () => {
+    const { d, calls } = deps({ "rpc:resume_subscription": { data: "2026-10-28T06:00:00+00:00", error: null } });
+    expect(await resumePlan(context(), d)).toEqual({ renewsAt: "2026-10-28T06:00:00.000Z" });
+    expect(rpcArgs(calls, "resume_subscription")).toEqual({ p_tenant_id: TENANT, p_actor: OWNER });
+    await expect(resumePlan(context("admin"), d)).rejects.toMatchObject({ code: "forbidden" });
+    const nothing = deps({ "rpc:resume_subscription": { data: null, error: { code: "PA409", message: "resume_subscription: nothing to resume" } } });
+    await expect(resumePlan(context(), nothing.d)).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("Choose a plan in Billing") });
   });
 });
