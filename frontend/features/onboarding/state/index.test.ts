@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { trialChatUrl } from "@/features/onboarding/data";
-import { initialState, testChatOf, trialCodeOf, trialPhoneOf, type OnboardingState } from "@/features/onboarding/state";
+import { initialState, testChatOf, phoneProblem, trialCodeOf, trialPhoneOf, type OnboardingState } from "@/features/onboarding/state";
 
 const TRIAL = { routeCode: "TRIAL-AB12", trialDays: 7, credits: 300 };
 const withTrial: OnboardingState = { ...initialState, trial: TRIAL };
@@ -67,5 +67,21 @@ describe("trialPhoneOf", () => {
 
   it("sends nothing for something that is not a mobile number (the route would only refuse the shape)", () => {
     for (const text of ["", "12345", "5876543210", "98765 4321", "98765 432101", "abc"]) expect(trialPhoneOf(typed(text)), text).toBeUndefined();
+  });
+});
+
+describe("phoneProblem", () => {
+  const typed = (phone: string): OnboardingState => ({ ...initialState, phone });
+
+  it("accepts the pre-filled sample and any usual way of writing a mobile number", () => {
+    for (const text of ["98400 12345", "9876543210", "+91 98765 43210", "098765 43210"]) expect(phoneProblem(typed(text)), text).toBeNull();
+  });
+
+  it("refuses a missing number", () => {
+    for (const text of ["", "   "]) expect(phoneProblem(typed(text)), JSON.stringify(text)).toMatch(/enter your whatsapp number/i);
+  });
+
+  it("refuses a number that is not a ten-digit Indian mobile", () => {
+    for (const text of ["12345", "5876543210", "98765 4321", "98765 432101", "abc"]) expect(phoneProblem(typed(text)), text).toMatch(/10-digit/);
   });
 });

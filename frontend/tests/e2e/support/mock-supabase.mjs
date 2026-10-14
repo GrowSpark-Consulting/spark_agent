@@ -1086,6 +1086,16 @@ ${choose("Cancel", "cancel=1")}
         return send(res, 200, removed.map((s) => ({ id: s.id })));
       }
     }
+    if (table === "contacts") {
+      // RLS (0001): members read their own businesses' contacts. The Data & privacy screen asks for id, name and phone of one business, newest first, with a limit.
+      if (!email || req.method !== "GET") return send(res, 200, []);
+      const own = new Set(USERS[email].memberships.map(([t]) => t.id));
+      const tenantFilter = url.searchParams.get("tenant_id")?.replace(/^eq\./, "") ?? null;
+      const rows = CONTACTS.filter((c) => own.has(c.tenant_id) && (!tenantFilter || c.tenant_id === tenantFilter))
+        .slice(0, Number(url.searchParams.get("limit") ?? Infinity))
+        .map((c) => ({ id: c.id, name: c.name ?? null, phone: c.phone }));
+      return send(res, 200, rows);
+    }
     if (table === "conversations" || table === "messages") {
       if (!email) return send(res, 200, []);
       // Rows the app can't parse (a 500 would also log a browser console error, which the suite forbids).
