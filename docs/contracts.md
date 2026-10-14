@@ -60,6 +60,7 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0044_ai_limits` | Rate limits and the daily AI spend cap: `ai_spend_daily` (server only; one row per business and India's day: the models' estimated `cost_usd` and `calls`), `tenants.ai_daily_cap_usd` (a platform admin's cap for one business; null: the plan's, monthly credits x USD 0.002, at least USD 1), `record_ai_spend(tenant, cost)` and `ai_limits(tenant, conversation?)` (today's spend and cap, and the AI replies in the last hour to the chat and by the business). Server only. (0043 is the contact deletion, #191) |
 | `0045_notify_attempts` | A keyed send is claimed before WhatsApp is asked (closes the Day 6 reply-key note, section 3.1): `notify_attempts` (server only; `message_id` = the keyed message id, `status` `sending` or `released`), `claim_notify_attempt(tenant, message, kind)` (`claimed`, `sent` when the message is recorded, `in_doubt` when an earlier attempt neither recorded nor released it) and `release_notify_attempt(tenant, message)` (after a refusal for certain). Server only |
 | `0046_rls_tightening` | The Day 7 row-level-security review: `consent_logs` loses its browser INSERT (the server's functions write every entry); staff update only the leads assigned to them and cannot reassign them (owners and admins any lead); `anon` loses every write grant on every table and view, and on tables created later. (0045 is the notify claim, #201) |
+| `0047_message_media` | The private storage bucket `message-media` (50 MB a file, any type) for a customer's photos, voice notes and documents once downloaded from WhatsApp, at `<tenant_id>/<conversation_id>/<message_id>.<ext>` (`backend/src/lib/storage.ts` builds the path). A member reads the files of the business its first folder names (checked inline in the policy, then `is_member`); only the server writes (no insert, update or delete policy). (0045 is #201, 0046 is #203) |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -777,6 +778,8 @@ invalid `phone` is `invalid` with `fields.phone`.
 - `PATCH /api/admin/features/:key` `{ name?, description?, defaultOn? }` → `AdminFeature`.
 - `GET /api/admin/payments/refunds` → `RefundCandidate[]` (refund each in PayU's dashboard).
 Not built: opening a business's dashboard as an admin (logged) needs its own design.
+
+**Message media (`backend/src/lib/storage.ts`, 0047; agreed with Dev 1, 14 Oct).** Downloaded WhatsApp media goes to the private bucket `message-media` at `<tenant_id>/<conversation_id>/<message_id>.<ext>`: build it with `messageMediaPath` (refuses anything that is not an id) and `mediaExtension(mimeType)` (`.bin` for an unknown type). Written by the server only; a member of the business reads with their own session, or the server hands out a signed URL. **To do once files are stored:** a contact's data deletion and a business's deletion must also remove its folders through the Storage API (deleting rows does not touch storage).
 
 **A customer's data deletion (`backend/src/consent/deletion.ts`, 0043; types in `@pakka/types` `privacy.ts`; Settings → Data & privacy).**
 Owner or admin; a contact of another business is `not_found`.
