@@ -9,7 +9,8 @@ import { createSystemNoticePort } from "../agent/pipeline/ports";
 import { answerAfterFailure, replyTurn, type ReplyDeps } from "../agent/pipeline/reply";
 import { BATCH_WINDOW_MS, runTurn, type StepRunner } from "../agent/pipeline/process-message";
 import { stopCheck, stopCheckAfterGate } from "../agent/pipeline/stop";
-import { isAiLimit, type AiLimit } from "../lib/ai-limits";
+import { isAiLimit, tellOwnersAboutLimit, type AiLimit, type LimitNoticeDeps } from "../lib/ai-limits";
+import { sendAccountNotice, type NoticeDeps } from "../notify/account-notices";
 import { turnClock } from "../agent/pipeline/turn-deadline";
 import { understandTurn, type UnderstandDeps } from "../agent/pipeline/understand";
 import { markReadStep, type MarkReadDeps } from "../channels/whatsapp/mark-read";
@@ -66,9 +67,9 @@ export const GOOD_EXTRACTION = JSON.stringify({ language: "en", intent: "questio
 export const GOOD_REPLY = "A 2BHK starts at ₹78 lakh. Would you like to visit?";
 export const timeout = () => new LlmError("timeout", undefined, 3);
 
-const llmResult = (text: string): LlmResult => ({ text, model: "mock", stopReason: "end_turn", usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, costUsd: 0, latencyMs: 0, attempts: 1, requestId: null });
+const llmResult = (text: string, costUsd = 0): LlmResult => ({ text, model: "mock", stopReason: "end_turn", usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, costUsd, latencyMs: 0, attempts: 1, requestId: null });
 
-function scriptedLlm(script: ModelScript) {
+function scriptedLlm(script: ModelScript, costUsd = 0) {
   const next = { extraction: 0, reply: 0 };
   const calls = { extraction: 0, reply: 0 };
   /** Every request the pipeline made, as sent (Day 7 PR C: what reached the model). */
@@ -81,7 +82,7 @@ function scriptedLlm(script: ModelScript) {
       const items = (role === "extraction" ? script.extraction : script.reply) ?? [role === "extraction" ? GOOD_EXTRACTION : GOOD_REPLY];
       const item = items[Math.min(next[role]++, items.length - 1)];
       if (item instanceof Error) throw item;
-      return llmResult(typeof item === "function" ? item() : item);
+      return llmResult(typeof item === "function" ? item() : item, costUsd);
     },
   };
   return { client, calls, requests };
@@ -292,6 +293,39 @@ export interface WorldOptions {
   aiLimit?: AiLimit | null;
   /** Inngest drops an event whose id it has seen (the default). False: both copies are delivered. */
   dedupeEvents?: boolean;
+  /** The limit lookup itself (Day 7: the real aiLimitFor on a fake ai_limits); when given, it decides instead of `aiLimit`. */
+  aiLimitFrom?: (tenantId: string, conversationId: string) => Promise<AiLimit | null>;
+  /** Wraps the model client both the understanding and the reply call (Day 7: the real withSpendGuard). A call it refuses never reaches the scripted model. */
+  wrapLlm?: (client: LlmClient) => LlmClient;
+  /** What each scripted model call costs (USD), as the result's costUsd. */
+  modelCostUsd?: number;
+  /** The business's team, for the owner alert (the alert goes to the roles the function names, to those with an alert number). Default: an owner, an admin, a staff member, and an owner with no alert number. */
+  members?: WorldMember[];
+  /** What the fake send does for each owner alert, in order; after the list, "ok". */
+  alertSends?: ("ok" | "skipped" | "failed" | "throws")[];
+  /** The lookup of who to alert fails. */
+  alertRecipientsFail?: boolean;
+  /** The clock the owner alert's key reads (an hour and a day in India's time). Default: now. */
+  now?: () => Date;
+}
+
+export interface WorldMember {
+  userId: string;
+  role: "owner" | "admin" | "staff";
+  alertNumber: boolean;
+}
+export const DEFAULT_MEMBERS: WorldMember[] = [
+  { userId: "u0000000-0000-4000-8000-0000000000a1", role: "owner", alertNumber: true },
+  { userId: "u0000000-0000-4000-8000-0000000000a2", role: "admin", alertNumber: true },
+  { userId: "u0000000-0000-4000-8000-0000000000a3", role: "staff", alertNumber: true },
+  { userId: "u0000000-0000-4000-8000-0000000000a4", role: "owner", alertNumber: false },
+];
+
+/** One owner alert as the fake send received it. */
+export interface OwnerAlert {
+  userId: string;
+  key: string | undefined;
+  text: string;
 }
 
 export interface Event {
@@ -325,7 +359,8 @@ export async function createWorld(options: WorldOptions = {}) {
   notify.onRecorded = (delivery, messageId) => {
     fake.messages.set(messageId, { id: messageId, tenantId: TENANT, conversationId: CONV, direction: "out", sender: delivery.kind === "ai_reply" ? "ai" : "system", kind: "text", createdAt: new Date().toISOString(), body: delivery.text, meta: {} } as FakeMessage);
   };
-  const model = scriptedLlm(options.model ?? {});
+  const model = scriptedLlm(options.model ?? {}, options.modelCostUsd ?? 0);
+  const llmClient = options.wrapLlm ? options.wrapLlm(model.client) : model.client;
   const PHONE = options.phone ?? DEFAULT_PHONE;
   const poison = options.poison ?? "";
   notify.poison = poison;
@@ -406,7 +441,7 @@ export async function createWorld(options: WorldOptions = {}) {
   };
   const replyDeps: ReplyDeps = {
     store: fake.store,
-    llm: model.client,
+    llm: llmClient,
     send: (tenantId, kind, payload) => notify.send(tenantId, kind, payload),
     audit,
     sendEvent: async (event) => void handoffEvents.push(event as Event),
@@ -416,7 +451,7 @@ export async function createWorld(options: WorldOptions = {}) {
   };
   const understandDeps = (signal?: AbortSignal): UnderstandDeps => ({
     store: fake.store,
-    llm: model.client,
+    llm: llmClient,
     loadPackDefinition: async (key, version) => (key === pack.key && version === pack.version ? (pack as unknown) : null),
     retrieve: async () => [{ chunkId: "c1", documentId: "d1", title: "Price list", content: options.kbText ?? "2BHK of 950 sq ft in Velachery starts at ₹78 lakh.", similarity: 0.8 }],
     signal,
@@ -426,18 +461,52 @@ export async function createWorld(options: WorldOptions = {}) {
   // The read receipt reaches Meta and the database in production; here it is always "late", so it skips without touching either (it never fails a turn).
   const lateMarkRead = (startedAt: number): MarkReadDeps => ({ db: {} as MarkReadDeps["db"], markRead: vi.fn() as unknown as MarkReadDeps["markRead"], now: () => startedAt + 60_000 });
 
+  // The owner alert (lib/ai-limits.ts tellOwnersAboutLimit, through the real sendAccountNotice): who is told is fake (the real lookup is notify/staff-alerts.ts), and the send keeps
+  // one alert per key like notify.send does. Real: the notice's words, its key, its roles (the same ones inngest/process-message.ts names), one alert per person, never throwing.
+  const ownerAlerts: OwnerAlert[] = [];
+  const alertKeys = new Set<string>();
+  const alertScript = [...(options.alertSends ?? [])];
+  const noticeDeps: NoticeDeps = {
+    recipients: async (_tenantId, roles) => {
+      if (options.alertRecipientsFail) throw new Error(`the team lookup failed (simulated)${poison}`);
+      return (options.members ?? DEFAULT_MEMBERS).filter((m) => (roles as readonly string[]).includes(m.role) && m.alertNumber).map((m) => m.userId);
+    },
+    send: async (_tenantId, _kind, payload: NotifyPayload): Promise<SendOutcome> => {
+      const action = alertScript.shift() ?? "ok";
+      if (action === "throws") throw new Error(`the alert send broke (simulated)${poison}`);
+      if (action === "skipped") return { status: "skipped", reason: "feature_off" } as SendOutcome;
+      if (action === "failed") return { status: "failed", error: { code: "upstream_failed", message: "x", retryable: true, outcomeUnknown: false } } as SendOutcome;
+      if (!alertKeys.has(payload.idempotencyKey ?? "")) {
+        alertKeys.add(payload.idempotencyKey ?? "");
+        ownerAlerts.push({ userId: payload.staffUserId ?? "", key: payload.idempotencyKey, text: payload.text ?? "" });
+      }
+      return { status: "sent", messageId: "m", providerMsgId: "p", creditsCharged: 0, usedTemplate: false } as SendOutcome;
+    },
+  };
+  const limitNoticeDeps = (): LimitNoticeDeps => ({
+    appUrl: "http://localhost:3000",
+    now: options.now ?? (() => new Date()),
+    notify: (tenantId, message, keyBase) => sendAccountNotice(tenantId, message, keyBase, { roles: ["owner", "admin"], deps: noticeDeps }),
+  });
+
   /**
    * The body of the process-message function, in the order of inngest/process-message.ts (whole-turn.test.ts guards that it stays so). Left out: the
-   * "external-notice" step for a chat a team member handles from their own number, and the "limit-notice" step that tells the owners a limit stopped
-   * the assistant (both need the database; they have their own tests).
+   * "external-notice" step for a chat a team member handles from their own number (it needs the database; it has its own tests). The "limit-notice" step is here
+   * (Day 7): the real tellOwnersAboutLimit and sendAccountNotice, with a fake team and a fake send.
    */
   async function processMessageBody(event: { data: unknown }, step: StepApi): Promise<unknown> {
     const startedAt = await step.run("started", async () => Date.now());
-    const turn = await runTurn(step, event.data, { store: fake.store, isEnabled: async () => options.featureEnabled ?? true, aiLimit: async () => options.aiLimit ?? null });
+    const turn = await runTurn(step, event.data, { store: fake.store, isEnabled: async () => options.featureEnabled ?? true, aiLimit: async (tenantId, conversationId) => (options.aiLimitFrom ? options.aiLimitFrom(tenantId, conversationId) : (options.aiLimit ?? null)) });
     if (turn.status !== "ready") {
       if (turn.status === "gated_off" && (turn.reason === "not_ai_mode" || turn.reason === "feature_off" || isAiLimit(turn.reason))) {
         const ids = MessageReceived.safeParse(event.data);
-        if (ids.success) await stopCheckAfterGate(step, ids.data, replyDeps);
+        if (ids.success) {
+          const stop = await stopCheckAfterGate(step, ids.data, replyDeps);
+          if (stop.status !== "opted_out" && isAiLimit(turn.reason)) {
+            const limit = turn.reason;
+            await step.run("limit-notice", () => tellOwnersAboutLimit(ids.data.tenantId, limit, ids.data.conversationId, limitNoticeDeps()));
+          }
+        }
       }
       return turn;
     }
@@ -546,6 +615,8 @@ export async function createWorld(options: WorldOptions = {}) {
       answered: inbound.filter((id) => fake.answered.has(id)),
       handoffs: fake.handoffs.length,
       sendCalls: notify.calls.filter((c) => c.kind === "ai_reply").length,
+      /** The alerts the owners and admins received that a limit stopped the assistant (one per person per key). */
+      ownerAlerts: [...ownerAlerts],
     };
   }
 
