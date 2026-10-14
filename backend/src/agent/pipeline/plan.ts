@@ -4,6 +4,7 @@ import type { OfferedSlot } from "../scheduling/offer";
 import { MAX_ASK_FIELDS, type AskField } from "../scoring/qualify";
 import { textLanguage, type AreaWords, type FixedTextKey, type TextLanguage } from "./fixed-texts";
 import { planBooking } from "./plan-booking";
+import { languageForReply } from "./reply-language";
 import type { ReplySettings } from "./persona";
 import type { UnderstandResult } from "./understand";
 
@@ -75,6 +76,8 @@ export interface PlanInput {
   question: string | null;
   /** contacts.language, as the last fallback for the language of a fixed line. */
   contactLanguage: string | null;
+  /** The words of the customer's messages of this turn (reply.ts), for the script of a low-confidence "other" reading (reply-language.ts). */
+  customerWords?: string;
   /** Consecutive misses in this chat before this turn. */
   previousMisses: number;
   settings: ReplySettings;
@@ -188,6 +191,8 @@ function decide(input: PlanInput): Plan {
   const { understood, question, previousMisses, settings } = input;
   const language = textLanguage(understood.status === "understood" ? understood.summary.language : null, input.contactLanguage);
   const carry = previousMisses;
+  // The language the reply MODEL is told (a low-confidence "other" is decided in code, reply-language.ts); fixed lines use `language` above.
+  const modelLanguage = understood.status === "understood" ? languageForReply(understood.summary.language, understood.summary.confidence, input.customerWords, input.contactLanguage) : null;
 
   // The customer answered our question: they tapped Talk to the team, or (if the buttons were refused and the plain text went)
   // sent "1". A person takes over. Checked before anything else, even when the message could not be understood (the model down,
@@ -239,7 +244,7 @@ function decide(input: PlanInput): Plan {
   // is told at once, with the card showing what was asked for.
   if (summary.intent === "price_negotiation" && settings.negotiationHandoffEnabled) {
     return {
-      reply: { mode: "model", action: { kind: "handoff", trigger: "negotiation" }, facts: [NEGOTIATION_FACT], language: summary.language },
+      reply: { mode: "model", action: { kind: "handoff", trigger: "negotiation" }, facts: [NEGOTIATION_FACT], language: modelLanguage },
       handoff: { trigger: "negotiation", priority: "high" },
       kbMisses: 0,
       case: "negotiation",
@@ -247,12 +252,12 @@ function decide(input: PlanInput): Plan {
   }
 
   const asked = question?.trim() ? question.trim() : "";
-  const model = (action: NextAction, facts: string[] = [], ask?: AskField[]): ReplyPlan => ({ mode: "model", action, facts, language: summary.language, ...(ask ? { ask } : {}) });
+  const model = (action: NextAction, facts: string[] = [], ask?: AskField[]): ReplyPlan => ({ mode: "model", action, facts, language: modelLanguage, ...(ask ? { ask } : {}) });
 
   if (summary.intent === "off_topic") return { reply: model({ kind: "decline_off_topic" }), kbMisses: 0, case: "off_topic" };
 
   // Booking (steps 5 and 6): times to offer, the customer's pick, and what follows a booking. A booking intent comes before the answer.
-  const booking = planBooking({ input, summary, qualification: understood.qualification, retrieval, language });
+  const booking = planBooking({ input, summary, qualification: understood.qualification, retrieval, language, modelLanguage });
   if (booking) return booking;
 
   // Qualifying (step 5): the next missing details to ask for, two at most (the reply prompt's rule 4).

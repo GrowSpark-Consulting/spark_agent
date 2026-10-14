@@ -1,0 +1,15 @@
+name: A Tamil price question the extractor reads as 'other' at low confidence is still answered in Tamil, from the knowledge base
+description: "Day 7, the low-confidence 'other' fix (pipeline/reply-language.ts). Mock: the extraction is scripted to be unsure (other, 0.3); the code decides ta from the Tamil letters, so the reply is told Tamil, never English (the line the model is told is checked in reply-language-whole-turn.test.ts). Live: the real extractor will usually read this as ta; what is checked live is that the reply is in Tamil script, with the price from the knowledge base only."
+kb:
+  - "2BHK of 950 sq ft in Velachery starts at ₹78 lakh. Site visits are free on weekdays."
+turns:
+  - customer: "வேளச்சேரியில் 2BHK வீட்டின் விலை என்ன?"
+    mock:
+      extraction: {"language": "other", "intent": "question", "fields": {"location": "Velachery", "config": "2BHK"}, "question": "What is the price of a 2BHK in Velachery?", "confidence": 0.3}
+      reply: "வேளச்சேரியில் 2BHK வீடு ₹78 லட்சத்தில் தொடங்குகிறது."
+    expect:
+      reply: {"sent": true, "matches": ["[\\u0B80-\\u0BFF]{3}"]}
+      noInventedPrice: true
+      aiReplies: 1
+    mockOnly:
+      case: answered_from_kb
