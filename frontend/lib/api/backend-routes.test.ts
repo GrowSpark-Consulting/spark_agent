@@ -91,6 +91,13 @@ const AWAITING_BACKEND: { call: string; file: string; where: string }[] = [
 
 /** Backend routes the browser never calls, and why. Anything not here and not in FRONTEND_CALLS fails the test. */
 const NO_BROWSER_CALLER: Record<string, string> = {
+  // The admin panel's billing routes (Dev 2, 0041). Dev 3's admin panel (Day 7) moves these to FRONTEND_CALLS when it calls them.
+  "GET /api/admin/tenants": "not called yet: the admin panel's business list",
+  "POST /api/admin/tenants/:id/extend-trial": "not called yet: the admin panel's extend-trial action",
+  "POST /api/admin/tenants/:id/credits": "not called yet: the admin panel's grant-credits action",
+  "PATCH /api/admin/plans/:key": "not called yet: the admin panel's plan editor",
+  "PATCH /api/admin/features/:key": "not called yet: the admin panel's feature editor",
+  "GET /api/admin/payments/refunds": "not called yet: the admin panel's list of payments to refund",
   "GET /api/health": "infrastructure: Railway's liveness check",
   "GET /api/webhooks/whatsapp": "Meta calls it: the webhook verification handshake",
   "POST /api/webhooks/whatsapp": "Meta calls it: inbound messages and statuses (signature checked)",

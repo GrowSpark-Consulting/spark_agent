@@ -3,6 +3,7 @@ import { handleHandoffLink } from "../agent/handoff/takeover";
 import { getLeadCard } from "../agent/leadcard/route";
 import { suggestReply } from "../agent/leadcard/suggest";
 import { accountStatus } from "../billing/account-status";
+import { editFeature, editPlan, extendTrial, grantCredits, listTenants, refundCandidates } from "../billing/admin";
 import { cancelPlan, changePlan, handlePayuReturn, handlePayuWebhook, paymentStatus, resumePlan, startCheckout, startSetupFee, startTopup } from "../billing/checkout";
 import { getBalance } from "../billing/credits";
 import { startTrialFor } from "../billing/start-trial";
@@ -258,6 +259,24 @@ const whatsappDisconnect: RouteHandler = async (request, deps, params) => {
 // { tenantId, ... } → 201 connection. Platform admin only (docs/whatsapp-connection-contract.md).
 const adminManualConnect = adminRoute(({ admin, body }) => connectManual(body, admin.actor), { status: 201 });
 
+// The admin panel's billing routes (billing/admin.ts, 0041). Platform admins only; every change audited with the admin.
+// → AdminTenant[]: every business with status, plan, credits, trial end, subscription, setup-fee flag.
+const adminTenants = adminRoute(({ admin }) => listTenants(admin));
+// { days } → { trialEndsAt }: a trial extended (one paused at its end reopens).
+const adminExtendTrial: RouteHandler = (request, deps, params) =>
+  adminRoute(({ admin, body, params: p }) => extendTrial(admin, p.id, body))(request, deps.userClient, params);
+// { amount, expiresInDays?, note?, requestId? } → { granted, credits }.
+const adminGrantCredits: RouteHandler = (request, deps, params) =>
+  adminRoute(({ admin, body, params: p }) => grantCredits(admin, p.id, body))(request, deps.userClient, params);
+// { name?, priceInr?, monthlyCredits?, seats?, whatsappNumbers?, featureKeys? } → AdminPlan.
+const adminUpdatePlan: RouteHandler = (request, deps, params) =>
+  adminRoute(({ admin, body, params: p }) => editPlan(admin, p.key, body))(request, deps.userClient, params);
+// { name?, description?, defaultOn? } → AdminFeature.
+const adminUpdateFeature: RouteHandler = (request, deps, params) =>
+  adminRoute(({ admin, body, params: p }) => editFeature(admin, p.key, body))(request, deps.userClient, params);
+// → RefundCandidate[]: payments flagged for a refund.
+const adminRefunds = adminRoute(({ admin }) => refundCandidates(admin));
+
 export const ROUTES: readonly Route[] = [
   { path: "/api/health", methods: { GET: health } },
   { path: "/api/templates", browser: true, methods: { POST: (request, deps) => templates(request, deps.userClient) } },
@@ -300,6 +319,12 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/admin/whatsapp/connect-link", browser: true, methods: { POST: adminConnectLink } },
   { path: "/api/whatsapp/connections/:id/recheck", browser: true, methods: { POST: whatsappRecheck } },
   { path: "/api/whatsapp/connections/:id/disconnect", browser: true, methods: { POST: whatsappDisconnect } },
+  { path: "/api/admin/tenants", browser: true, methods: { GET: (request, deps) => adminTenants(request, deps.userClient) } },
+  { path: "/api/admin/tenants/:id/extend-trial", browser: true, methods: { POST: adminExtendTrial } },
+  { path: "/api/admin/tenants/:id/credits", browser: true, methods: { POST: adminGrantCredits } },
+  { path: "/api/admin/plans/:key", browser: true, methods: { PATCH: adminUpdatePlan } },
+  { path: "/api/admin/features/:key", browser: true, methods: { PATCH: adminUpdateFeature } },
+  { path: "/api/admin/payments/refunds", browser: true, methods: { GET: (request, deps) => adminRefunds(request, deps.userClient) } },
   { path: "/api/admin/whatsapp/manual", browser: true, methods: { POST: (request, deps) => adminManualConnect(request, deps.userClient) } },
   // The two buttons of a staff alert (module 6). No login: the signed token says who tapped and which handoff. Answers are redirects or friendly pages.
   { path: "/h/:token", secretParams: ["token"], methods: { GET: (request, _deps, params) => handleHandoffLink(request, { token: params.token }) } },
