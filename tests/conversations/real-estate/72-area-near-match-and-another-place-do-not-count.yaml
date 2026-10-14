@@ -1,0 +1,46 @@
+name: "A longer word that contains the unserved area does not count as insisting, and another unserved place gets the options"
+description: "Raja, 14 Oct. After the options for Adyar: 'what about Adyarpet' (a different place that only starts with the same letters) is not a repeat and is answered like any message (no refusal, no reminder); a message that repeats Adyar but also names a place the business has ('Adyar or Velachery') is not counted either; 'only Mylapore' (another place the business has nothing in, named by the model) gets the options again, never 'nothing there'."
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, areas: [Velachery, Tambaram] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+turns:
+  - customer: "I want a 2BHK in Adyar, my budget is around 60 lakh and I plan to buy within 3 months"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { config: 2BHK, location: Adyar, budget: 60L, timeline: 0-3m }, question: null }
+    expect:
+      reply: { sent: true, contains: ["Velachery, Tambaram"] }
+      areaReminder: false
+    mockOnly:
+      case: area_options
+  - customer: "what about Adyarpet"
+    mock:
+      extraction: { language: en, intent: give_details, fields: {}, question: null }
+      reply: "Thanks for telling me. Could you share a little more about what you are looking for?"
+    expect:
+      reply: { sent: true, notContains: ["any property", "for now"] }
+      aiReplies: 1
+      handoff: null
+      areaReminder: false
+    mockOnly:
+      case: nothing_to_look_up
+  - customer: "Adyar or Velachery, which is closer to the beach?"
+    mock:
+      extraction: { language: en, intent: give_details, fields: {}, question: null }
+      reply: "Thanks for telling me. Could you share a little more about what you are looking for?"
+    expect:
+      reply: { sent: true, notContains: ["any property", "for now"] }
+      aiReplies: 1
+      areaReminder: false
+    mockOnly:
+      case: nothing_to_look_up
+  - customer: "only Mylapore"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { location: Mylapore }, question: null }
+    expect:
+      reply: { sent: true, contains: ["Mylapore", "Velachery, Tambaram"], notContains: ["for now"] }
+      aiReplies: 1
+      areaReminder: false
+    mockOnly:
+      case: area_options

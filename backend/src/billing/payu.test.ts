@@ -160,6 +160,16 @@ describe("verifyPayment", () => {
     expect(await verifyPayment(config, "S1abc", fakeFetch(unknown).impl)).toEqual({ state: "not_found", providerPaymentId: null, method: null, amountPaise: null, reason: null });
   });
 
+  it("never reads a refused call as a payment PayU never saw (seen from PayU's test host, 14 Oct)", async () => {
+    // A key and salt PayU doesn't accept: no transaction list at all.
+    await expect(verifyPayment(config, "S1abc", fakeFetch({ status: 0, msg: "Invalid Hash." }).impl)).rejects.toMatchObject({
+      code: "rejected",
+      retryable: true,
+      message: "PayU verify_payment: Invalid Hash. (check PAYU_MERCHANT_KEY, PAYU_MERCHANT_SALT and PAYU_MODE)",
+    });
+    await expect(verifyPayment(config, "S1abc", fakeFetch({ status: 0 }).impl)).rejects.toMatchObject({ code: "rejected", message: "PayU verify_payment: refused" });
+  });
+
   it("says when PayU could not be reached, so the caller retries", async () => {
     await expect(verifyPayment(config, "S1abc", fakeFetch({}, 503).impl)).rejects.toMatchObject({ code: "unreachable", retryable: true });
     const down = vi.fn<FetchLike>(async () => {

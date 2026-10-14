@@ -56,6 +56,7 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0040_staff_alert_platform_fallback` | `notify_staff_target`: when the business has no active number of its own and no chat on one of ours (its only number failed, or a trial nobody has written to yet), alerts and account notices go through our oldest active platform number (the demo number), with the staff conversation on its channel under the business. Customers (`notify_target`) unchanged. Outside the member's 24-hour window it still needs an approved `staff_alert` template on that connection (Dev 1's health-jobs note, item 1) |
 | `0041_admin_billing` | The admin panel's billing functions (service role only; the routes check `platform_admins` first; each change and its audit row in one transaction, actor `admin:<user id>`): `admin_tenants()` (every business: status, plan, live credits, trial end, live subscription, setup-fee flag, members, own active numbers); `admin_extend_trial(tenant, days, actor)` (1 to 30 days from the later of its end and now; a trial paused at its end reopens; the TRIAL code follows; trial notices start over; trial credits are not extended; PA409 for a business with a plan); `admin_grant_credits(tenant, amount, expires_at, request_id, note, actor)` (`grant_credits` 'admin'; a repeated request id grants nothing); `admin_update_plan(key, ...)` (null = unchanged; a price change is refused, PA409, while a business is subscribed at the plan or has a downgrade to it scheduled, because mandates were approved for the old amount; only real feature keys; the trial stays free); `admin_update_feature(key, name, description, default_on)`; `admin_refund_candidates()` (payments flagged `payment.needs_refund`) |
 | `0042_billing_cancel` | Cancelling a plan and paying a past-due plan another way (decision 20): `subscriptions.cancel_at`; `cancel_subscription(tenant, actor)` (a plan in good standing stops renewing and ends at its period end, `scheduled`, dropping a scheduled downgrade; a past-due one ends now and the business is paused, `ended`, naming the mandate to revoke; again is harmless; PA409 with no plan), `resume_subscription(tenant, actor)` (undoes it while the period lasts; PA409 when not cancelled), `end_cancelled_subscriptions(now)` (for the renewal job: each cancelled plan whose period has ended is ended, its business paused, its mandate returned to revoke); `renewals_to_notify` and `renewals_to_charge` skip a cancelled plan; `begin_payment` lets a past-due business subscribe again (the pending plan names the past-due one it replaces, which `settle_payment` cancels once paid; the server revokes its mandate); `settle_payment` flags a second setup fee and a renewal charged after the owner cancelled for a refund (`payment.needs_refund`); `anon` and `authenticated` lose INSERT, UPDATE and DELETE on `payments` and `subscriptions` (RLS already refused them; reads stay). Audited: `subscription.cancel_requested`, `subscription.resumed`, `subscription.ended` |
+| `0043_contact_deletion` | A customer's request to delete their data (DPDP): `contacts.deleted_at`; `contact_deletion_preview(tenant, contact)` (counts of chats, messages, leads, bookings and upcoming bookings) and `delete_contact_data(tenant, contact, actor)`: in one transaction it deletes the contact's conversations (with messages and handoffs) and leads (with bookings and quotes), unlinks `kb_gaps.last_contact_id`, scrubs the contact (phone `deleted:<id>`, no name, language or tags) instead of deleting it so its `consent_logs` survive, writes `consent_logs` `deletion_requested` and `deleted` (source `dashboard`) and `audit_logs` `contact.deleted` (actor, counts only), and returns the past bookings' Google Calendar events to take down. PA404 for a contact of another business, PA409 while it has an upcoming held or confirmed booking, `already_deleted` when asked again. Server only |
 | `0044_ai_limits` | Rate limits and the daily AI spend cap: `ai_spend_daily` (server only; one row per business and India's day: the models' estimated `cost_usd` and `calls`), `tenants.ai_daily_cap_usd` (a platform admin's cap for one business; null: the plan's, monthly credits x USD 0.002, at least USD 1), `record_ai_spend(tenant, cost)` and `ai_limits(tenant, conversation?)` (today's spend and cap, and the AI replies in the last hour to the chat and by the business). Server only. (0043 is the contact deletion, #191) |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
@@ -711,7 +712,8 @@ turn ends: nothing is read, updated or replied to. The check also runs for a cha
 off (an opt-out never depends on a toggle; step `stop-check-gated`), and for the safe line sent after a run gave up. The gate
 (step 3) and `notify.send` (which checks `opted_out_at`) refuse every later message of that contact. The notice is recorded
 as shown only when the send is known to have gone out; an unknown outcome leaves `consent_at` null and the next reply
-carries it again. `consent_logs` rows go with the contact if the contact is deleted. A message the model reads as "wants to leave"
+carries it again. `consent_logs` rows would go with the contact if the contact row were deleted, so a deletion request (0043) scrubs the
+contact instead and keeps them. A message the model reads as "wants to leave"
 (`opt_out` intent) without being one of the phrases gets the STOP hint, not an opt-out.
 
 **Rate limits and the daily AI spend cap (`backend/src/lib/ai-limits.ts`, 0044; Day 7).** PLACEHOLDER numbers until Raja decides: one
@@ -761,6 +763,17 @@ invalid `phone` is `invalid` with `fields.phone`.
 - `PATCH /api/admin/features/:key` `{ name?, description?, defaultOn? }` → `AdminFeature`.
 - `GET /api/admin/payments/refunds` → `RefundCandidate[]` (refund each in PayU's dashboard).
 Not built: opening a business's dashboard as an admin (logged) needs its own design.
+
+**A customer's data deletion (`backend/src/consent/deletion.ts`, 0043; types in `@pakka/types` `privacy.ts`; Settings → Data & privacy).**
+Owner or admin; a contact of another business is `not_found`.
+- `GET /api/contacts/:id/deletion` → `ContactDeletionPreview` `{ contactId, deletedAt, conversations, messages, leads, bookings,
+  upcomingBookings }`: what a deletion would remove, for the confirmation.
+- `POST /api/contacts/:id/deletion` (no body) → `ContactDeletionResult` `{ status: deleted | already_deleted, removed { conversations,
+  messages, leads, bookings }, calendarEvents { removed, left } }`. The chats (messages, handoffs) and leads (bookings, quotes) are
+  deleted, the contact is scrubbed, `consent_logs` gets `deletion_requested` and `deleted`, and the audit names the member. Past bookings'
+  Google Calendar events carry the customer's name and are taken down after; `left` counts any that couldn't be (Google unreachable,
+  calendar disconnected): the business removes those by hand. `conflict` while a booking is coming up (cancel it first). If the same
+  number writes again later, it is a new contact.
 
 **Who may call a route (`backend/src/server/auth.ts`, built):**
 

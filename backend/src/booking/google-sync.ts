@@ -130,12 +130,17 @@ export type RemoveResult = "removed" | "already_gone" | "no_event" | "no_calenda
 export async function removeBookingFromGoogle(tenantId: string, bookingId: string, deps: GoogleSyncDeps = defaults()): Promise<RemoveResult> {
   const booking = await loadBooking(tenantId, bookingId, deps.db);
   if (!booking?.calendar_event_id || !booking.resource_id) return "no_event";
-  const [calendar] = await connectedCalendars(tenantId, [booking.resource_id], deps.db);
+  return removeGoogleEvent(tenantId, { resourceId: booking.resource_id, eventId: booking.calendar_event_id }, deps);
+}
+
+/** Takes one event off a resource's Google Calendar, by its id: also for a booking that no longer exists (a contact's data deleted, 0043). */
+export async function removeGoogleEvent(tenantId: string, event: { resourceId: string; eventId: string }, deps: GoogleSyncDeps = defaults()): Promise<RemoveResult> {
+  const [calendar] = await connectedCalendars(tenantId, [event.resourceId], deps.db);
   if (!calendar) return "no_calendar";
-  const token = await deps.accessToken(tenantId, booking.resource_id);
+  const token = await deps.accessToken(tenantId, event.resourceId);
   if (!token) return "no_calendar";
 
-  const path = `/calendars/${encodeURIComponent(calendar.calendar_id)}/events/${encodeURIComponent(booking.calendar_event_id)}`;
+  const path = `/calendars/${encodeURIComponent(calendar.calendar_id)}/events/${encodeURIComponent(event.eventId)}`;
   const res = await callGoogle(deps, token, "DELETE", path);
   if (res.status === 404 || res.status === 410) return "already_gone";
   if (res.status !== 200 && res.status !== 204) throw new Error(`google sync: removing the event failed (${res.status})`);

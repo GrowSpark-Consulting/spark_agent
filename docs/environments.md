@@ -158,7 +158,8 @@ One project, `pakka-agent`, in the team's Vercel account (Pro: Hobby is for non-
    (The `api.*` domains belong to Railway now.)
 5. Environment variables, using the names in `frontend/.env.example` (public values only):
    `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and later
-   `NEXT_PUBLIC_META_APP_ID`, `NEXT_PUBLIC_META_ES_CONFIG_ID`.
+   `NEXT_PUBLIC_META_APP_ID`, `NEXT_PUBLIC_META_ES_CONFIG_ID`, and the optional `NEXT_PUBLIC_SETUP_CALL_URL` and
+   `NEXT_PUBLIC_DEMO_WHATSAPP_NUMBER` (the shared trial/demo number; unset, the wizard says the test chat is unavailable).
    - **Preview**, scoped to branch `main`: staging values (`NEXT_PUBLIC_API_URL` = the staging API)
    - **Production**: production values
    - Never set server secrets (`SUPABASE_SERVICE_ROLE_KEY`, `META_*`, `INNGEST_*`, `ENCRYPTION_KEY`) or
@@ -208,6 +209,22 @@ on the same Node as CI (`.nvmrc`).
 
 Check a deploy: `https://<API host>/api/health` returns
 `{"ok":true,"env":"<railway environment>","commit":"<sha>"}`.
+
+### Failure injection (staging failure tests, Day 7)
+
+For the exit test's failure checks ("with the model call forced to time out, the customer receives exactly one reply"),
+staging can break the language model or WhatsApp for named test businesses only (`backend/src/lib/failure-injection.ts`):
+
+1. Pick a test business (never a client's) and copy its id.
+2. On Railway set `FAILURE_INJECTION` (any of `llm_timeout`, `llm_bad_json`, `whatsapp_send_error`, `whatsapp_send_timeout`,
+   comma-separated) and `FAILURE_INJECTION_TENANTS` (that id; several, comma-separated), then deploy. The log says
+   `[failure-injection] ON for 1 test business(es): ...` at the first model call or send.
+3. Message the business's number and check the inbox, `messages` and `credit_ledger`: one reply (or none, for a send
+   failure), no credit spent for a message that did not go.
+4. Remove both variables and deploy again.
+
+Every other business behaves as usual. Both variables go together, an unknown failure or a business that is not an id
+fails the deploy, and so does injection alongside `PAYU_MODE=live`: a deployment that takes real money is production.
 
 ## DNS for pakkaagent.in
 

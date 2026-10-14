@@ -101,3 +101,20 @@ export function setupCallUrl(): string | null {
   // Referenced literally so Next.js inlines it into the browser bundle at build time.
   return parseSetupCallUrl(process.env.NEXT_PUBLIC_SETUP_CALL_URL);
 }
+
+/**
+ * The shared WhatsApp number that answers trial and demo codes (the number "Open WhatsApp test chat" opens): digits with the country
+ * code, no leading 0 (a "+", spaces, dashes and brackets people type are dropped). Public by design (NEXT_PUBLIC_*). Unset or not a
+ * plausible number, it is null and the wizard says the test chat isn't available rather than linking to a number nobody owns.
+ */
+export function parseDemoWhatsAppNumber(value: string | undefined): string | null {
+  const text = value?.trim();
+  if (!text || !/^\+?[\d\s().-]+$/.test(text)) return null;
+  const digits = text.replace(/\D/g, "");
+  return /^[1-9]\d{7,14}$/.test(digits) ? digits : null;
+}
+
+export function demoWhatsAppNumber(): string | null {
+  // Referenced literally so Next.js inlines it into the browser bundle at build time.
+  return parseDemoWhatsAppNumber(process.env.NEXT_PUBLIC_DEMO_WHATSAPP_NUMBER);
+}

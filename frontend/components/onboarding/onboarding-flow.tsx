@@ -5,10 +5,11 @@ import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { CHECKS, INDUSTRIES, PROFILES, ROUTES, STEP_LABELS, TOTAL_STEPS, type CheckKind } from "@/features/onboarding/data";
+import { CHECKS, ROUTES, STEP_LABELS, TOTAL_STEPS, type CheckKind } from "@/features/onboarding/data";
 import { offeredTrades, type ActivePack, type OfferedTrade } from "@/features/onboarding/packs";
 import {
   industryKey,
+  trialPhoneOf,
   initialState,
   plannedFailure,
   waitHiIndex,
@@ -24,15 +25,12 @@ import { StepWhatsApp } from "@/components/onboarding/step-whatsapp";
 import { StepTeam } from "@/components/onboarding/step-team";
 import { StepLive } from "@/components/onboarding/step-live";
 
-const IMPORT_TICK_MS = 550;
 const CHECK_TICK_MS = 650;
 
 /** Starts on the default trade if it is offered, otherwise on the first offered one, with its profile. */
 function initialStateFor(trades: OfferedTrade[]): OnboardingState {
   if (trades.length === 0 || trades.some((t) => t.index === initialState.ind)) return initialState;
-  const ind = trades[0].index;
-  const profile = PROFILES[INDUSTRIES[ind].key];
-  return { ...initialState, ind, staff: profile.staff.map((p) => ({ ...p })), site: profile.site };
+  return { ...initialState, ind: trades[0].index };
 }
 
 /** activePacks: the active vertical packs, or null when they couldn't be read (no trade is offered). */
@@ -48,22 +46,6 @@ export function OnboardingFlow({ activePacks }: { activePacks: ActivePack[] | nu
       ...(typeof patch === "function" ? patch(prev) : patch),
     }));
   }, []);
-
-  /* ── Website import: advances one line every 550ms, four lines total ── */
-  React.useEffect(() => {
-    if (s.imp !== "run") return;
-    const t = window.setTimeout(() => {
-      set((x) => {
-        const n = x.impStep + 1;
-        return n >= 4 ? { imp: "done", impStep: 4 } : { impStep: n };
-      });
-    }, IMPORT_TICK_MS);
-    return () => window.clearTimeout(t);
-  }, [s.imp, s.impStep, set]);
-
-  const startImport = React.useCallback(() => {
-    set((x) => (x.imp !== "idle" ? {} : { imp: "run", impStep: 0 }));
-  }, [set]);
 
   /* ── Connection checks: one row every 650ms; may fail or wait for “hi” ── */
   React.useEffect(() => {
@@ -102,7 +84,7 @@ export function OnboardingFlow({ activePacks }: { activePacks: ActivePack[] | nu
   const submitBusiness = () => {
     if (!tradeOffered) return;
     startSavingBusiness(async () => {
-      const result = await startTrial({ name: s.biz, industry: industryKey(s) });
+      const result = await startTrial({ name: s.biz, industry: industryKey(s), phone: trialPhoneOf(s) });
       if (result.status === "ready") {
         set({ trial: result.trial, hasBusiness: false, trialError: null, step: 2 });
       } else if (result.status === "has_business") {
@@ -113,7 +95,7 @@ export function OnboardingFlow({ activePacks }: { activePacks: ActivePack[] | nu
             result.status === "unavailable"
               ? "Trials for this trade aren’t open yet."
               : result.status === "invalid"
-                ? (result.fields.name ?? result.fields.industry ?? "Check your business details.")
+                ? (result.fields.name ?? result.fields.industry ?? result.fields.phone ?? "Check your business details.")
                 : result.message,
         });
         return;
@@ -128,8 +110,7 @@ export function OnboardingFlow({ activePacks }: { activePacks: ActivePack[] | nu
 
   const nextOff =
     (st === 0 && s.otpSent && s.otp.length < 6) ||
-    (st === 1 && (!s.biz.trim() || !tradeOffered || savingBusiness)) ||
-    (st === 2 && s.imp !== "done");
+    (st === 1 && (!s.biz.trim() || !tradeOffered || savingBusiness));
 
   const nextLabel =
     st === 0
@@ -138,8 +119,6 @@ export function OnboardingFlow({ activePacks }: { activePacks: ActivePack[] | nu
         : "Send code on WhatsApp"
       : st === 1 && savingBusiness
         ? "Setting up…"
-        : st === 2
-        ? "Looks good"
         : st === 3
           ? "I’ve tried it"
           : st === 4
@@ -223,12 +202,12 @@ export function OnboardingFlow({ activePacks }: { activePacks: ActivePack[] | nu
         <div className="max-w-[680px] w-full flex flex-col gap-6">
           {st === 0 && <StepVerifyPhone s={s} set={set} />}
           {st === 1 && <StepBusiness s={s} set={set} trades={trades} packsFailed={activePacks === null} />}
-          {st === 2 && <StepTeach s={s} set={set} onImport={startImport} />}
+          {st === 2 && <StepTeach />}
           {st === 3 && <StepTry s={s} />}
           {st === 4 && (
             <StepWhatsApp s={s} set={set} onRunChecks={startChecks} />
           )}
-          {st === 5 && <StepTeam s={s} set={set} />}
+          {st === 5 && <StepTeam s={s} />}
           {st === 6 && <StepLive s={s} />}
 
           {/* ── Footer nav ── */}

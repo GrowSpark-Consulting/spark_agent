@@ -249,10 +249,22 @@ function verified(detail: z.infer<typeof Detail>): VerifiedPayment {
 /** What PayU says happened to one of our payments. The only answer the server acts on. */
 export async function verifyPayment(config: PayuConfig, txnid: string, fetchImpl: FetchLike = defaultFetch): Promise<VerifiedPayment> {
   const answer = z
-    .object({ status: z.union([z.number(), z.string()]).optional(), transaction_details: z.record(z.string(), Detail).optional() })
+    .object({
+      status: z.union([z.number(), z.string()]).optional(),
+      msg: z.string().optional(),
+      message: z.string().optional(),
+      transaction_details: z.record(z.string(), Detail).optional(),
+    })
     .safeParse(await postService(config, "verify_payment", txnid, fetchImpl));
   if (!answer.success) throw new PayuError("unexpected", "PayU verify_payment: an answer we cannot read", true);
-  const detail = answer.data.transaction_details?.[txnid];
+  // PayU lists every txnid it was asked about, an unknown one as "Not Found". No list at all is a refusal of the call
+  // itself ({"status":0,"msg":"Invalid Hash."} for a key and salt it doesn't accept): never read that as "not found".
+  if (!answer.data.transaction_details) {
+    const text = (answer.data.msg ?? answer.data.message ?? "refused").slice(0, 300);
+    const hint = /hash|key/i.test(text) ? " (check PAYU_MERCHANT_KEY, PAYU_MERCHANT_SALT and PAYU_MODE)" : "";
+    throw new PayuError("rejected", `PayU verify_payment: ${text}${hint}`, true);
+  }
+  const detail = answer.data.transaction_details[txnid];
   if (!detail) return { state: "not_found", providerPaymentId: null, method: null, amountPaise: null, reason: null };
   return verified(detail);
 }

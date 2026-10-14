@@ -3,10 +3,16 @@
 
 import { TRIAL_PACKS, type IndustryKey } from "@pakka/types";
 
-export const TRIAL_CODE = "TRIAL-7F3K";
-
-/** The WhatsApp test chat, with a trial code as the first message. */
-export const trialChatUrl = (code: string) => `https://wa.me/919000000000?text=${encodeURIComponent(code)}`;
+/**
+ * The WhatsApp test chat on the shared demo number, with the business's own route code as the first message (the backend
+ * routes on that code: channels/whatsapp/demo/code.ts). Null when there is no configured number or no real code, so the
+ * caller says the chat is unavailable instead of linking somewhere made up.
+ */
+export function trialChatUrl(number: string | null, routeCode: string | null): string | null {
+  const code = routeCode?.trim();
+  if (!number || !code || !/^[1-9]\d{7,14}$/.test(number)) return null;
+  return `https://wa.me/${number}?text=${encodeURIComponent(code)}`;
+}
 
 export const ROUTES = {
   landing: "/",
@@ -312,15 +318,6 @@ export function featureDescription(index: number, profile: IndustryProfile) {
   return [base, profile.qualify, profile.booking, profile.reminders, base, profile.feedback][index];
 }
 
-export function importStepTexts(site: string, profile: IndustryProfile) {
-  return [
-    "Reading " + site,
-    "Finding " + profile.noun,
-    "Collecting common questions",
-    "Drafting replies in your tone",
-  ];
-}
-
 /* ── WhatsApp connection ─────────────────────────────────────────────── */
 
 export type WaMethod = "meta" | "manual";
@@ -424,44 +421,3 @@ export const CHECKS: Record<CheckKind, ConnectionCheck[]> = {
     { title: "Webhook reachable" },
   ],
 };
-
-/* ── Deterministic fake QR (25×25) ───────────────────────────────────── */
-
-export const QR_SIZE = 25;
-
-function buildQrCells(): boolean[] {
-  const N = QR_SIZE;
-  const cells: boolean[] = [];
-  let seed = 7;
-  const rnd = () => {
-    seed = (seed * 9301 + 49297) % 233280;
-    return seed / 233280;
-  };
-  const finder = (r: number, c: number): 0 | 1 | null => {
-    for (const [fr, fc] of [
-      [0, 0],
-      [0, N - 7],
-      [N - 7, 0],
-    ]) {
-      const y = r - fr;
-      const x = c - fc;
-      if (y >= 0 && y < 7 && x >= 0 && x < 7) {
-        return y === 0 || y === 6 || x === 0 || x === 6 || (y >= 2 && y <= 4 && x >= 2 && x <= 4)
-          ? 1
-          : 0;
-      }
-      if (y >= -1 && y <= 7 && x >= -1 && x <= 7) return 0;
-    }
-    return null;
-  };
-  for (let r = 0; r < N; r++) {
-    for (let x = 0; x < N; x++) {
-      const f = finder(r, x);
-      cells.push(f === null ? rnd() > 0.52 : f === 1);
-    }
-  }
-  return cells;
-}
-
-/** true = dark module (#111), false = light (#fff) */
-export const QR_CELLS = buildQrCells();

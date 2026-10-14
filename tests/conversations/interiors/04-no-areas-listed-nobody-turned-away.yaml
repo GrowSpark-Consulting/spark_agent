@@ -1,0 +1,19 @@
+name: A business that has listed no service areas turns nobody away, whatever pincode the customer gives
+description: "Raja, 14 Oct. Where the business has not said where it works, the pincode cannot be judged, so the customer is not sent looking for another place and nobody is reminded: the assistant carries on as before. (The catalog item has a price but no areas.)"
+pack: interiors
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { type: service, priceFrom: 1000000, attributes: { price_to: 3000000 } }
+turns:
+  - customer: "I want interiors for my apartment, pincode 641001"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { property_type: apartment, pincode: "641001" }, question: null }
+      reply: "Thanks. What is the size of the apartment in sq ft, and what would you like done?"
+    expect:
+      reply: { sent: true, notContains: ["we don't have", "for now"] }
+      aiReplies: 1
+      handoff: null
+      areaReminder: false
+    mockOnly:
+      case: ask_details

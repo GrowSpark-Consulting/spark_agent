@@ -1,5 +1,6 @@
 import { serverSpendGuard, withSpendGuard } from "../../lib/ai-limits";
 import { serverEnv } from "../../lib/env";
+import { serverFailureInjection, withLlmFailures } from "../../lib/failure-injection";
 import { createAnthropicClient, type LlmClient } from "./anthropic";
 import { tracerFromEnv, type TracerHandle } from "./tracing";
 
@@ -19,7 +20,9 @@ export function llm(): LlmClient {
     const env = serverEnv();
     tracing = tracerFromEnv(env);
     // Each call's cost goes into today's spend, and a business past its daily cap gets no more calls (lib/ai-limits.ts).
-    client = withSpendGuard(createAnthropicClient(env.ANTHROPIC_API_KEY, tracing.tracer), serverSpendGuard());
+    // On staging, failure injection may break it for named test businesses (lib/failure-injection.ts); outermost, so
+    // an injected failure is neither counted as spend nor stopped by the cap.
+    client = withLlmFailures(withSpendGuard(createAnthropicClient(env.ANTHROPIC_API_KEY, tracing.tracer), serverSpendGuard()), serverFailureInjection());
   }
   return client;
 }
