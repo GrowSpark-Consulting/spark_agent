@@ -53,6 +53,7 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0037_renewals` | Plan renewals by PayU auto-debit: `payments.for_period_end` (one open renewal per subscription and period), `subscriptions.pre_debit_at` (the debit time the notice announced); `begin_renewal`, `renewals_to_notify`, `renewals_to_charge` (period ended, announced time come, none pending or paid, under 3 failed attempts, none in 2 days), `grant_annual_credit_months`, `lapse_overdue_subscriptions` (past due 7 days → cancelled, business paused); `settle_payment` now settles renewals (success moves the period on and grants the month to the end of the next month; failure → `past_due`) and audits a payment that needs a refund as `payment.needs_refund`. Service role only |
 | `0038_plan_change` | `begin_plan_change(tenant, plan, txnid)`: the same plan cancels a scheduled downgrade (`kept`) or does nothing (`unchanged`); a cheaper plan is scheduled for the next renewal (`next_plan_key`; `scheduled`); a dearer one is an upgrade now (`upgrade`): the price difference for the rest of the period (at least ₹1, GST added) and a new mandate at the new full price, as a pending subscription that `replaces_subscription_id` the current one, with the rest of the month's extra credits. PA409 without a plan, PA428 while a renewal is past due. `settle_payment` applies a paid upgrade: old plan cancelled (the server revokes its mandate at PayU), new one active over the same period, extra credits joining the current month's. Service role only |
 | `0039_trial_lifecycle` | The trial's messages and its end: `trial_notices` (server-only; one row per business and day, claimed before sending; `claimed_by` = the job run, so a retry of that run may send again and another run may not); `trial_notices_due(now)` (each trial's latest due day: 3 four days before the end, 5 two days before, 6 one day before, 7 once paused at the end, within 3 days); `claim_trial_notice(tenant, day, run)` → `claimed` / `already` / `superseded` / `not_eligible`, rechecked under the business's row lock (never a business with an active or past_due subscription); `pause_expired_trials(now)` (an ended trial with no live subscription and no subscription payment pending → `paused`, audited `tenant.trial_ended`; a business being paid for is skipped). Service role only |
+| `0042_billing_cancel` | Cancelling a plan and paying a past-due plan another way (decision 20): `subscriptions.cancel_at`; `cancel_subscription(tenant, actor)` (a plan in good standing stops renewing and ends at its period end, `scheduled`, dropping a scheduled downgrade; a past-due one ends now and the business is paused, `ended`, naming the mandate to revoke; again is harmless; PA409 with no plan), `resume_subscription(tenant, actor)` (undoes it while the period lasts; PA409 when not cancelled), `end_cancelled_subscriptions(now)` (for the renewal job: each cancelled plan whose period has ended is ended, its business paused, its mandate returned to revoke); `renewals_to_notify` and `renewals_to_charge` skip a cancelled plan; `begin_payment` lets a past-due business subscribe again (the pending plan names the past-due one it replaces, which `settle_payment` cancels once paid; the server revokes its mandate); `settle_payment` flags a second setup fee and a renewal charged after the owner cancelled for a refund (`payment.needs_refund`); `anon` and `authenticated` lose INSERT, UPDATE and DELETE on `payments` and `subscriptions` (RLS already refused them; reads stay). Audited: `subscription.cancel_requested`, `subscription.resumed`, `subscription.ended` |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -565,16 +566,24 @@ admin grant starts again. Credits that expire with no spend wake nothing; the ne
 `credits_exhausted` handoff alert as before. Auto top-up ("if on", the handover) waits for PayU billing (Day 6).
 
 **Plan renewals (`billing-renewals`, built 13 Oct; `backend/src/billing/renewals.ts`, decision 20).** Once a day at
-06:00 in India (outside NPCI's busy hours for UPI debits), five steps, each safe to repeat:
+06:00 in India (outside NPCI's busy hours for UPI debits), six steps, each safe to repeat:
 1. **Notices:** each mandate whose period ends within 4 days gets its renewal payment and PayU's pre-debit notice (cards
    and UPI; e-NACH needs none), announcing the job's first run at least 48 hours away and not before the period ends.
 2. **Charges:** at that run the mandate is charged. The payment is marked pending before PayU is asked, so a crash or
    timeout never charges twice. A failure sends the owners and admins an `account_notice` ("Your Spark Agent plan payment of
    ₹2,948.82 didn't go through. We'll try again in 2 days." with the billing link; key `renewal_failed:<payment id>`).
    Up to 3 attempts a period, 2 days apart; the subscription is `past_due` meanwhile and the business keeps working.
-3. **Pending:** charges pending over 10 minutes are verified with PayU; one PayU has no record of after an hour is failed.
+   The alert says "To pay another way, choose your plan again in Billing." (0042: a new checkout replaces the failing
+   mandate). After the last attempt, or when the mandate can't be charged at all, it says "...didn't go through and won't
+   be tried again." and "Your assistant pauses on 24 Oct 2026 unless you choose your plan again in Billing." (the run
+   that will lapse it).
+3. **Pending:** charges pending over 10 minutes are verified with PayU; one PayU has no record of after an hour is failed
+   (nothing was taken, so the owners hear only when it was the last attempt).
 4. **Annual months:** an annual plan's credits still come month by month.
-5. **Lapse:** a plan unpaid 7 days after its period ended is cancelled and the business paused; the owners and admins
+5. **Ended (0042):** a plan its owner cancelled ends with its paid period: cancelled, the business paused, the mandate
+   revoked at PayU (logged if PayU refuses: the plan is never charged again either way) and the owners and admins told
+   ("Your Spark Agent plan has ended as you asked...", key `subscription_ended:<subscription id>`).
+6. **Lapse:** a plan unpaid 7 days after its period ended is cancelled and the business paused; the owners and admins
    are told (key `subscription_lapsed:<subscription id>`; an `account_notice`, since a `staff_alert` is skipped once the
    business is paused). Choosing a plan in Billing starts again.
 UNVERIFIED until the PayU test account: whether a retry needs a fresh pre-debit notice (UPI's sequence numbers).
@@ -846,7 +855,17 @@ Plain lists (leads, conversations, bookings, services) are read directly under R
     rest of the period's difference on PayU, which also approves the new auto-debit; the plan changes once it is paid and
     the old mandate is revoked), `scheduled` `{ planKey, effectiveAt }` (a downgrade from the next renewal), `kept` (a
     scheduled downgrade cancelled) or `unchanged`. `conflict` without a plan or while a renewal is past due;
-    `not_available` for a different `cycle` (switching monthly and yearly isn't offered yet).
+    `not_available` for a different `cycle` (switching monthly and yearly isn't offered yet); `conflict` for a cancelled
+    plan (keep it first).
+  - `POST /api/billing/cancel` (no body) → `CancelPlanResult`: `scheduled` `{ endsAt }` (the plan stops renewing and ends
+    with the period already paid; nothing changes at PayU until then) or `ended` (a past-due plan ends now: the business
+    is paused and its mandate revoked). Asking again changes nothing. `conflict` without a plan. Owner only; needs no PayU
+    keys.
+  - `POST /api/billing/resume` (no body) → `ResumePlanResult` `{ renewsAt }`: a cancelled plan renews again while its
+    period lasts. `conflict` when there is no cancelled plan to keep. Owner only.
+  - A past-due business may `POST /api/billing/checkout` again ("pay another way"): once paid, the new plan starts from
+    now on the new mandate, and the past-due plan is cancelled and its mandate revoked. A plan in good standing still
+    answers `conflict`.
   - `GET /api/billing/payments/:id` → `PaymentView` `{ id, kind, status: created | pending | success | failed, amountInr,
     failureReason, createdAt }`. Any member. While not final it asks PayU again (at most every 5 seconds).
   - `POST /api/billing/payu/return`: PayU's surl and furl (the payer's browser, from PayU's page). Verifies with PayU, then
@@ -855,7 +874,8 @@ Plain lists (leads, conversations, bookings, services) are read directly under R
     ours, 503 while PayU can't be asked (so PayU retries). Nothing posted to either URL is trusted, only `verify_payment`.
 - `GET /api/billing/balance` → `AccountStatus` (`backend/src/billing/account-status.ts`): `status`, `plan { key, name, monthlyCredits }`,
   `credits { plan, topup, total }` (`credit_balance`), `creditsGranted` (the meter's denominator: grants of plan, trial,
-  top-up and admin credits whose bucket is still live), `renewsAt` (the subscription's period end, active businesses only),
+  top-up and admin credits whose bucket is still live), `renewsAt` (the subscription's period end, active businesses only;
+  null once cancelled), `endsAt` (the owner cancelled: when the plan ends; null otherwise),
   `trialEndsAt`, `aiPaused` with `aiPausedReason` (in this order: `paused` (`trial_ended` for a trial the trial-lifecycle
   job paused at its end, plan still `trial`), `cancelled`, `trial_ended`,
   `whatsapp_not_connected` (a paying business with no active WhatsApp number, never connected or failed; a trial replies

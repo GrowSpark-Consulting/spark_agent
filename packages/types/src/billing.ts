@@ -57,6 +57,20 @@ export const ChangePlanResult = z.discriminatedUnion("action", [
 ]);
 export type ChangePlanResult = z.infer<typeof ChangePlanResult>;
 
+/**
+ * POST /api/billing/cancel (owner, no body). scheduled: the plan ends at `endsAt`, the end of the period already paid, and
+ * is not renewed (POST /api/billing/resume keeps it until then). ended: a past-due plan ended now and the business is paused.
+ */
+export const CancelPlanResult = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("scheduled"), endsAt: z.string() }),
+  z.object({ status: z.literal("ended") }),
+]);
+export type CancelPlanResult = z.infer<typeof CancelPlanResult>;
+
+/** POST /api/billing/resume (owner, no body): a cancelled plan renews again from `renewsAt`. */
+export const ResumePlanResult = z.object({ renewsAt: z.string() });
+export type ResumePlanResult = z.infer<typeof ResumePlanResult>;
+
 export const PAYMENT_KINDS = ["subscribe", "renewal", "plan_change", "topup", "setup_fee"] as const;
 export const PAYMENT_STATUSES = ["created", "pending", "success", "failed"] as const;
 
