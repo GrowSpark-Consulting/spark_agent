@@ -28,16 +28,15 @@ async function openOnboarding(page: Page) {
 }
 
 /** Walks the wizard to the given step heading, picking a trade on the Business step. */
-async function walkTo(page: Page, stop: "WhatsApp" | "Team" | "Live", trade = "Real estate", { codeSent = false } = {}) {
+async function walkTo(page: Page, stop: "Try" | "WhatsApp" | "Team" | "Live", trade = "Real estate", { codeSent = false } = {}) {
   if (!codeSent) await next(page, "Send code on WhatsApp").click();
   await page.getByPlaceholder("––––––").fill("123456");
   await next(page, "Verify and continue").click();
   await page.getByLabel("Business name").fill("Sunrise Homes");
   await option(page, trade).click();
   await next(page, "Continue").click();
-  await next(page, "Import").click();
-  await advance(page, 600, 6);
-  await next(page, "Looks good").click();
+  await next(page, "Continue").click();
+  if (stop === "Try") return;
   await next(page, "I’ve tried it").click();
   if (stop === "WhatsApp") return;
   await next(page, "Do this later").click();
@@ -93,22 +92,29 @@ test("walks every step without overflow, and Back returns", async ({ page }) => 
   await next(page, "Continue").click();
 
   await expect(page.getByRole("heading", { name: "Teach your assistant" })).toBeVisible();
-  await expect(next(page, "Looks good")).toBeDisabled();
-  await next(page, "Import").click();
-  await advance(page, 600, 6);
-  await expect(next(page, "Looks good")).toBeEnabled();
+  // No website import exists: the step says so, shows nothing "found", and never blocks Continue.
+  await expect(page.getByTestId("import-unavailable")).toContainText("isn’t available yet");
+  await expect(page.getByText(/found/)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Import" })).toHaveCount(0);
+  await expect(next(page, "Continue")).toBeEnabled();
   await expectNoHorizontalOverflow(page);
-  await next(page, "Looks good").click();
+  await next(page, "Continue").click();
 
   await expect(page.getByRole("heading", { name: "Try your assistant now" })).toBeVisible();
-  // The one-trial-per-number refusal is the test chat's WhatsApp reply (Dev 1, PR 1b), not an answer the wizard gets, so the wizard only sets the expectation.
-  await expect(page.getByTestId("one-trial-note")).toContainText("one free trial for each WhatsApp number");
+  // This account already has a business: no trial exists, so there is no code, no test chat link and no trial note.
+  await expect(page.getByTestId("no-trial-chat")).toContainText("already has a business");
+  await expect(page.locator('a[href*="wa.me"]')).toHaveCount(0);
+  await expect(page.getByText(/TRIAL-/)).toHaveCount(0);
+  await expect(page.getByTestId("one-trial-note")).toHaveCount(0);
   await next(page, "Back").click();
   await expect(page.getByRole("heading", { name: "Teach your assistant" })).toBeVisible();
-  await next(page, "Looks good").click();
+  await next(page, "Continue").click();
   await next(page, "I’ve tried it").click();
 
   await expect(page.getByRole("heading", { name: "Connect your WhatsApp number" })).toBeVisible();
+  // NEXT_PUBLIC_SETUP_CALL_URL is not set in this build: the setup-call offer says to ask the team and links nowhere.
+  await expect(page.getByTestId("setup-call")).toContainText("Ask the Spark Agent team");
+  await expect(page.getByTestId("setup-call").getByRole("link")).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
   await next(page, "Do this later").click();
 
@@ -117,9 +123,11 @@ test("walks every step without overflow, and Back returns", async ({ page }) => 
   await next(page, "Go live").click();
 
   await expect(page.getByRole("link", { name: "Go to my dashboard" })).toBeVisible();
-  // No trial was created here (the account already has a business), so the summary is the default.
-  await expect(page.getByText("7 days · 300 credits")).toBeVisible();
-  await expect(page.getByText(/150 credits/)).toHaveCount(0);
+  // No trial was created here (the account already has a business): no trial code, credits or days are shown, and nothing says the
+  // assistant is live while no number is connected.
+  await expect(page.getByText(/credits/)).toHaveCount(0);
+  await expect(page.getByText(/Test number/)).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "You’re set up." })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 });
 
@@ -411,7 +419,16 @@ test.describe("onboarding needs an account", () => {
     await expect(page.getByText(/6-digit code sent to \+91/)).toBeVisible();
     await expect(page.getByText(/sent to .*@/)).toHaveCount(0);
 
-    await walkTo(page, "Live", "Beauty parlour", { codeSent: true });
+    await walkTo(page, "Try", "Beauty parlour", { codeSent: true });
+    // A real trial was created: the link carries this business's own code and the configured (fictional, e2e) demo number.
+    const code = (await page.getByText(/^Your code is/).locator("strong").textContent()) ?? "";
+    expect(code).toMatch(/^TRIAL-[A-Z0-9]{4}$/);
+    await expect(page.getByRole("link", { name: "Open WhatsApp test chat" })).toHaveAttribute("href", `https://wa.me/15555550100?text=${code}`);
+    await expect(page.getByTestId("test-chat-unavailable")).toHaveCount(0);
+    await expect(page.getByTestId("one-trial-note")).toContainText("one free trial for each WhatsApp number");
+    await next(page, "I’ve tried it").click();
+    await next(page, "Do this later").click();
+    await next(page, "Go live").click();
     await expect(page.getByRole("link", { name: "Go to my dashboard" })).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });

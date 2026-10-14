@@ -158,7 +158,8 @@ One project, `pakka-agent`, in the team's Vercel account (Pro: Hobby is for non-
    (The `api.*` domains belong to Railway now.)
 5. Environment variables, using the names in `frontend/.env.example` (public values only):
    `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and later
-   `NEXT_PUBLIC_META_APP_ID`, `NEXT_PUBLIC_META_ES_CONFIG_ID`.
+   `NEXT_PUBLIC_META_APP_ID`, `NEXT_PUBLIC_META_ES_CONFIG_ID`, and the optional `NEXT_PUBLIC_SETUP_CALL_URL` and
+   `NEXT_PUBLIC_DEMO_WHATSAPP_NUMBER` (the shared trial/demo number; unset, the wizard says the test chat is unavailable).
    - **Preview**, scoped to branch `main`: staging values (`NEXT_PUBLIC_API_URL` = the staging API)
    - **Production**: production values
    - Never set server secrets (`SUPABASE_SERVICE_ROLE_KEY`, `META_*`, `INNGEST_*`, `ENCRYPTION_KEY`) or
