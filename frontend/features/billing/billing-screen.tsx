@@ -91,8 +91,10 @@ function BillingView({ tenantId, timeZone, isOwner, paymentId }: { tenantId: str
 
       <Section id="plan" title="Your plan">
         <Body state={status} loading="Loading your plan" missing="Your plan isn't available yet" errorTitle="Couldn't load your plan" onRetry={retryStatus}>
-          {(s) => <PlanCard status={s} timeZone={timeZone} tenantId={tenantId} isOwner={isOwner} onChanged={retryStatus} />}
+          {(s) => <PlanCard status={s} timeZone={timeZone} />}
         </Body>
+        {/* Outside Body on purpose: the plan is re-read after a cancel or resume, and its message must survive that reload. */}
+        {isOwner ? <PlanEnding tenantId={tenantId} timeZone={timeZone} status={status.status === "ready" ? status.data : null} onChanged={retryStatus} /> : null}
       </Section>
 
       <Section id="credits" title="Credits">
@@ -174,7 +176,7 @@ function Body<T>({
 
 const date = (iso: string, timeZone: string) => new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone }).format(new Date(iso));
 
-function PlanCard({ status, timeZone, tenantId, isOwner, onChanged }: { status: AccountStatus; timeZone: string; tenantId: string; isOwner: boolean; onChanged: () => void }) {
+function PlanCard({ status, timeZone }: { status: AccountStatus; timeZone: string }) {
   const notice = pausedNotice(status.aiPausedReason);
   const trialDays = status.status === "trial" ? daysLeft(status.trialEndsAt, new Date()) : null;
   return (
@@ -215,9 +217,6 @@ function PlanCard({ status, timeZone, tenantId, isOwner, onChanged }: { status: 
         <p role="alert" data-testid="billing-paused" data-reason={notice.reason} className="app-notice" style={{ margin: 0 }}>
           <strong>{notice.title}.</strong> {notice.detail}
         </p>
-      ) : null}
-      {isOwner && status.status === "active" ? (
-        <PlanEnding tenantId={tenantId} timeZone={timeZone} renewsAt={status.renewsAt} endsAt={status.endsAt ?? null} onChanged={onChanged} />
       ) : null}
       {status.status === "trial" && !notice ? (
         <p className="app-card-text" data-testid="trial-prompt">

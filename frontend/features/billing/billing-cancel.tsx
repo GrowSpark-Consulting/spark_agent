@@ -1,5 +1,6 @@
 "use client";
 
+import type { AccountStatus } from "@pakka/types";
 import { useRef, useState } from "react";
 import { ConfirmDialog } from "@/features/knowledge/confirm-dialog";
 import { formatError, type FormattedError } from "@/lib/errors";
@@ -24,19 +25,20 @@ function describeError(err: unknown): FormattedError {
 export function PlanEnding({
   tenantId,
   timeZone,
-  renewsAt,
-  endsAt,
+  status,
   onChanged,
 }: {
   tenantId: string;
   timeZone: string;
-  /** When the paid plan renews; null when it is cancelled, a trial, or has no subscription. */
-  renewsAt: string | null;
-  /** When a cancelled plan ends (it is not renewed); null when it is not cancelled. */
-  endsAt: string | null;
+  /** The plan as the API last said it; null while it is loading or failed to load. The buttons follow it; the messages outlive a re-read. */
+  status: AccountStatus | null;
   /** Re-read the plan from the API. */
   onChanged: () => void;
 }) {
+  // Only a plan in good standing can be cancelled or kept; a trial, a paused or cancelled business has nothing to do here.
+  const active = status?.status === "active";
+  const renewsAt = active ? status.renewsAt : null;
+  const endsAt = active ? (status.endsAt ?? null) : null;
   const [confirming, setConfirming] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [done, setDone] = useState<string | null>(null);
@@ -72,6 +74,7 @@ export function PlanEnding({
     onChanged();
   }
 
+  if (!endsAt && !renewsAt && !done && !error) return null;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }} data-testid="plan-ending">
       {endsAt ? (
