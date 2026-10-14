@@ -487,6 +487,21 @@ describe("never two replies", () => {
     expect(w.audits).toEqual([]);
   });
 
+  it("logs one fixed line, '[pipeline] reply send retried', when a send failed in a way that makes the step run again: no ids, phone numbers or text, and silent otherwise", async () => {
+    const lines: string[] = [];
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => void lines.push(a.join(" ")));
+    const failing = (retryable: boolean, outcomeUnknown: boolean) => world({ send: () => ({ status: "failed", error: { code: "rate_limited", message: "secret detail +919876543210", retryable, outcomeUnknown } }) });
+
+    const retried = failing(true, false);
+    await expect(replyTurn(runner().step, retried.turn, understood(found), Date.now(), retried.deps)).rejects.toThrow(/could not be sent/);
+    expect(lines).toEqual(["[pipeline] reply send retried"]);
+
+    // not a retry: a send that failed for good, one whose outcome is unknown (it may have gone out), and one that went out
+    for (const w of [failing(false, false), failing(true, true), world()]) await replyTurn(runner().step, w.turn, understood(found), Date.now(), w.deps);
+    expect(lines).toEqual(["[pipeline] reply send retried"]);
+  });
+
   it("a send that failed for good is not retried: not_sent, nothing recorded", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const w = world({ send: () => ({ status: "failed", error: { code: "whatsapp_not_connected", message: "x", retryable: false, outcomeUnknown: false } }) });
