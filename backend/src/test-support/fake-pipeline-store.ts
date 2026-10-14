@@ -1,4 +1,4 @@
-import type { HandoffPriority, TenantReplyInfo } from "../agent/pipeline/store";
+import { parseChatCoverage, type HandoffPriority, type TenantReplyInfo } from "../agent/pipeline/store";
 import { parsePendingState } from "../agent/scheduling/state";
 import type { BatchText, ContactRow, ConversationRow, HistoryItem, InboundMessage, LeadRow, LeadState, PendingMessage, PipelineStore, TenantRow } from "../agent/pipeline/store";
 
@@ -84,8 +84,9 @@ export function fakePipelineStore(
   const consentLogs: FakeConsentLog[] = [];
   /** record_kb_gap's rows: one per business and normalised question, with the business-wide count. */
   const gaps = new Map<string, { tenantId: string; norm: string; question: string; contactId: string; askedCount: number }>();
-  const state = { failNext: new Set<keyof PipelineStore>(), leadCounter: 0, handoffCounter: 0 };
+  const state = { failNext: new Set<keyof PipelineStore>(), /** Fails on EVERY call, until removed. */ failAlways: new Set<keyof PipelineStore>(), leadCounter: 0, handoffCounter: 0 };
   const maybeFail = (op: keyof PipelineStore) => {
+    if (state.failAlways.has(op)) throw new Error(`${op} failed (simulated, always)`);
     if (state.failNext.delete(op)) throw new Error(`${op} failed (simulated)`);
   };
   /** Leads staff were told are hot (the audit row the reply step writes; a test's audit fake adds to it). */
@@ -236,6 +237,24 @@ export function fakePipelineStore(
       for (const m of earlier) {
         const planCase = (m.meta?.agent as { planCase?: unknown } | undefined)?.planCase;
         if (typeof planCase === "string") return planCase;
+      }
+      return null;
+    },
+    async recordedMessageIds(tenantId, conversationId, ids) {
+      calls.push("recordedMessageIds");
+      maybeFail("recordedMessageIds");
+      return [...messages.values()].filter((m) => m.tenantId === tenantId && m.conversationId === conversationId && ids.includes(m.id)).map((m) => m.id);
+    },
+    async getPreviousCoverage(tenantId, conversationId, before) {
+      calls.push("getPreviousCoverage");
+      maybeFail("getPreviousCoverage");
+      const earlier = [...messages.values()]
+        .filter((m) => m.tenantId === tenantId && m.conversationId === conversationId && m.sender === "customer" && Date.parse(m.createdAt) < Date.parse(before))
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+        .slice(0, 20);
+      for (const m of earlier) {
+        const agent = m.meta?.agent as Record<string, unknown> | undefined;
+        if (agent && Object.hasOwn(agent, "coverage")) return parseChatCoverage(agent.coverage);
       }
       return null;
     },

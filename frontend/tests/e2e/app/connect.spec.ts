@@ -38,7 +38,7 @@ test("the Facebook step is not run when Meta isn't configured here: it says so, 
   await page.getByRole("radio", { name: /No, it’s a new number/ }).check();
   await page.getByRole("button", { name: "Continue with Facebook" }).click();
   const failed = page.getByTestId("connect-failed");
-  await expect(failed).toContainText("isn’t switched on yet");
+  await expect(failed).toContainText("isn't switched on yet");
   await expect(failed).toContainText("Nothing was changed");
   await expect(page.getByTestId("connect-done")).toHaveCount(0);
   await expect(page.getByTestId("setup-call")).toBeVisible();
@@ -47,7 +47,7 @@ test("the Facebook step is not run when Meta isn't configured here: it says so, 
 test("an unknown, expired or used link (404) is invalid, with no way to continue", async ({ page }) => {
   await stubApi(page, LINK, () => refusal(404, "not_found", "That link was not found."));
   await page.goto(`/connect/${TOKEN}`);
-  await expect(page.getByTestId("connect-invalid")).toContainText("This link isn’t valid");
+  await expect(page.getByTestId("connect-invalid")).toContainText("This link isn't valid or has expired.");
   await expect(page.getByRole("button", { name: "Continue with Facebook" })).toHaveCount(0);
 });
 
@@ -61,7 +61,7 @@ test("something that isn't shaped like a token is invalid without asking the ser
 test("Embedded Signup switched off on the server (501) is said plainly and points to the setup call", async ({ page }) => {
   await stubApi(page, LINK, () => refusal(501, "not_available", "Not available."));
   await page.goto(`/connect/${TOKEN}`);
-  await expect(page.getByTestId("connect-problem")).toContainText("Connecting through Facebook isn’t switched on yet");
+  await expect(page.getByTestId("connect-problem")).toContainText("Connecting with Facebook isn't switched on yet.");
   await expect(page.getByTestId("setup-call")).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue with Facebook" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0);

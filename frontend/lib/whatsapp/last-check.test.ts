@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CHECK_KEYS, checkStatus, checkTitle, overallSummary, parseLastCheck, webhookUnconfirmed } from "./last-check";
+import { CHECK_KEYS, checkStatus, checkTitle, overallSummary, parseLastCheck, webhookBanner, webhookUnconfirmed } from "./last-check";
 
 const RAN = "2026-10-12T04:30:00.000Z";
 const check = (key: string, status: string, message = `${key} message`) => ({ key, status, message, checked_at: RAN });
@@ -88,5 +88,40 @@ describe("words", () => {
     expect(overallSummary("pass", 6)).toBe("All 6 checks passed.");
     expect(overallSummary("warn", 6)).not.toMatch(/passed/);
     expect(overallSummary("fail", 6)).toMatch(/failed/);
+  });
+});
+
+describe("webhookBanner", () => {
+  const banner = (overrides: Record<string, string>, overall = "warn") => webhookBanner(parseLastCheck(lastCheck(all(overrides), overall)));
+
+  it("says plainly that messages can't arrive when the webhook check warns or fails", () => {
+    for (const status of ["warn", "fail"]) {
+      expect(banner({ webhook_subscribed: status })).toEqual({
+        kind: "blocked",
+        message: "Messages can't arrive until your Meta app is subscribed.",
+        detail: "webhook_subscribed message",
+      });
+    }
+  });
+
+  it("finds the check by its key, not by position", () => {
+    const shuffled = [...all({ webhook_subscribed: "warn" })].reverse();
+    expect(webhookBanner(parseLastCheck(lastCheck(shuffled)))).toMatchObject({ kind: "blocked" });
+    // A warning on another check is not a webhook warning.
+    expect(banner({ payment_method: "warn" })).toBeNull();
+  });
+
+  it("is quiet when the webhook check passed", () => expect(banner({}, "pass")).toBeNull());
+
+  it("does not call a webhook nobody has seen healthy: not_verified and a missing check are 'unconfirmed'", () => {
+    expect(banner({ webhook_subscribed: "not_verified" })).toMatchObject({ kind: "unconfirmed" });
+    const without = lastCheck(all().filter((c) => c.key !== "webhook_subscribed"));
+    expect(webhookBanner(parseLastCheck(without))).toMatchObject({ kind: "unconfirmed", detail: null });
+  });
+
+  it("says nothing for a skipped check (an earlier failure explains it), a never-checked number, or an unreadable result", () => {
+    expect(banner({ webhook_subscribed: "skipped" }, "fail")).toBeNull();
+    expect(webhookBanner(parseLastCheck({}))).toBeNull();
+    expect(webhookBanner(parseLastCheck({ token: { ok: true } }))).toBeNull();
   });
 });

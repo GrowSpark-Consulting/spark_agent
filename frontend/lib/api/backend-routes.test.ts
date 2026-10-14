@@ -112,6 +112,10 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   // PayU billing (Dev 2, decision 20): the routes PayU itself calls. The ones the Billing screen calls are in FRONTEND_CALLS.
   "POST /api/billing/payu/return": "PayU's checkout page posts the payer's browser here (a navigation); it redirects to /dashboard/billing",
   "POST /api/webhooks/payu": "PayU calls it: payment results (verified with PayU before anything changes)",
+  "POST /api/billing/cancel": "the Billing screen's Cancel plan button is not built yet (Dhatri)",
+  "POST /api/billing/resume": "the Billing screen's Keep my plan button is not built yet (Dhatri)",
+  "GET /api/contacts/:id/deletion": "not called yet: the Data & privacy screen's deletion confirmation (Dhatri)",
+  "POST /api/contacts/:id/deletion": "not called yet: the Data & privacy screen's Delete data button (Dhatri)",
 };
 
 function sourceFiles(dir: string): string[] {

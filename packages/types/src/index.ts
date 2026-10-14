@@ -10,5 +10,6 @@ export * from "./errors";
 export * from "./features";
 export * from "./onboarding";
 export * from "./pack";
+export * from "./privacy";
 export * from "./tenancy";
 export * from "./whatsapp";

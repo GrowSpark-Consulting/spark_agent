@@ -8,7 +8,7 @@ import { createPipelineStore } from "./store";
 // safe line goes out. Best effort and silent on failure: whatever went wrong is already in the log, and the message
 // stays in the inbox for a person. Safe to call twice (it looks before it sends). Ids in, a word out.
 
-export async function answerRunThatGaveUp(ids: { tenantId: string; conversationId: string; messageId: string }): Promise<"sent" | "opted_out" | "nothing_to_do" | "not_sent"> {
+export async function answerRunThatGaveUp(ids: { tenantId: string; conversationId: string; messageId: string }): Promise<"sent" | "opted_out" | "nothing_to_do" | "already_replied" | "not_sent"> {
   try {
     return await answerAfterFailure(ids, BATCH_WINDOW_MS, replyDeps(createPipelineStore()));
   } catch (error) {

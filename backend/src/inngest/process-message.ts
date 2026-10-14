@@ -10,6 +10,9 @@ import { turnClock } from "../agent/pipeline/turn-deadline";
 import { understandTurn } from "../agent/pipeline/understand";
 import { markReadStep } from "../channels/whatsapp/mark-read";
 import { isEnabled } from "../features/is-enabled";
+import { aiLimitFor, isAiLimit, tellOwnersAboutLimit, type LimitNoticeDeps } from "../lib/ai-limits";
+import { serverEnv } from "../lib/env";
+import { sendAccountNotice } from "../notify/account-notices";
 import { inngest } from "./client";
 
 // The message pipeline (docs/handover.md: `process-message`, trigger `whatsapp/message.received`). The work is
@@ -34,6 +37,13 @@ import { inngest } from "./client";
 // still unanswered and the chat is still the assistant's, sends one safe line (give-up.ts), so nobody is left in
 // silence. A sweep for messages nobody answered, like kb-sweep does for documents, is still the follow-up for a
 // failure that could not even do that.
+/** A limit's notice goes to the business's owners and admins (an account_notice, once per key). */
+const limitNoticeDeps = (): LimitNoticeDeps => ({
+  appUrl: serverEnv().NEXT_PUBLIC_APP_URL,
+  now: () => new Date(),
+  notify: (tenantId, message, keyBase) => sendAccountNotice(tenantId, message, keyBase, { roles: ["owner", "admin"] }),
+});
+
 export const processMessage = inngest.createFunction(
   {
     id: "process-message",
@@ -54,16 +64,23 @@ export const processMessage = inngest.createFunction(
     // The turn's clock starts here (a step, so every later invocation of this function knows when it began).
     const startedAt = await steps.run("started", async () => Date.now());
     const store = createPipelineStore();
-    const turn = await runTurn(steps, event.data, { store, isEnabled });
+    const turn = await runTurn(steps, event.data, { store, isEnabled, aiLimit: (tenantId, conversationId) => aiLimitFor(tenantId, conversationId) });
     // A status and a reason only: no ids, no message text, no phone number.
     if (turn.status !== "ready") {
       console.log(`[pipeline] ${turn.status} (${turn.reason})`);
-      // A chat a person has, or one with the assistant switched off, still honours STOP: an opt-out never depends on a toggle.
-      if (turn.status === "gated_off" && (turn.reason === "not_ai_mode" || turn.reason === "feature_off")) {
+      // A chat a person has, one with the assistant switched off, or one a rate limit or the spend cap stopped, still
+      // honours STOP: an opt-out never depends on a toggle or a limit.
+      if (turn.status === "gated_off" && (turn.reason === "not_ai_mode" || turn.reason === "feature_off" || isAiLimit(turn.reason))) {
         const ids = MessageReceived.safeParse(event.data);
         if (ids.success) {
           const stop = await stopCheckAfterGate(steps, ids.data, replyDeps(store));
           if (stop.status === "opted_out") console.log(`[pipeline] opted out while gated off (confirmation ${stop.confirmation})`);
+          // A limit stopped the assistant: the messages wait in the inbox, and the owners and admins hear once (lib/ai-limits.ts).
+          else if (isAiLimit(turn.reason)) {
+            const limit = turn.reason;
+            const told = await step.run("limit-notice", () => tellOwnersAboutLimit(ids.data.tenantId, limit, ids.data.conversationId, limitNoticeDeps()));
+            console.log(`[pipeline] limit notice: sent ${told.sent}, skipped ${told.skipped}, failed ${told.failed}`);
+          }
           // A chat a team member handles from their own number: the customer hears so, at most every 30 minutes (agent/handoff/external-notice.ts).
           else if (turn.reason === "not_ai_mode") {
             const told = await step.run("external-notice", () => tellCustomerTeamIsHandling(ids.data));
