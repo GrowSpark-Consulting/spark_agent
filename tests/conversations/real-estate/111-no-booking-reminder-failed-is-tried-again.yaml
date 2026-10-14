@@ -1,0 +1,47 @@
+name: "A staff reminder that could not be sent is tried again by the customer's next message, and the reply never says the team knows until it went out"
+description: "Day 7, Finding 3. One reminder per lead must not block a retry after a failed send. Turn 1: the alert cannot be sent (the mock fails it): the plan's fact tells the model that nobody has been told, and nothing promises a follow-up. Turn 2: the same lead asks again, the alert is tried again and goes out. Turn 3: nothing more is sent. The wording of the reply is the model's (scripted here); the fact it is given is checked in reply-no-booking.test.ts."
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - {"priceFrom": 6000000, "attributes": {"price_to": 8000000, "areas": ["Velachery", "Tambaram"]}}
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "2BHK of 950 sq ft in Velachery starts at ₹78 lakh."
+turns:
+  - customer: "Please cancel my visit"
+    mock:
+      extraction: {"language": "en", "intent": "cancel", "fields": {}, "question": null, "confidence": 0.9}
+      reply: "I can't see a booking under this chat. If it was made with the team, please contact them directly. Did you mean something else?"
+      bookingReminder: fails
+    expect:
+      reply: {"sent": true, "notContains": ["has been told", "will check", "will get back"]}
+      aiReplies: 1
+      bookingChangeReminder: true
+      handoff: null
+      mode: ai
+    mockOnly:
+      case: no_booking_to_change
+  - customer: "I did book a visit, please cancel it"
+    mock:
+      extraction: {"language": "en", "intent": "cancel", "fields": {}, "question": null, "confidence": 0.9}
+      reply: "I still can't see a booking under this chat, but the team has now been told and will check."
+    expect:
+      reply: {"sent": true}
+      aiReplies: 1
+      bookingChangeReminder: true
+      handoff: null
+      mode: ai
+    mockOnly:
+      case: no_booking_to_change
+  - customer: "any update?"
+    mock:
+      extraction: {"language": "en", "intent": "cancel", "fields": {}, "question": null, "confidence": 0.9}
+      reply: "The team has been told and will check. Nothing else has changed."
+    expect:
+      reply: {"sent": true}
+      aiReplies: 1
+      bookingChangeReminder: false
+      handoff: null
+      mode: ai
+    mockOnly:
+      case: no_booking_to_change

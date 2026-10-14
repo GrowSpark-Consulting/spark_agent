@@ -78,6 +78,8 @@ export interface PlanInput {
   contactLanguage: string | null;
   /** The words of the customer's messages of this turn (reply.ts), for the script of a low-confidence "other" reading (reply-language.ts). */
   customerWords?: string;
+  /** The staff reminder for a cancel or move with no booking went out (kept on the message by the reply step): only then may the reply say the team has been told. */
+  bookingReminderSent?: boolean;
   /** Consecutive misses in this chat before this turn. */
   previousMisses: number;
   settings: ReplySettings;
@@ -161,6 +163,8 @@ export interface Plan {
   coverage?: { area: string; stage: "options" | "unavailable" } | null;
   /** Staff are reminded, once, to record in their CRM that this customer wants a place the business has nothing in. */
   areaReminder?: boolean;
+  /** A customer with no booking on record asked to cancel or move one (plan-booking.ts): staff are told, before the reply, with no handover and no mode change. */
+  bookingChangeReminder?: "cancel" | "reschedule";
   /** The miss count to keep for the next turn of this chat. */
   kbMisses: number;
   /** The row of the table above, for the log (never a customer's words). */

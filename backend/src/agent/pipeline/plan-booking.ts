@@ -39,6 +39,8 @@ export const CANCEL_MIN_CONFIDENCE = 0.8;
 /** What the reply is asked to answer when the question is ours, not the customer's: the model answers it from the facts. */
 const CANCEL_QUESTION = "Can I cancel my booking?";
 const KEEP_QUESTION = "Is my booking still on?";
+/** What the reply is asked to answer when a customer with no booking asks to cancel or move one. */
+const NO_BOOKING_QUESTION = "Is there a booking I should look for?";
 const NOTHING_CANCELLED = "Nothing has been cancelled yet. Ask the customer to say yes or no to cancelling it.";
 
 interface Args {
@@ -157,8 +159,20 @@ export function planBooking(args: Args): Plan | null {
     }
   }
 
+  // A cancel or a move asked for by a lead with NO booking on record (Finding 3 of the Day 7 injection sweep): the staff are told (before the reply, so what the customer is
+  // told is true), the chat stays with the assistant, and the reply says there is no booking in this chat. A time that is only held counts as a booking (hasBooking), not this.
+  // A question the knowledge base can answer is answered first, as in the cancel and offer rows (the note to the staff waits for the next message).
+  if (!s.hasBooking && !answerFirst && (summary.intent === "reschedule" || (summary.intent === "cancel" && summary.confidence >= CANCEL_MIN_CONFIDENCE))) {
+    const kind = summary.intent === "cancel" ? "cancel" : "reschedule";
+    const asked = `The customer asked to ${kind === "cancel" ? "cancel" : "move"} a booking, but no booking is on record for them in this chat.`;
+    const facts = input.bookingReminderSent
+      ? [asked, "The team has been told and will check.", "If they meant something else, ask what they meant."]
+      : [asked, "Nobody has been told. Do not promise that anyone will follow up. Say you cannot see a booking under this chat and that, if it was made with the team, they should contact the team directly.", "If they meant something else, ask what they meant."];
+    return { reply: model({ kind: "answer_and_ask", question: NO_BOOKING_QUESTION, askFields: [] }, facts), bookingChangeReminder: kind, kbMisses: 0, case: "no_booking_to_change" };
+  }
+
   if (blocked || unserved || s.hasBooking) return null;
-  // Asking to cancel or move a booking the lead does not have is not a reason to offer a new one.
+  // Asking to cancel or move a booking the lead does not have is handled above; below that confidence it is not a reason to offer a new one.
   if (summary.intent === "cancel" || summary.intent === "reschedule") return null;
   const asksToBook = summary.intent === "book";
   const readyAndFree = qualification.readyForSlots && !summary.hasQuestion;

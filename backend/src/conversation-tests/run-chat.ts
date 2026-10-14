@@ -6,11 +6,12 @@ import { withLlmFailures, type FailureInjection } from "../lib/failure-injection
 import type { LlmClient, LlmRequest, LlmResult } from "../agent/llm";
 import { NonRetriableError } from "inngest";
 import { amountsIn } from "../agent/pipeline/postcheck";
-import { HOT_LEAD_ACTION, HOT_LEAD_EVENT, VOICE_NOTE_EVENT } from "../agent/pipeline/events";
+import { BOOKING_REMINDER_ACTION, HOT_LEAD_ACTION, HOT_LEAD_EVENT, VOICE_NOTE_EVENT } from "../agent/pipeline/events";
 import { fixedText } from "../agent/pipeline/fixed-texts";
 import type { StepRunner, TurnContext } from "../agent/pipeline/process-message";
 import { replyTurn, type ReplyDeps, type ReplyOutcome } from "../agent/pipeline/reply";
 import type { AreaReminderInput } from "../agent/handoff/area-reminder";
+import type { BookingChangeReminderInput } from "../agent/handoff/booking-change-reminder";
 import { stopCheck } from "../agent/pipeline/stop";
 import { understandTurn, type UnderstandDeps, type UnderstandResult } from "../agent/pipeline/understand";
 import type { SendOutcome } from "../notify/send";
@@ -211,6 +212,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
     audits.push(entry);
     if (entry.action === "message.answered" && entry.entityId) fake.answered.set(entry.entityId, Date.now());
     if (entry.action === HOT_LEAD_ACTION && entry.entityId) fake.hotAlerted.add(entry.entityId);
+    if (entry.action === BOOKING_REMINDER_ACTION && entry.entityId) fake.bookingReminded.add(entry.entityId);
   };
   const systemNotice = {
     send: async (input: { text: string }) => {
@@ -222,6 +224,8 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
   const hotLeadEvents: string[] = [];
   const voiceEvents: string[] = [];
   const areaReminders: AreaReminderInput[] = [];
+  const bookingReminders: BookingChangeReminderInput[] = [];
+  let bookingReminderFails = false;
   const sendEvent: ReplyDeps["sendEvent"] = async (event) => {
     handoffEvents.push(event.id);
     if (event.name === HOT_LEAD_EVENT) hotLeadEvents.push(event.id);
@@ -238,6 +242,10 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
     areaReminder: async (input) => {
       areaReminders.push(input);
       return { recipients: 1, sent: 1, skipped: 0, failed: 0 };
+    },
+    bookingChangeReminder: async (input) => {
+      bookingReminders.push(input);
+      return bookingReminderFails ? { recipients: 1, sent: 0, skipped: 0, failed: 1 } : { recipients: 1, sent: 1, skipped: 0, failed: 0 };
     },
     now: clock,
     ...(setup && calendar
@@ -267,6 +275,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
     replyScript = turnSpec.mock?.reply === undefined ? [] : [...(Array.isArray(turnSpec.mock.reply) ? turnSpec.mock.reply : [turnSpec.mock.reply])];
     kb = turnSpec.mock?.kb ?? chat.kb;
     creditsZero = turnSpec.mock?.credits === "zero";
+    bookingReminderFails = turnSpec.mock?.bookingReminder === "fails";
     injected = turnSpec.mock?.inject ?? [];
     const sendsBefore = sends.length;
     const confirmationsBefore = confirmations.length;
@@ -275,6 +284,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
     const hotLeadBefore = hotLeadEvents.length;
     const voiceBefore = voiceEvents.length;
     const areaRemindersBefore = areaReminders.length;
+    const bookingRemindersBefore = bookingReminders.length;
 
     const id = messageId("in", index + 1);
     fake.messages.set(id, { id, tenantId: A, conversationId: CONV, direction: "in", sender: "customer", kind: turnSpec.voice ? "audio" : turnSpec.tap ? "interactive" : "text", createdAt: new Date(base + index * 60_000).toISOString(), body: turnSpec.voice ? null : turnSpec.customer, meta: turnSpec.tap ? { buttonId: turnSpec.tap } : {} } as FakeMessage);
@@ -374,6 +384,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
       if (expect.hotLead !== undefined && hotLeadEvents.length - hotLeadBefore > 0 !== expect.hotLead) fail(`hot lead alert this turn: wanted ${expect.hotLead}, got ${hotLeadEvents.length - hotLeadBefore > 0}`);
       if (expect.voiceNoteAlert !== undefined && voiceEvents.length - voiceBefore > 0 !== expect.voiceNoteAlert) fail(`voice note alert this turn: wanted ${expect.voiceNoteAlert}, got ${voiceEvents.length - voiceBefore > 0}`);
       if (expect.areaReminder !== undefined && areaReminders.length - areaRemindersBefore > 0 !== expect.areaReminder) fail(`area reminder this turn: wanted ${expect.areaReminder}, got ${areaReminders.length - areaRemindersBefore > 0}`);
+      if (expect.bookingChangeReminder !== undefined && bookingReminders.length - bookingRemindersBefore > 0 !== expect.bookingChangeReminder) fail(`booking change reminder this turn: wanted ${expect.bookingChangeReminder}, got ${bookingReminders.length - bookingRemindersBefore > 0}`);
       if (expect.leadTemperature !== undefined && fake.leads.get(LEAD)?.temperature !== expect.leadTemperature) fail(`lead temperature: wanted ${expect.leadTemperature}, got ${fake.leads.get(LEAD)?.temperature}`);
       if (expect.leadScore !== undefined && fake.leads.get(LEAD)?.score !== expect.leadScore) fail(`lead score: wanted ${expect.leadScore}, got ${fake.leads.get(LEAD)?.score}`);
       if (expect.calendar) {
