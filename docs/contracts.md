@@ -762,6 +762,7 @@ invalid `phone` is `invalid` with `fields.phone`.
   `conflict` for a price change while businesses are subscribed at it.
 - `PATCH /api/admin/features/:key` `{ name?, description?, defaultOn? }` → `AdminFeature`.
 - `GET /api/admin/payments/refunds` → `RefundCandidate[]` (refund each in PayU's dashboard).
+- `GET /api/admin/whatsapp/connections` → `AdminConnection[]` (`backend/src/admin/connections.ts`, Day 7): every business's connections, newest first (up to 500): business, `method`, `status`, the number as Meta displays it, verified name, coexistence, quality, messaging limit, a manual token's expiry, and `lastCheck` `{ ranAt, overall, checks: [{ key, status, message }] }` read from `last_check` in the shape of `docs/whatsapp-connection-contract.md` (null when never checked or in an older shape). No token or secret is ever selected.
 Not built: opening a business's dashboard as an admin (logged) needs its own design.
 
 **A customer's data deletion (`backend/src/consent/deletion.ts`, 0043; types in `@pakka/types` `privacy.ts`; Settings → Data & privacy).**

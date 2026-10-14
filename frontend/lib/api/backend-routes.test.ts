@@ -116,6 +116,7 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   "POST /api/webhooks/payu": "PayU calls it: payment results (verified with PayU before anything changes)",
   "POST /api/billing/cancel": "the Billing screen's Cancel plan button is not built yet (Dhatri)",
   "POST /api/billing/resume": "the Billing screen's Keep my plan button is not built yet (Dhatri)",
+  "GET /api/admin/whatsapp/connections": "not called yet: the admin panel's connection list (Dhatri)",
 };
 
 function sourceFiles(dir: string): string[] {

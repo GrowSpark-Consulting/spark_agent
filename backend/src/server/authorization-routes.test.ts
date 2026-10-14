@@ -115,6 +115,7 @@ beforeEach(() => {
 
 const ADMIN_CALLS: Call[] = [
   { method: "GET", path: "/api/admin/tenants" },
+  { method: "GET", path: "/api/admin/whatsapp/connections" },
   { method: "POST", path: `/api/admin/tenants/${ID}/extend-trial`, body: { days: 3 } },
   { method: "POST", path: `/api/admin/tenants/${ID}/credits`, body: { amount: 5 } },
   { method: "PATCH", path: "/api/admin/plans/starter", body: { name: "Starter" } },
