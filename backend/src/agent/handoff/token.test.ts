@@ -93,6 +93,14 @@ describe("the two links of an alert", () => {
     expect(links.own).toMatch(/^https:\/\/api\.example\.test\/h\/[A-Za-z0-9_.-]+\?mode=own$/);
   });
 
+  it.each(["https://api.example.test/", "https://api.example.test//", "https://api.example.test"])("never has a double slash, whatever trailing slashes the API's address was given with (%s): the address is logged, and a token in a path with a double slash is not masked by the request logger", (base) => {
+    const links = createHandoffLinks(claims, { ...env, API_PUBLIC_URL: base }, NOW, { ownNumber: true });
+    for (const link of [links.inbox, links.own as string]) {
+      expect(link).toMatch(/^https:\/\/api\.example\.test\/h\/[A-Za-z0-9_.-]+\?mode=(inbox|own)$/);
+      expect(link.replace("https://", "")).not.toContain("//");
+    }
+  });
+
   it("both carry the same token, so using one ends the other: one takeover per handoff", () => {
     const links = createHandoffLinks(claims, withUrls, NOW, { ownNumber: true });
     const token = (url: string | null) => new URL(url ?? "").pathname.split("/")[2];
