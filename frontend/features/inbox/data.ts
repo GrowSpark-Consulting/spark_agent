@@ -680,8 +680,9 @@ export function groupByDay(
 }
 
 const TRIGGER_TEXT: Record<string, string> = {
-  asked_human: "asked to talk to a person",
-  complaint: "a complaint",
+  asked_human: "Asked for a person",
+  complaint: "Upset / complaint",
+  opt_out: "Opted out – don’t WhatsApp unless they write again",
   negotiation: "wants to negotiate the price",
   hot_lead: "a hot lead",
   kb_gap: "asked something the AI couldn't answer",
