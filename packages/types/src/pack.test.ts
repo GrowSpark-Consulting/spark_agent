@@ -153,3 +153,24 @@ describe("Scoring", () => {
     expect(Scoring.safeParse({ rules, thresholds, hardFails: [{ field: "a" }] }).success).toBe(false);
   });
 });
+
+describe("PackDefinition coverage", () => {
+  it("is optional: a pack without it parses as before", () => {
+    expect(PackDefinition.parse(visitPack).coverage).toBeUndefined();
+  });
+
+  it("names the field that says where the customer is and the area matcher that judges it", () => {
+    const pack = PackDefinition.parse({ ...visitPack, coverage: { field: "config", match: "in_project_areas" } });
+    expect(pack.coverage).toEqual({ field: "config", match: "in_project_areas" });
+    expect(PackDefinition.parse({ ...visitPack, coverage: { field: "config", match: "in_service_area" } }).coverage?.match).toBe("in_service_area");
+  });
+
+  it.each([
+    ["a matcher that is not about areas", { field: "config", match: "within_project_band" }],
+    ["no field", { match: "in_project_areas" }],
+    ["an empty field", { field: "", match: "in_project_areas" }],
+    ["an unknown key", { field: "config", match: "in_project_areas", extra: true }],
+  ])("refuses %s", (_name, coverage) => {
+    expect(PackDefinition.safeParse({ ...visitPack, coverage }).success).toBe(false);
+  });
+});

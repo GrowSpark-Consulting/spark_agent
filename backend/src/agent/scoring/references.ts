@@ -21,8 +21,9 @@ export interface CatalogRow {
 
 const positive = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n > 0;
 
-function wantedNames(pack: Pick<PackDefinition, "scoring">): Set<string> {
+function wantedNames(pack: Pick<PackDefinition, "scoring"> & { coverage?: PackDefinition["coverage"] }): Set<string> {
   const names = new Set<string>();
+  if (pack.coverage) names.add(pack.coverage.match); // the places a pack says it works in are needed even when no scoring rule uses them
   for (const rule of pack.scoring.rules) if (rule.match) names.add(rule.match);
   for (const hardFail of pack.scoring.hardFails) {
     if (hardFail.match) names.add(hardFail.match);
@@ -59,7 +60,7 @@ function areasOf(rows: CatalogRow[]): string[] {
   return areas;
 }
 
-export function buildReferences(pack: Pick<PackDefinition, "scoring" | "catalog">, catalog: CatalogRow[]): Record<string, unknown> {
+export function buildReferences(pack: Pick<PackDefinition, "scoring" | "catalog"> & { coverage?: PackDefinition["coverage"] }, catalog: CatalogRow[]): Record<string, unknown> {
   const rows = pack.catalog ? catalog.filter((row) => row.type === pack.catalog?.type) : catalog;
   const references: Record<string, unknown> = {};
 

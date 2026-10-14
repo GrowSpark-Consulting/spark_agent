@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getJson, postJson } from "@/lib/api/client";
+import { containsSecret } from "@pakka/types";
 import { ApiError } from "@/lib/errors";
 import type { EmbeddedSignupPayload } from "@/lib/whatsapp/embedded-signup";
 
@@ -66,16 +67,68 @@ export function linkProblem(err: unknown): LinkProblem {
   return "failed";
 }
 
-export type SubmitProblem = "invalid" | "conflict" | "not_available" | "meta_failed" | "failed";
+export type SubmitProblem =
+  /** 404: unknown, expired or used. The link can't be tried again. */
+  | "invalid"
+  | "conflict"
+  | "not_available"
+  | "rate_limited"
+  /** validation_failed: the server names the field (for example phoneNumberId when Meta returned no number). */
+  | "validation"
+  | "meta_failed"
+  | "failed";
 
-/** Which words a refused exchange gets (contract: not_found, conflict, upstream_failed, not_available, validation_failed). */
+/** Which words a refused exchange gets (contract: not_found, conflict, upstream_failed, not_available, rate_limited, validation_failed). */
 export function submitProblem(err: unknown): SubmitProblem {
   if (err instanceof ApiError) {
     const code = err.body.error.code;
-    if (code === "not_found") return "invalid";
+    if (code === "not_found" || err.status === 404) return "invalid";
     if (code === "conflict") return "conflict";
     if (code === "not_available" || err.status === 501) return "not_available";
+    if (code === "rate_limited" || err.status === 429) return "rate_limited";
+    if (code === "validation_failed") return "validation";
     if (code === "upstream_failed") return "meta_failed";
   }
   return "failed";
+}
+
+/** The per-field messages of a validation_failed answer (the API writes them for the person), or none. Anything that looks like a credential is dropped. */
+export function submitFields(err: unknown): Record<string, string> {
+  if (!(err instanceof ApiError) || err.body.error.code !== "validation_failed") return {};
+  const out: Record<string, string> = {};
+  for (const [field, message] of Object.entries(err.body.error.fields ?? {})) if (!containsSecret(message)) out[field] = message;
+  return out;
+}
+
+/**
+ * What the page may say after a 201. Only a connection the server reports `active` is connected. A number that was saved but did not pass its
+ * checks (`failed`, or anything else that is not live) or is still being checked (`pending`, `validating`) is not.
+ */
+export type ConnectionOutcome = "connected" | "check_failed" | "checking";
+export function connectionOutcome(status: string): ConnectionOutcome {
+  if (status === "active") return "connected";
+  if (status === "pending" || status === "validating") return "checking";
+  return "check_failed";
+}
+
+export type SubmitResult =
+  | { kind: "connected" }
+  | { kind: "checking" }
+  /** The link itself can't be used (404): the page becomes the invalid-link page. */
+  | { kind: "invalid" }
+  | { kind: "failed"; problem: Exclude<SubmitProblem, "invalid"> | "check_failed"; fields: Record<string, string> };
+
+/**
+ * Sends the Embedded Signup result and turns the answer into what the page may say. Success needs the server's 201 AND a connection that is
+ * `active`; every refusal leaves the link usable again (a failed attempt does not consume it), except a 404.
+ */
+export async function sendSignup(token: string, payload: EmbeddedSignupPayload): Promise<SubmitResult> {
+  try {
+    const connected = await submitEmbeddedSignup(token, payload);
+    const outcome = connectionOutcome(connected.status);
+    return outcome === "connected" ? { kind: "connected" } : outcome === "checking" ? { kind: "checking" } : { kind: "failed", problem: "check_failed", fields: {} };
+  } catch (err) {
+    const problem = submitProblem(err);
+    return problem === "invalid" ? { kind: "invalid" } : { kind: "failed", problem, fields: submitFields(err) };
+  }
 }

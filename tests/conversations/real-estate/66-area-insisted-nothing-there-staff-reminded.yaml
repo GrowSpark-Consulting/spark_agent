@@ -1,0 +1,42 @@
+name: A customer who insists on an area the business has no homes in is told there is nothing there for now, staff are reminded once, and the lead stays open
+description: "Raja, 14 Oct. After the areas were listed (chat 65), the customer names the same area again. They are told politely that there is no property there for now and that they will be updated; no site visit is offered; the owners and admins get one staff reminder to record it in their CRM; the lead stays open (engaged) and the chat stays with the assistant (no handover). Asking again later repeats the line without a second reminder. Strict rule: only the same area named again counts as insisting, and only when the model extracted it (chat 67 has the other way out)."
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, areas: [Velachery, Tambaram] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+turns:
+  - customer: "I want a 2BHK in Adyar, my budget is around 60 lakh and I plan to buy within 3 months"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { config: 2BHK, location: Adyar, budget: 60L, timeline: 0-3m }, question: null }
+    expect:
+      reply: { sent: true, contains: ["Adyar", "Velachery, Tambaram"] }
+      aiReplies: 1
+      areaReminder: false
+    mockOnly:
+      case: area_options
+  - customer: "No, I only want Adyar"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { location: Adyar }, question: null }
+    expect:
+      reply: { sent: true, contains: ["any property in Adyar for now"], notContains: ["10:00 am", "3:00 pm", "5:30 pm", "Velachery"] }
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      leadStage: engaged
+      calendar: { confirmed: [] }
+      areaReminder: true
+    mockOnly:
+      case: area_unavailable
+  - customer: "Please check once more for Adyar"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { location: Adyar }, question: null }
+    expect:
+      reply: { sent: true, contains: ["Adyar"], notContains: ["10:00 am", "3:00 pm", "5:30 pm", "Velachery"] }
+      aiReplies: 1
+      handoff: null
+      leadStage: engaged
+      calendar: { confirmed: [] }
+      areaReminder: false
+    mockOnly:
+      case: area_unavailable

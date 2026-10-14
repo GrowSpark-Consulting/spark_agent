@@ -1,0 +1,30 @@
+name: An unserved area is answered in Tamil, first with the areas the business has, then with nothing there for now (machine draft)
+description: "Raja, 14 Oct. The two fixed area lines in Tamil script. MACHINE DRAFT: the Tamil wording is not checked by a native speaker; Raja and a native speaker must read it before it is final test data. The behaviour (options first, then 'nothing there' with one staff reminder, no time offered, lead open) is the same as chat 66."
+needsNativeCheck: true
+contact: { language: ta }
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, areas: [Velachery, Tambaram] } }
+  slots: ["2026-10-11T04:30:00.000Z"]
+turns:
+  - customer: "அடையாரில் 2BHK வேண்டும்"
+    mock:
+      extraction: { language: ta, intent: give_details, fields: { config: 2BHK, location: Adyar }, question: null }
+    expect:
+      reply: { sent: true, contains: ["பகுதியில் தற்போது எங்களிடம் இடங்கள் இல்லை", "Velachery, Tambaram"] }
+      aiReplies: 1
+      areaReminder: false
+    mockOnly:
+      case: area_options
+  - customer: "இல்லை, எனக்கு அடையார் தான் வேண்டும்"
+    mock:
+      extraction: { language: ta, intent: give_details, fields: { location: Adyar }, question: null }
+    expect:
+      reply: { sent: true, contains: ["மன்னிக்கவும்", "சொத்துகள் இல்லை"], notContains: ["Velachery"] }
+      aiReplies: 1
+      handoff: null
+      leadStage: engaged
+      areaReminder: true
+    mockOnly:
+      case: area_unavailable

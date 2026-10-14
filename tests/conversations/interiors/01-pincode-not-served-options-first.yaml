@@ -1,0 +1,20 @@
+name: An interiors customer in a pincode the business does not work in is first told the pincodes it does
+description: "Raja, 14 Oct (Day 7 out-of-area pincode item). The interiors pack judges the pincode against the business's service areas (the catalog's areas, here two Chennai pincodes). The first reply lists the pincodes the business does work in; it is a fixed line, nobody is reminded yet, the lead stays open and the chat stays with the assistant. (The pack has a field-visit booking mode, which needs no calendar here.) The score still counts the pincode rule as 0 of its 10 points."
+pack: interiors
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { type: service, priceFrom: 1000000, attributes: { price_to: 3000000, areas: ["600042", "600020"] } }
+turns:
+  - customer: "I need a full home makeover for my 3 BHK apartment, around 1150 sq ft, pincode 641001, budget 12 to 15 lakh"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { property_type: apartment, area_sqft: 1150, scope: full_home, budget: 12-15L, pincode: "641001" }, question: null }
+    expect:
+      reply: { sent: true, buttons: [], contains: ["641001", "600042, 600020"], notContains: ["for now", "update you"] }
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      leadStage: engaged
+      areaReminder: false
+    mockOnly:
+      case: area_options
