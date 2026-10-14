@@ -153,6 +153,11 @@ export interface PipelineStore {
   /** The plan case the chat's latest earlier turn kept on its customer message (`meta.agent.planCase`, before `before`), or null. */
   getPreviousPlanCase(tenantId: string, conversationId: string, before: string): Promise<string | null>;
   /**
+   * Which of these message ids are messages of this chat (any sender). The failure handler uses it to see whether notify.send recorded the reply for a turn
+   * (its row has the id keyedMessageId gives the reply's key), when the reply step's own marker and answered rows were lost.
+   */
+  recordedMessageIds(tenantId: string, conversationId: string, ids: string[]): Promise<string[]>;
+  /**
    * What this chat last said about a place the business has no sites in (`messages.meta.agent.coverage`): the newest earlier customer message that
    * says anything about it decides, and `null` (the customer moved on to a place the business has) or an unreadable value is nothing.
    */
@@ -468,6 +473,15 @@ export function createPipelineStore(db: SupabaseClient = supabaseAdmin(), { time
         if (agent && typeof agent.planCase === "string") return agent.planCase;
       }
       return null;
+    },
+
+    async recordedMessageIds(tenantId, conversationId, ids) {
+      if (ids.length === 0) return [];
+      const { data, error } = await run("read recorded messages", (signal) =>
+        db.from("messages").select("id").eq("tenant_id", tenantId).eq("conversation_id", conversationId).in("id", ids).abortSignal(signal),
+      );
+      if (error) fail("read recorded messages", error);
+      return parse(z.array(z.object({ id: z.string() })), data ?? [], "read recorded messages").map((row) => row.id);
     },
 
     async getPreviousCoverage(tenantId, conversationId, before) {
