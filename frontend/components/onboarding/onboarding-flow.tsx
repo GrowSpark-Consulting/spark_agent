@@ -9,6 +9,7 @@ import { CHECKS, ROUTES, STEP_LABELS, TOTAL_STEPS, type CheckKind } from "@/feat
 import { offeredTrades, type ActivePack, type OfferedTrade } from "@/features/onboarding/packs";
 import {
   industryKey,
+  trialPhoneOf,
   initialState,
   plannedFailure,
   waitHiIndex,
@@ -83,7 +84,7 @@ export function OnboardingFlow({ activePacks }: { activePacks: ActivePack[] | nu
   const submitBusiness = () => {
     if (!tradeOffered) return;
     startSavingBusiness(async () => {
-      const result = await startTrial({ name: s.biz, industry: industryKey(s) });
+      const result = await startTrial({ name: s.biz, industry: industryKey(s), phone: trialPhoneOf(s) });
       if (result.status === "ready") {
         set({ trial: result.trial, hasBusiness: false, trialError: null, step: 2 });
       } else if (result.status === "has_business") {
@@ -94,7 +95,7 @@ export function OnboardingFlow({ activePacks }: { activePacks: ActivePack[] | nu
             result.status === "unavailable"
               ? "Trials for this trade aren’t open yet."
               : result.status === "invalid"
-                ? (result.fields.name ?? result.fields.industry ?? "Check your business details.")
+                ? (result.fields.name ?? result.fields.industry ?? result.fields.phone ?? "Check your business details.")
                 : result.message,
         });
         return;

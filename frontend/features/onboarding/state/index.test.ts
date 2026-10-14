@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { trialChatUrl } from "@/features/onboarding/data";
-import { initialState, testChatOf, trialCodeOf, type OnboardingState } from "@/features/onboarding/state";
+import { initialState, testChatOf, trialCodeOf, trialPhoneOf, type OnboardingState } from "@/features/onboarding/state";
 
 const TRIAL = { routeCode: "TRIAL-AB12", trialDays: 7, credits: 300 };
 const withTrial: OnboardingState = { ...initialState, trial: TRIAL };
@@ -50,5 +50,22 @@ describe("testChatOf", () => {
 
   it("shows nothing when no trial exists", () => {
     expect(testChatOf(initialState, NUMBER)).toEqual({ kind: "none", reason: "no_trial" });
+  });
+});
+
+describe("trialPhoneOf", () => {
+  const typed = (phone: string): OnboardingState => ({ ...initialState, phone });
+
+  it("sends nothing for the pre-filled sample number", () => {
+    expect(trialPhoneOf(initialState)).toBeUndefined();
+    expect(trialPhoneOf(typed("+91 98400 12345"))).toBeUndefined();
+  });
+
+  it("turns a typed ten-digit Indian mobile number into E.164, however it is spaced or prefixed", () => {
+    for (const text of ["98765 43210", "9876543210", "+91 98765 43210", "91 98765-43210", "098765 43210"]) expect(trialPhoneOf(typed(text)), text).toBe("+919876543210");
+  });
+
+  it("sends nothing for something that is not a mobile number (the route would only refuse the shape)", () => {
+    for (const text of ["", "12345", "5876543210", "98765 4321", "98765 432101", "abc"]) expect(trialPhoneOf(typed(text)), text).toBeUndefined();
   });
 });
