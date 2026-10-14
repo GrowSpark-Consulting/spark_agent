@@ -74,6 +74,8 @@ export function createHandoffLinks(
 ): { inbox: string; own: string | null } {
   if (!env.API_PUBLIC_URL) throw new AppError("not_available", "Links to take over a chat aren't switched on yet.");
   const token = signHandoffToken(claims, env, now);
-  const link = (mode: "inbox" | "own") => `${env.API_PUBLIC_URL}/h/${token}?mode=${mode}`;
+  // No trailing slash on the base: `https://host/` + `/h/...` would be `//h/<token>`, a path the request logger does not mask (the token would be logged).
+  const base = env.API_PUBLIC_URL.replace(/\/+$/, "");
+  const link = (mode: "inbox" | "own") => `${base}/h/${token}?mode=${mode}`;
   return { inbox: link("inbox"), own: options.ownNumber ? link("own") : null };
 }
