@@ -11,6 +11,7 @@ import { createDbPackSource } from "../packs/store";
 import { createSchedulingDeps } from "../scheduling/port-db";
 import { createCatalogLoader } from "../scoring/catalog-db";
 import { createSystemNoticePort } from "./ports";
+import { createSentReplyRecorded } from "./reply-record";
 import type { ReplyDeps } from "./reply";
 import type { PipelineStore } from "./store";
 import type { UnderstandDeps } from "./understand";
@@ -64,6 +65,8 @@ export function replyDeps(store: PipelineStore): ReplyDeps {
     scheduling,
     // A customer who keeps asking for an area the business has nothing in: the owners and admins are reminded once (a staff_alert with our own text).
     areaReminder,
+    // The failure handler's second signal that a reply already went out: the row notify.send recorded for it.
+    sentReplyRecorded: createSentReplyRecorded(store),
   };
 }
 

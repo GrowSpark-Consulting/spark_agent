@@ -1242,3 +1242,140 @@ describe("the details to ask for, and a lead that is not a fit", () => {
     expect(JSON.stringify([...r.memo.values()])).not.toContain(CUSTOMER_WORDS);
   });
 });
+
+describe("answerAfterFailure: a reply for this turn already went out (its records may be lost)", () => {
+  const ids = { tenantId: A, conversationId: CONV, messageId: M1 };
+  const marked = (reply: unknown): FakeMessage[] => [{ id: M1, tenantId: A, conversationId: CONV, direction: "in", sender: "customer", kind: "text", createdAt: at(3), body: CUSTOMER_WORDS, meta: { agent: { reply } } }];
+  const answeredRows = (w: ReturnType<typeof world>) => w.audits.filter((a) => a.action === "message.answered").map((a) => a.entityId);
+
+  it("the marker the reply step leaves after its send: no safe line, the messages are marked answered, and the word says why", async () => {
+    const w = world({ messages: marked({ case: "answered_from_kb", source: "model" }) });
+    expect(await answerAfterFailure(ids, 15_000, w.deps)).toBe("already_replied");
+    expect(w.send).not.toHaveBeenCalled();
+    expect(answeredRows(w)).toEqual([M1]);
+    expect(await answerAfterFailure(ids, 15_000, w.deps)).toBe("nothing_to_do"); // healed: a second call finds it answered
+  });
+
+  it("the marker of an unknown outcome counts too (the reply step's own rule: it counts as answered and is never sent again)", async () => {
+    const w = world({ messages: marked({ case: "answered_from_kb", source: "unknown_outcome" }) });
+    expect(await answerAfterFailure(ids, 15_000, w.deps)).toBe("already_replied");
+    expect(w.send).not.toHaveBeenCalled();
+  });
+
+  it("a marker that is null is no marker: the safe line goes out", async () => {
+    const w = world({ messages: marked(null) });
+    expect(await answerAfterFailure(ids, 15_000, w.deps)).toBe("sent");
+  });
+
+  it("no marker, but notify.send recorded the reply for this turn: no safe line, and the messages are marked answered", async () => {
+    const w = world();
+    const recorded = vi.fn(async () => [M1]);
+    w.deps.sentReplyRecorded = recorded;
+    expect(await answerAfterFailure(ids, 15_000, w.deps)).toBe("already_replied");
+    expect(recorded).toHaveBeenCalledWith(A, CONV, [M1]);
+    expect(w.send).not.toHaveBeenCalled();
+    expect(answeredRows(w)).toEqual([M1]);
+  });
+
+  it("the marker is looked at first: when it is there, the recorded rows are not even asked about", async () => {
+    const w = world({ messages: marked({ case: "x", source: "model" }) });
+    const recorded = vi.fn(async () => [M1]);
+    w.deps.sentReplyRecorded = recorded;
+    expect(await answerAfterFailure(ids, 15_000, w.deps)).toBe("already_replied");
+    expect(recorded).not.toHaveBeenCalled();
+  });
+
+  it("neither a marker nor a recorded reply: the safe line goes out, as before (nothing is suppressed on a guess)", async () => {
+    const w = world();
+    const recorded = vi.fn(async () => [] as string[]);
+    w.deps.sentReplyRecorded = recorded;
+    expect(await answerAfterFailure(ids, 15_000, w.deps)).toBe("sent");
+    expect(recorded).toHaveBeenCalledOnce();
+    expect(sentText(w)).toBe(fixedText("fallback", "en"));
+  });
+
+  it("without the dependency and with no marker the safe line goes out", async () => {
+    const w = world();
+    expect(w.deps.sentReplyRecorded).toBeUndefined();
+    expect(await answerAfterFailure(ids, 15_000, w.deps)).toBe("sent");
+  });
+
+  it("opt-out, STOP and a chat a person has are decided FIRST: a marker does not turn them into 'already_replied'", async () => {
+    const reply = { case: "x", source: "model" };
+    expect(await answerAfterFailure(ids, 15_000, world({ optedOut: true, messages: marked(reply) }).deps)).toBe("nothing_to_do");
+    expect(await answerAfterFailure(ids, 15_000, world({ mode: "human", messages: marked(reply) }).deps)).toBe("nothing_to_do");
+    const stop: FakeMessage[] = [{ id: M1, tenantId: A, conversationId: CONV, direction: "in", sender: "customer", kind: "text", createdAt: at(3), body: "STOP", meta: { agent: { reply } } }];
+    expect(await answerAfterFailure(ids, 15_000, world({ messages: stop }).deps)).toBe("opted_out");
+  });
+
+  it("fails open when the marker cannot be read: the safe line goes out, and one fixed line is logged with no ids and no words", async () => {
+    const lines: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => void lines.push(a.join(" ")));
+    const w = world();
+    w.state.failNext.add("getAgentMeta");
+    expect(await answerAfterFailure(ids, 15_000, w.deps)).toBe("sent");
+    expect(lines).toContain("[pipeline] could not check whether a reply already went out; sending the safe line");
+    expect(lines.join(" ")).not.toContain(A);
+    expect(lines.join(" ")).not.toContain(CUSTOMER_WORDS);
+  });
+
+  it("fails open when the recorded rows cannot be read: the same", async () => {
+    const lines: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((...a: unknown[]) => void lines.push(a.join(" ")));
+    const w = world();
+    w.deps.sentReplyRecorded = async () => Promise.reject(new Error("db down: secret detail"));
+    expect(await answerAfterFailure(ids, 15_000, w.deps)).toBe("sent");
+    expect(lines).toContain("[pipeline] could not check whether a reply already went out; sending the safe line");
+    expect(lines.join(" ")).not.toContain("secret detail");
+  });
+
+  it("never throws when marking the messages answered fails: the customer has their reply, and that is what is reported", async () => {
+    const w = world({ messages: marked({ case: "x", source: "model" }), auditFailures: 99 });
+    expect(await answerAfterFailure(ids, 15_000, w.deps)).toBe("already_replied");
+    expect(w.send).not.toHaveBeenCalled();
+  });
+
+  // A marker or a recorded reply covers the messages UP TO the one it belongs to (the turn's last message); a message that arrived after it is not covered.
+  const MA = "a0000000-0000-0000-0000-0000000000b1";
+  const MB = "a0000000-0000-0000-0000-0000000000b2";
+  const MC = "a0000000-0000-0000-0000-0000000000b3";
+  const three = (metaOf: Record<string, unknown>): FakeMessage[] =>
+    [MA, MB, MC].map((id, i) => ({ id, tenantId: A, conversationId: CONV, direction: "in", sender: "customer", kind: "text", createdAt: at(9 - i * 3), body: CUSTOMER_WORDS, meta: metaOf[id] ? { agent: metaOf[id] } : {} }) as FakeMessage);
+  const marker = { reply: { case: "x", source: "model" } };
+
+  it("a marker on the NEWEST pending message covers every pending message before it: all are marked answered, no safe line", async () => {
+    const w = world({ messages: three({ [MC]: marker }) });
+    expect(await answerAfterFailure({ ...ids, messageId: MC }, 15_000, w.deps)).toBe("already_replied");
+    expect(w.send).not.toHaveBeenCalled();
+    expect(answeredRows(w).sort()).toEqual([MA, MB, MC]);
+  });
+
+  it("a marker on an OLDER message does not cover a newer one that arrived after it: the newer one is NOT marked answered without a reply, and the safe line goes out for it", async () => {
+    const w = world({ messages: three({ [MA]: marker }) });
+    expect(await answerAfterFailure({ ...ids, messageId: MA }, 15_000, w.deps)).toBe("sent");
+    expect(w.send).toHaveBeenCalledOnce();
+    expect(answeredRows(w).sort()).toEqual([MA, MB, MC]); // marked answered only because the safe line went out for them
+  });
+
+  it("... and when that safe line cannot be sent, nothing is marked answered, so the newer message is not lost", async () => {
+    const w = world({ messages: three({ [MA]: marker }), send: () => ({ status: "failed", error: { code: "rate_limited", message: "x", retryable: true, outcomeUnknown: false } }) });
+    expect(await answerAfterFailure({ ...ids, messageId: MA }, 15_000, w.deps)).toBe("not_sent");
+    expect(answeredRows(w)).toEqual([]);
+  });
+
+  it("an earlier turn whose rows were lost (marker on B) and a later turn that failed (C): the safe line goes out for C", async () => {
+    const w = world({ messages: three({ [MB]: marker }) });
+    expect(await answerAfterFailure({ ...ids, messageId: MC }, 15_000, w.deps)).toBe("sent");
+    expect(w.send).toHaveBeenCalledOnce();
+  });
+
+  it("a recorded reply for an older message covers only up to it, the same way", async () => {
+    const w = world({ messages: three({}) });
+    w.deps.sentReplyRecorded = async () => [MB];
+    expect(await answerAfterFailure({ ...ids, messageId: MC }, 15_000, w.deps)).toBe("sent");
+    const w2 = world({ messages: three({}) });
+    w2.deps.sentReplyRecorded = async () => [MC];
+    expect(await answerAfterFailure({ ...ids, messageId: MC }, 15_000, w2.deps)).toBe("already_replied");
+    expect(answeredRows(w2).sort()).toEqual([MA, MB, MC]);
+  });
+});

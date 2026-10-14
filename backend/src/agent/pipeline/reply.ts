@@ -68,6 +68,11 @@ export interface ReplyDeps {
    * a staff_alert through notify.send with our own text). Without it nobody is reminded and the customer's reply is the same. Never needed for the reply.
    */
   areaReminder?: (input: AreaReminderInput) => Promise<unknown>;
+  /**
+   * Which of these customer messages notify.send recorded a reply for (reply-record.ts: a reply is named by the turn's last message). Used only by the
+   * failure handler, as a second signal after the reply step's own marker. Without it only the marker is looked at.
+   */
+  sentReplyRecorded?: (tenantId: string, conversationId: string, messageIds: string[]) => Promise<string[]>;
   /** The link in the privacy notice (PRIVACY_POLICY_URL, https). */
   privacyPolicyUrl: string;
   now?: () => number;
@@ -587,11 +592,45 @@ async function openHandoff(turn: TurnContext, handoff: { trigger: HandoffTrigger
 // When the run gave up
 
 /**
+ * How far a reply that already went out reaches among these unanswered messages (oldest first): the index of the NEWEST one it answered, or -1. A reply
+ * answers the turn's last message and every unanswered message before it, so it reaches up to the newest message that carries the marker (the reply step's
+ * own rule for "answered", an unknown outcome included) or has a recorded reply; a message that arrived after it is not covered. Fails open: a check that
+ * cannot be read says "none" and logs one fixed line (no ids, no words).
+ */
+async function replyReach(ids: { tenantId: string; conversationId: string }, pending: { id: string }[], deps: ReplyDeps): Promise<number> {
+  try {
+    for (let i = pending.length - 1; i >= 0; i--) {
+      const agent = await deps.store.getAgentMeta(ids.tenantId, ids.conversationId, pending[i].id);
+      if (agent?.reply !== undefined && agent.reply !== null) return i;
+    }
+    if (!deps.sentReplyRecorded) return -1;
+    const replied = new Set(await deps.sentReplyRecorded(ids.tenantId, ids.conversationId, pending.map((m) => m.id)));
+    for (let i = pending.length - 1; i >= 0; i--) if (replied.has(pending[i].id)) return i;
+    return -1;
+  } catch {
+    console.error(`${TAG} could not check whether a reply already went out; sending the safe line`);
+    return -1;
+  }
+}
+
+/**
  * Called when a run has failed after its retries: a customer must not be left without an answer. If their latest
  * messages are still unanswered and the chat is still the assistant's, one safe line goes out and they are marked
  * answered. Best effort, never throws, and safe to call twice (it looks first).
+ *
+ * "Still unanswered" is read from the audit rows, and those can be lost after a reply went out. So before the safe line, two signals that a reply for these
+ * messages already went out are looked at, in this order: the marker the reply step leaves on the message after its send (it is written even when the send's
+ * record failed), then the row notify.send recorded for the reply's key (reply-record.ts). Either one means the customer has their answer: no safe line, and
+ * the messages are marked answered so a later run does not collect them again ("already_replied"). A reply covers only the messages up to the one it
+ * answered: a message that arrived after it still gets the safe line. A check that cannot be read FAILS OPEN: the safe line
+ * goes out, because a customer left in silence is worse than one extra line. When neither signal exists (WhatsApp accepted the reply and nothing of ours
+ * recorded it) nothing can tell, and the safe line may follow a delivered reply: the notify.send gap of the Day 6 reply-key note, section 3.1.
  */
-export async function answerAfterFailure(ids: { tenantId: string; conversationId: string; messageId: string }, batchWindowMs: number, deps: ReplyDeps): Promise<"sent" | "opted_out" | "nothing_to_do" | "not_sent"> {
+export async function answerAfterFailure(
+  ids: { tenantId: string; conversationId: string; messageId: string },
+  batchWindowMs: number,
+  deps: ReplyDeps,
+): Promise<"sent" | "opted_out" | "nothing_to_do" | "already_replied" | "not_sent"> {
   const { store } = deps;
   try {
     const message = await store.getMessage(ids.tenantId, ids.conversationId, ids.messageId);
@@ -607,6 +646,13 @@ export async function answerAfterFailure(ids: { tenantId: string; conversationId
     const stopped = await applyStop({ tenantId: ids.tenantId, conversationId: ids.conversationId, contactId: contact.id, messageIds: pending.map((m) => m.id) }, deps);
     if (stopped) return "opted_out";
     if (conversation.mode !== "ai") return "nothing_to_do";
+
+    // Only when the reply reaches the newest unanswered message: one that arrived after it still needs an answer (the safe line below, for all of them).
+    if ((await replyReach(ids, pending, deps)) === pending.length - 1) {
+      // Best effort: the customer has their reply, and that is what is reported.
+      await recordAnswered({ tenantId: ids.tenantId, conversationId: ids.conversationId, messageIds: pending.map((m) => m.id) } as TurnContext, deps).catch(() => undefined);
+      return "already_replied";
+    }
 
     const language = textLanguage(contact.language);
     // The notice is optional: if the business's settings cannot be read, the safe line still goes out, without it.
