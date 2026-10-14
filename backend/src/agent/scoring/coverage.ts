@@ -9,6 +9,8 @@ import { judge } from "./score";
 
 /** How many of the business's areas one reply lists. */
 export const MAX_LISTED_AREAS = 6;
+/** How many of the business's places are kept, normalised, on the reading for the check that a message names one of them. */
+export const MAX_KNOWN_AREAS = 50;
 /** How much of one of the business's own area names is put in a reply. */
 export const MAX_AREA_NAME_CHARS = 60;
 /** How much of the customer's own words are put back in a reply. */
@@ -50,6 +52,8 @@ export interface CoverageReading {
   shown: string;
   /** Where the business does have sites, as it wrote them: at most MAX_LISTED_AREAS. */
   areas: string[];
+  /** Every place the business has (up to MAX_KNOWN_AREAS), normalised: what a message is checked against to see whether the customer also names a served place. */
+  known: string[];
 }
 
 const cutChars = (text: string, max: number) => [...text].slice(0, max).join("");
@@ -77,5 +81,21 @@ export function readCoverage(rule: CoverageRule, references: Record<string, unkn
   const verdict = judge(rule.match, area, { references: { ...references, ...(name ? { [`${name}_areas`]: areas.map(normaliseArea).filter(Boolean) } : {}) } });
   if (verdict === undefined) return null;
   const shown = cutChars(stripUnsafeCharacters(text).replace(/\s+/g, " ").trim(), MAX_SHOWN_CHARS).trim();
-  return { served: verdict, area, shown, areas: areas.slice(0, MAX_LISTED_AREAS) };
+  return { served: verdict, area, shown, areas: areas.slice(0, MAX_LISTED_AREAS), known: areas.map(normaliseArea).filter(Boolean).slice(0, MAX_KNOWN_AREAS) };
+}
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Whether the customer's own words name this place (as normaliseArea writes it), as a whole word and not as part of a longer one ("Adyarpet" is
+ * not "Adyar"). A pincode is matched as digits however it is spaced or dashed, and not inside a longer number. This is how a repeat is
+ * recognised when the extraction model, told to give only what a message adds, returns no place for a place the lead already has.
+ */
+export function mentionsArea(text: string, area: string): boolean {
+  if (!area) return false;
+  if (/^\d+$/.test(area)) {
+    const digits = [...area].join("[ -]?");
+    return new RegExp(`(?<!\\d)${digits}(?!\\d)`).test(text.normalize("NFKC"));
+  }
+  return new RegExp(`(?<![\\p{L}\\p{N}\\p{M}])${escapeRegExp(area)}(?![\\p{L}\\p{N}\\p{M}])`, "u").test(normaliseArea(text));
 }

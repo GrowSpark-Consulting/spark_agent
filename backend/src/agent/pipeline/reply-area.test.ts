@@ -24,7 +24,7 @@ const at = (secondsAgo: number) => new Date(NOW - secondsAgo * 1000).toISOString
 const AREAS = ["Velachery", "Tambaram", "Anna Nagar"];
 const SENT: SendOutcome = { status: "sent", messageId: "m-out", providerMsgId: "wamid.OUT", creditsCharged: 1, usedTemplate: false };
 
-const reading = (over: Record<string, unknown> = {}) => ({ served: false, area: "adyar", shown: "Adyar", areas: AREAS, named: true, ...over });
+const reading = (over: Record<string, unknown> = {}) => ({ served: false, area: "adyar", shown: "Adyar", areas: AREAS, known: AREAS.map((a) => a.toLowerCase()), named: true, ...over });
 const ready: QualificationSummary = { score: 55, temperature: "warm", ask: [], missingRequired: [], readyForSlots: true, hardFail: null, bookingKind: "site_visit" };
 const understood = (over: Record<string, unknown> = {}): UnderstandResult =>
   ({ status: "understood", summary: { intent: "give_details", language: "en", sentiment: "neutral", asksIfHuman: false, notInterested: false, confidence: 0.9, hasQuestion: false, fieldKeys: ["location"], ...over }, retrieval: { outcome: "skipped" }, qualification: ready }) as UnderstandResult;
@@ -38,11 +38,13 @@ interface Options {
   send?: SendOutcome;
   reminder?: "none" | "fails";
   understood?: UnderstandResult;
+  /** What the customer wrote (the default is "Adyar"). */
+  words?: string;
 }
 
 function world(over: Options = {}) {
   const customer = (id: string, secondsAgo: number, agent: Record<string, unknown> | null): FakeMessage => ({
-    id, tenantId: A, conversationId: CONV, direction: "in", sender: "customer", kind: "text", createdAt: at(secondsAgo), body: "Adyar", meta: agent ? { agent } : {},
+    id, tenantId: A, conversationId: CONV, direction: "in", sender: "customer", kind: "text", createdAt: at(secondsAgo), body: over.words ?? "Adyar", meta: agent ? { agent } : {},
   });
   const messages = [
     ...(over.before ? [customer(M0, 120, over.before)] : []),
@@ -251,5 +253,84 @@ describe("what the steps remember", () => {
     await run(w, r);
     expect(JSON.stringify([...r.memo.entries()])).not.toMatch(/adyar|velachery|tambaram|anna nagar/i);
     expect(r.ran).toContain("area-reminder");
+  });
+});
+
+// The real extraction model is told to give only what a message adds, so it returns no place for one the lead already has: "only Adyar" after the
+// options is read by comparing the customer's own words with the stored unserved place (the strict rule, the model naming it, stays the first path).
+describe("a repeat the model returned no place for", () => {
+  const noPlace = { reading: reading({ named: false }) };
+  const shown = { coverage: { area: "adyar", stage: "options" } };
+
+  it.each(["only Adyar", "Adyar only", "No, I want Adyar only", "I told you, Adyar", "Not interested in other areas, only Adyar please"])("%j after the options is insisting", async (words) => {
+    const w = world({ ...noPlace, before: shown, words });
+    expect(await run(w)).toMatchObject({ case: "area_unavailable", reply: { status: "sent", source: "fixed" } });
+    expect(sentText(w)).toBe(areaText("area_unavailable", "en", { area: "Adyar", areas: AREAS }));
+    expect(w.areaReminder).toHaveBeenCalledTimes(1);
+    expect(w.areaReminder).toHaveBeenCalledWith({ tenantId: A, conversationId: CONV, leadId: LEAD, area: "Adyar", areaKey: "adyar" });
+    expect(metaOf(w)).toMatchObject({ coverage: { area: "adyar", stage: "unavailable" } });
+    expect(w.complete).not.toHaveBeenCalled();
+    expect(w.handoffs).toHaveLength(0);
+  });
+
+  it("counts after 'nothing there' too, without a second reminder", async () => {
+    const w = world({ ...noPlace, before: { coverage: { area: "adyar", stage: "unavailable" } }, words: "only Adyar" });
+    expect(await run(w)).toMatchObject({ case: "area_unavailable" });
+    expect(w.areaReminder).not.toHaveBeenCalled();
+  });
+
+  it("does not count a longer word that only contains the place (Adyarpet)", async () => {
+    const w = world({ ...noPlace, before: shown, words: "what about Adyarpet" });
+    await run(w);
+    expect(metaOf(w).planCase).not.toMatch(/^area_/);
+    expect(w.areaReminder).not.toHaveBeenCalled();
+    expect(Object.hasOwn(metaOf(w), "coverage")).toBe(false);
+  });
+
+  it("does not count another place, and does not count a message that also names a place the business has", async () => {
+    for (const words of ["only Mylapore", "Adyar or Velachery, which is closer?"]) {
+      const w = world({ ...noPlace, before: shown, words });
+      await run(w);
+      expect(metaOf(w).planCase, words).not.toMatch(/^area_/);
+      expect(w.areaReminder).not.toHaveBeenCalled();
+    }
+  });
+
+  it("does not count when the options were never shown for this place: the first reply lists the areas, never a refusal", async () => {
+    for (const before of [null, { coverage: { area: "mylapore", stage: "options" } }, { coverage: null }]) {
+      const w = world({ ...noPlace, before, words: "only Adyar" });
+      await run(w);
+      expect(metaOf(w).planCase).not.toBe("area_unavailable");
+      expect(w.areaReminder).not.toHaveBeenCalled();
+    }
+  });
+
+  it("counts a pincode repeat, however it is spaced", async () => {
+    const w = world({ reading: reading({ named: false, area: "641001", shown: "641001", areas: ["600042", "600020"] }), before: { coverage: { area: "641001", stage: "options" } }, words: "the flat is at 641 001, that is where I need it" });
+    expect(await run(w)).toMatchObject({ case: "area_unavailable" });
+    expect(w.areaReminder).toHaveBeenCalledWith(expect.objectContaining({ areaKey: "641001" }));
+  });
+
+  it("counts a repeat in Tamil script and in Tanglish, against the place as it was stored", async () => {
+    const tamil = world({ reading: reading({ named: false, area: "அடையாறு", shown: "அடையாறு" }), before: { coverage: { area: "அடையாறு", stage: "options" } }, words: "அடையாறு மட்டும் தான்" });
+    expect(await run(tamil)).toMatchObject({ case: "area_unavailable" });
+    const tanglish = world({ before: shown, words: "Adyar dhaan venum", reading: reading({ named: false }) });
+    expect(await run(tanglish)).toMatchObject({ case: "area_unavailable" });
+  });
+
+  it("checks a message against every place the business has, not only the ones a reply lists", async () => {
+    const many = ["Velachery", "Tambaram", "Anna Nagar", "Guindy", "Porur", "Mogappair", "Chromepet", "Perungudi"];
+    const w = world({ reading: reading({ named: false, areas: many.slice(0, 6), known: many.map((a) => a.toLowerCase()) }), before: shown, words: "Adyar or Perungudi, which is closer?" });
+    await run(w);
+    expect(metaOf(w).planCase).not.toMatch(/^area_/);
+    expect(w.areaReminder).not.toHaveBeenCalled();
+  });
+
+  it("is the same on a repeated run: one reply, the same state, one reminder key", async () => {
+    const w = world({ ...noPlace, before: shown, words: "only Adyar" });
+    await run(w);
+    await run(w);
+    expect(w.send).toHaveBeenCalledTimes(1);
+    expect(new Set(w.areaReminder.mock.calls.map(([input]) => JSON.stringify(input))).size).toBe(1);
   });
 });

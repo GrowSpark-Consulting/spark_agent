@@ -1,0 +1,29 @@
+name: "A repeat in Tamil script of an unserved area is read from the customer's own words (machine draft)"
+description: "Raja, 14 Oct. The customer wrote the place in Tamil script the first time, so that is the place stored; the repeat contains the same word and the model returns no field. Counts as insisting. MACHINE DRAFT wording in the fixed lines. A repeat in Tamil script of a place first typed in English letters is NOT recognised by this rule (the words are compared as written, no transliteration)."
+needsNativeCheck: true
+contact: { language: ta }
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, areas: [Velachery, Tambaram] } }
+  slots: ["2026-10-11T04:30:00.000Z"]
+turns:
+  - customer: "அடையாறு பகுதியில் 2BHK வேண்டும்"
+    mock:
+      extraction: { language: ta, intent: give_details, fields: { config: 2BHK, location: "அடையாறு" }, question: null }
+    expect:
+      reply: { sent: true, contains: ["இடங்கள் இல்லை", "Velachery, Tambaram"] }
+      areaReminder: false
+    mockOnly:
+      case: area_options
+  - customer: "அடையாறு மட்டும் தான்"
+    mock:
+      extraction: { language: ta, intent: give_details, fields: {}, question: null }
+    expect:
+      reply: { sent: true, contains: ["சொத்துகள் இல்லை"], notContains: ["Velachery"] }
+      aiReplies: 1
+      handoff: null
+      leadStage: engaged
+      areaReminder: true
+    mockOnly:
+      case: area_unavailable

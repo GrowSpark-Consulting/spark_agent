@@ -13,6 +13,7 @@ import type { NotifyPayload, SendOutcome } from "../../notify/send";
 import type { LlmClient, LlmMessage } from "../llm/anthropic";
 import { LlmError } from "../llm/anthropic";
 import { buildReplyMessages, buildReplySystem, REPLY_PROMPT } from "../prompts/reply_v2";
+import { mentionsArea, normaliseArea } from "../scoring/coverage";
 import { areaText, consentNotice, EXIT_BUTTON_IDS, exitQuestionButtons, fixedText, textLanguage } from "./fixed-texts";
 import { parseReplySettings, type ReplySettings } from "./persona";
 import { runAct, ActResultSchema, type ActResult } from "../scheduling/act";
@@ -131,7 +132,7 @@ interface Loaded {
 }
 
 /** What the understanding step kept about where the customer wants to be (understand.ts): not trusted, read here, and ignored when it is not in the shape it writes. */
-const CoverageReading = z.object({ served: z.boolean(), area: z.string().min(1), shown: z.string(), areas: z.array(z.string()), named: z.boolean() });
+const CoverageReading = z.object({ served: z.boolean(), area: z.string().min(1), shown: z.string(), areas: z.array(z.string()), known: z.array(z.string()).default([]), named: z.boolean() });
 
 async function loadPlanInput(turn: TurnContext, understood: UnderstandResult, deadlineExceeded: boolean, deps: ReplyDeps): Promise<Loaded> {
   const { store } = deps;
@@ -157,7 +158,13 @@ async function loadPlanInput(turn: TurnContext, understood: UnderstandResult, de
   const area = CoverageReading.safeParse(agent?.coverageReading);
   const unserved = area.success && !area.data.served ? area.data : null;
   const previous = unserved ? await store.getPreviousCoverage(turn.tenantId, turn.conversationId, firstAt) : null;
-  const coverage = unserved ? { area: unserved.area, shown: unserved.shown, areas: unserved.areas, named: unserved.named, stage: previous && previous.area === unserved.area ? previous.stage : null } : null;
+  const stage = unserved && previous && previous.area === unserved.area ? previous.stage : null;
+  // The model names the place only when a message adds it, and a repeat adds nothing (the place is already on the lead): a customer who repeats it is
+  // read from their own words. Only against the place this chat already answered (never before the options were shown), as a whole word, and not when
+  // the same message also names a place the business has (they may be weighing the two).
+  const words = texts.map((t) => t.body ?? "").join(" ");
+  const repeated = unserved !== null && !unserved.named && stage !== null && mentionsArea(words, unserved.area) && ![...unserved.known, ...unserved.areas.map(normaliseArea)].some((a) => mentionsArea(words, a));
+  const coverage = unserved ? { area: unserved.area, shown: unserved.shown, areas: unserved.areas, named: unserved.named || repeated, stage } : null;
   return {
     agent,
     settings,

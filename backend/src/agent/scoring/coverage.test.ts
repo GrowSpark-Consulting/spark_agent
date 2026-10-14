@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { coverageRule, MAX_AREA_NAME_CHARS, MAX_LISTED_AREAS, MAX_SHOWN_CHARS, normaliseArea, readCoverage } from "./coverage";
+import { coverageRule, MAX_AREA_NAME_CHARS, MAX_KNOWN_AREAS, MAX_LISTED_AREAS, MAX_SHOWN_CHARS, mentionsArea, normaliseArea, readCoverage } from "./coverage";
 
 // Where the customer wants to be, against where the business has sites. Plain code: the pack names the field and the area matcher
 // (or, for a pack published before `coverage` existed, its own area scoring rule does), the business's catalog names the places.
@@ -43,7 +43,7 @@ describe("readCoverage", () => {
   });
 
   it("is unserved for an area the business does not have, and carries the areas it does have, as the business wrote them", () => {
-    expect(readCoverage(rule, refs, "Adyar")).toEqual({ served: false, area: "adyar", shown: "Adyar", areas: ["Velachery", "Tambaram", "Anna Nagar"] });
+    expect(readCoverage(rule, refs, "Adyar")).toEqual({ served: false, area: "adyar", shown: "Adyar", areas: ["Velachery", "Tambaram", "Anna Nagar"], known: ["velachery", "tambaram", "anna nagar"] });
   });
 
   it("judges a place whose name has punctuation the customer left out or moved: the catalog's own spelling is compared as the customer's is", () => {
@@ -93,6 +93,14 @@ describe("readCoverage", () => {
     expect(readCoverage(rule, many, "Adyar")?.areas).toEqual(["A1", "B2", "C3", "D4", "E5", "F6"]);
   });
 
+  it(`keeps every place the business has, normalised, for the check that a message names one (not only the ${MAX_LISTED_AREAS} a reply lists), up to ${MAX_KNOWN_AREAS}`, () => {
+    const names = Array.from({ length: 60 }, (_, i) => `Place ${i + 1}`);
+    const read = readCoverage(rule, { project_areas: names }, "Adyar");
+    expect(read?.areas).toHaveLength(MAX_LISTED_AREAS);
+    expect(read?.known).toHaveLength(MAX_KNOWN_AREAS);
+    expect(read?.known[7]).toBe("place 8");
+  });
+
   it(`cuts a very long area name the business typed to ${MAX_AREA_NAME_CHARS} characters, so one reply stays short`, () => {
     const read = readCoverage(rule, { project_areas: ["V".repeat(500), "Tambaram"] }, "Adyar");
     expect([...(read?.areas[0] ?? "")]).toHaveLength(MAX_AREA_NAME_CHARS);
@@ -106,5 +114,52 @@ describe("readCoverage", () => {
     const emoji = readCoverage(rule, refs, `${"y".repeat(MAX_SHOWN_CHARS - 1)}😀😀`);
     expect(emoji?.shown.endsWith("😀")).toBe(true);
     expect([...(emoji?.shown ?? "")]).toHaveLength(MAX_SHOWN_CHARS);
+  });
+});
+
+// The customer's own words against the place already on the lead (Raja, 14 Oct: the real extraction model returns no field for a repeat, because the
+// place is already known). Whole word after the same normalising; a pincode as digits, however it is spaced or dashed.
+describe("mentionsArea", () => {
+  it.each([
+    "only Adyar",
+    "Adyar only",
+    "No, I want Adyar only",
+    "I told you, Adyar",
+    "Not interested in other areas, only Adyar please",
+    "ADYAR!!",
+    "Adyar dhaan venum",
+    "is it adyar.",
+  ])("counts %j", (text) => expect(mentionsArea(text, "adyar")).toBe(true));
+
+  it.each([
+    ["Adyarpet", "a longer word that only starts with it"],
+    ["Madyar", "a longer word that ends with it"],
+    ["Mylapore", "a different place"],
+    ["", "nothing"],
+    ["ok", "nothing about a place"],
+  ])("does not count %j (%s)", (text) => expect(mentionsArea(text, "adyar")).toBe(false));
+
+  it("counts a place with more than one word, however it is spaced or punctuated", () => {
+    expect(mentionsArea("only anna   nagar please", "anna nagar")).toBe(true);
+    expect(mentionsArea("Anna-Nagar only", "anna nagar")).toBe(true);
+    expect(mentionsArea("anna nagarx", "anna nagar")).toBe(false);
+  });
+
+  it("counts a pincode typed with a space or a dash, inside a sentence, and not a longer or shorter number", () => {
+    expect(mentionsArea("the flat is at 641 001, that is where I need it", "641001")).toBe(true);
+    expect(mentionsArea("641-001 only", "641001")).toBe(true);
+    expect(mentionsArea("pincode 641001 please", "641001")).toBe(true);
+    expect(mentionsArea("6410011", "641001")).toBe(false);
+    expect(mentionsArea("1641001", "641001")).toBe(false);
+    expect(mentionsArea("budget 64 lakh 1001", "641001")).toBe(false);
+  });
+
+  it("counts a place in Tamil script, whole word", () => {
+    expect(mentionsArea("அடையாறு மட்டும் தான்", "அடையாறு")).toBe(true);
+    expect(mentionsArea("அடையாறுபேட்டை", "அடையாறு")).toBe(false);
+  });
+
+  it("is false for an empty place", () => {
+    expect(mentionsArea("anything", "")).toBe(false);
   });
 });

@@ -103,7 +103,7 @@ const run = async (w: ReturnType<typeof world>) => {
 describe("an area the business has no sites in", () => {
   it("is kept as the reading of the message: not served, the customer's place and the places the business has, as it wrote them", async () => {
     const { meta } = await run(world({ script: reading({ budget: "60L", location: "Adyar." }) }));
-    expect(meta?.coverageReading).toEqual({ served: false, area: "adyar", shown: "Adyar.", areas: ["Velachery", "Tambaram", "Anna Nagar"], named: true });
+    expect(meta?.coverageReading).toEqual({ served: false, area: "adyar", shown: "Adyar.", areas: ["Velachery", "Tambaram", "Anna Nagar"], known: ["velachery", "tambaram", "anna nagar"], named: true });
   });
 
   it("is what was SAVED: a doubtful reading that does not replace the place the lead already has is not what the customer is taken to have said", async () => {
