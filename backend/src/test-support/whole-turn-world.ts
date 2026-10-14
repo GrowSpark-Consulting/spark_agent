@@ -27,12 +27,13 @@ import { fakePipelineStore, type FakeMessage } from "./fake-pipeline-store";
 // FakeNotify IS A FAKE. It is not Dev 2's notify.send (backend/src/notify/send.ts) and proves nothing about it. It copies only the parts of its contract
 // the pipeline relies on, so that a test can count what a customer would receive: a send under an idempotency key that was recorded returns the first
 // outcome and sends nothing; credits are spent by reference before the send and refunded by reference when it fails (as #163 made them); an unknown
-// outcome refunds the credits and is never resent (contracts decision 16); an opted-out contact is refused. Delivery by the provider and the record
-// notify_record writes are counted separately, because "may have gone out" and "recorded" are different things.
+// outcome refunds the credits and is never resent (contracts decision 16); an opted-out contact is refused; and (Day 7, Dev 2, migration 0045) a keyed
+// send is CLAIMED before the provider is asked, so a repeat after an attempt that never recorded or released its claim (the process died, notify_record
+// failed, or the outcome was unknown) is answered "unknown" and sends nothing, while a refusal for certain releases the claim. Delivery by the provider
+// and the record notify_record writes are counted separately, because "may have gone out" and "recorded" are different things.
 
-// WHERE THE FAKE IS MORE FORGIVING THAN THE REAL notify.send (backend/src/notify/send.ts), found by review: a notify_record failure (the real send logs it
-// and reports "sent" with no row, so the key is never known: the `ok_unrecorded` script models it); an error reading the earlier send of a key (the real
-// one throws); the template fallback under key <key>#template and its different cost; the 24-hour window and the feature check; spend and refund that can
+// WHERE THE FAKE IS MORE FORGIVING THAN THE REAL notify.send (backend/src/notify/send.ts), found by review: an error reading the earlier send of a key,
+// or claiming it (the real one throws); the template fallback under key <key>#template and its different cost; the 24-hour window and the feature check; spend and refund that can
 // throw; unexpected sender errors (non-retryable upstream_failed); credits locked in a transaction; the dedupe is not scoped to the business; and "never
 // negative" is enforced by the fake itself. None of these can be shown wrong by these tests.
 
@@ -70,9 +71,12 @@ const llmResult = (text: string): LlmResult => ({ text, model: "mock", stopReaso
 function scriptedLlm(script: ModelScript) {
   const next = { extraction: 0, reply: 0 };
   const calls = { extraction: 0, reply: 0 };
+  /** Every request the pipeline made, as sent (Day 7 PR C: what reached the model). */
+  const requests: LlmRequest[] = [];
   const client: LlmClient = {
     async complete(request: LlmRequest) {
       const role = request.role === "extraction" ? "extraction" : "reply";
+      requests.push(request);
       calls[role]++;
       const items = (role === "extraction" ? script.extraction : script.reply) ?? [role === "extraction" ? GOOD_EXTRACTION : GOOD_REPLY];
       const item = items[Math.min(next[role]++, items.length - 1)];
@@ -80,7 +84,7 @@ function scriptedLlm(script: ModelScript) {
       return llmResult(typeof item === "function" ? item() : item);
     },
   };
-  return { client, calls };
+  return { client, calls, requests };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -93,8 +97,8 @@ export type SendScript =
   | "permanent" // refused for good (the number is not connected): nothing delivered, credits refunded
   | "unknown_delivered" // no answer in time, and the provider DID deliver: failed + outcomeUnknown, credits refunded, nothing recorded
   | "unknown_lost" // no answer in time, and the provider did NOT deliver: failed + outcomeUnknown, credits refunded, nothing recorded
-  | "ok_unrecorded" // delivered, reported as sent, but notify_record failed (send.ts logs it and reports sent): nothing recorded, so the key is not known to a later send
-  | "crash_after_accept"; // the provider delivered, then the process died before notify_record: nothing recorded, credits kept, the caller sees an exception
+  | "ok_unrecorded" // delivered, reported as sent, but notify_record failed (send.ts logs it and reports sent): nothing recorded; the claim stays, so a later send of the key is answered "unknown"
+  | "crash_after_accept"; // the provider delivered, then the process died before notify_record: nothing recorded, credits kept, the claim stays, the caller sees an exception
 
 export interface Delivery {
   kind: string;
@@ -117,6 +121,8 @@ export class FakeNotify {
   /** Every call, answered or not. */
   readonly calls: { kind: string; key: string | undefined }[] = [];
   private readonly recorded = new Map<string, SendOutcome>();
+  /** Keyed sends claimed before the provider is asked (0045): "sending" until recorded, or released by a refusal for certain. */
+  private readonly claims = new Map<string, "sending" | "released">();
   private scripts: SendScript[];
   private seq = 0;
 
@@ -167,9 +173,18 @@ export class FakeNotify {
       if (earlier) return earlier;
     }
     if (kind === "ai_reply" && this.isOptedOut()) return { status: "skipped", reason: "opted_out" };
+    const inDoubt: SendOutcome = { status: "failed", error: { code: "upstream_failed", message: "fake: an earlier attempt may have gone out", retryable: true, outcomeUnknown: true } };
+    if (recordedKey !== undefined) {
+      if (this.claims.get(recordedKey) === "sending") return inDoubt;
+      this.claims.set(recordedKey, "sending");
+    }
+    const release = () => void (recordedKey !== undefined && this.claims.set(recordedKey, "released"));
     const cost = kind === "ai_reply" ? 1 : 0;
     const ref = recordedKey ?? `anon:${++this.seq}`;
-    if (cost > 0 && !this.spend(ref)) return { status: "skipped", reason: "insufficient_credits" };
+    if (cost > 0 && !this.spend(ref)) {
+      release();
+      return { status: "skipped", reason: "insufficient_credits" };
+    }
 
     const text = payload.interactive ? payload.interactive.body : (payload.text ?? "");
     const delivery: Delivery = { kind, key, text };
@@ -196,9 +211,11 @@ export class FakeNotify {
         return { status: "sent", messageId: `m-${++this.seq}`, providerMsgId: `wamid.OUT${this.seq}`, creditsCharged: cost, usedTemplate: false };
       case "retryable":
         this.refund(ref);
+        release();
         return failed(true, false, "rate_limited");
       case "permanent":
         this.refund(ref);
+        release();
         return failed(false, false, "whatsapp_not_connected");
       case "unknown_delivered":
         this.deliveries.push(delivery);

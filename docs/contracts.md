@@ -58,6 +58,9 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0042_billing_cancel` | Cancelling a plan and paying a past-due plan another way (decision 20): `subscriptions.cancel_at`; `cancel_subscription(tenant, actor)` (a plan in good standing stops renewing and ends at its period end, `scheduled`, dropping a scheduled downgrade; a past-due one ends now and the business is paused, `ended`, naming the mandate to revoke; again is harmless; PA409 with no plan), `resume_subscription(tenant, actor)` (undoes it while the period lasts; PA409 when not cancelled), `end_cancelled_subscriptions(now)` (for the renewal job: each cancelled plan whose period has ended is ended, its business paused, its mandate returned to revoke); `renewals_to_notify` and `renewals_to_charge` skip a cancelled plan; `begin_payment` lets a past-due business subscribe again (the pending plan names the past-due one it replaces, which `settle_payment` cancels once paid; the server revokes its mandate); `settle_payment` flags a second setup fee and a renewal charged after the owner cancelled for a refund (`payment.needs_refund`); `anon` and `authenticated` lose INSERT, UPDATE and DELETE on `payments` and `subscriptions` (RLS already refused them; reads stay). Audited: `subscription.cancel_requested`, `subscription.resumed`, `subscription.ended` |
 | `0043_contact_deletion` | A customer's request to delete their data (DPDP): `contacts.deleted_at`; `contact_deletion_preview(tenant, contact)` (counts of chats, messages, leads, bookings and upcoming bookings) and `delete_contact_data(tenant, contact, actor)`: in one transaction it deletes the contact's conversations (with messages and handoffs) and leads (with bookings and quotes), unlinks `kb_gaps.last_contact_id`, scrubs the contact (phone `deleted:<id>`, no name, language or tags) instead of deleting it so its `consent_logs` survive, writes `consent_logs` `deletion_requested` and `deleted` (source `dashboard`) and `audit_logs` `contact.deleted` (actor, counts only), and returns the past bookings' Google Calendar events to take down. PA404 for a contact of another business, PA409 while it has an upcoming held or confirmed booking, `already_deleted` when asked again. Server only |
 | `0044_ai_limits` | Rate limits and the daily AI spend cap: `ai_spend_daily` (server only; one row per business and India's day: the models' estimated `cost_usd` and `calls`), `tenants.ai_daily_cap_usd` (a platform admin's cap for one business; null: the plan's, monthly credits x USD 0.002, at least USD 1), `record_ai_spend(tenant, cost)` and `ai_limits(tenant, conversation?)` (today's spend and cap, and the AI replies in the last hour to the chat and by the business). Server only. (0043 is the contact deletion, #191) |
+| `0045_notify_attempts` | A keyed send is claimed before WhatsApp is asked (closes the Day 6 reply-key note, section 3.1): `notify_attempts` (server only; `message_id` = the keyed message id, `status` `sending` or `released`), `claim_notify_attempt(tenant, message, kind)` (`claimed`, `sent` when the message is recorded, `in_doubt` when an earlier attempt neither recorded nor released it) and `release_notify_attempt(tenant, message)` (after a refusal for certain). Server only |
+| `0046_rls_tightening` | The Day 7 row-level-security review: `consent_logs` loses its browser INSERT (the server's functions write every entry); staff update only the leads assigned to them and cannot reassign them (owners and admins any lead); `anon` loses every write grant on every table and view, and on tables created later. (0045 is the notify claim, #201) |
+| `0047_message_media` | The private storage bucket `message-media` (50 MB a file, any type) for a customer's photos, voice notes and documents once downloaded from WhatsApp, at `<tenant_id>/<conversation_id>/<message_id>.<ext>` (`backend/src/lib/storage.ts` builds the path). A member reads the files of the business its first folder names (checked inline in the policy, then `is_member`); only the server writes (no insert, update or delete policy). (0045 is #201, 0046 is #203) |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -81,12 +84,16 @@ can TRUNCATE. **A new business table needs one fixture row in that file**, or th
 | Table | Members can |
 |---|---|
 | `catalog_items` | read own tenant; **owners and admins** write (0028) |
-| `quotes` | read/write own tenant; lead and catalog item must be in the same tenant |
+| `quotes` | read/write own tenant; lead and catalog item must be in the same tenant. **Open (Day 7 review):** any member can also set `approved_by`, `sent_at` and `status`; whether approving or marking a quote sent should be server-only waits for the quote builder's design (Raja) |
 | `services`, `resources` | read own tenant; **owners and admins** insert/update/delete (0028) |
-| `leads` | update `stage`, `owner_user_id`, `outcome`, `fields` |
+| `leads` | update `stage`, `owner_user_id`, `outcome`, `fields`: **owners and admins** any lead of their business; **staff** only the leads assigned to them, and never to someone else (0046) |
 | `tenants` | **owners and admins** update `name`, `timezone`, `business_hours`, `agent_settings` (0028) |
 | `memberships` | update their own `whatsapp_phone`, `takeover_pref` |
-| `consent_logs` | read and insert own tenant (no update or delete) |
+| `consent_logs` | read own tenant only: every entry is written by the server's functions (0046; no insert, update or delete from the browser) |
+
+A visitor who is not signed in (`anon`) has no INSERT, UPDATE, DELETE or TRUNCATE grant on any table or view, nor on any table a later migration creates (0046); row-level security already refused those writes.
+
+**Server queries and tokens at rest (Day 7 review, 14 Oct).** The server uses the service role, so every query must name the business itself. Every `.from(...)` in `backend/src` was checked: each filters by `tenant_id`, or reads a global table (`plans`, `features`, `vertical_packs`, `platform_admins`), or finds a row by a secret or a provider id before the business is known (a connect-link token hash, a PayU txnid, a trial phone hash), or is a sweep across businesses by design (daily agenda, KB sweep, renewals), or follows an id the database itself returned. None was missing a filter. Tokens at rest on the staging database: every app secret, webhook token and WhatsApp token of a real connection is `v1:<iv>:<tag>:<ciphertext>` (AES-256-GCM, `ENCRYPTION_KEY`); the only exceptions were two placeholder rows of the businesses "Isolation Test A" and "Isolation Test B" (6 Oct, `pending`), to be deleted. Read-only check: count rows whose `token_enc` does not match `^v1:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$`.
 
 **Agreed: template status table** (Dev 2 builds it as the next free migration):
 
@@ -215,6 +222,8 @@ request, credits out) starts "Priority: ". Outside the window the template's `{{
 `API_PUBLIC_URL` (or `ENCRYPTION_KEY`) there are no take-over links, and a card that cannot be built is left out: the
 alert is then the headline and the dashboard link, as before.
 
+**Each alert is keyed (Day 7).** Every staff alert goes through `notify.send` with an idempotency key that names that exact alert and member, so a retried step, a repeat run or a replayed event never sends it twice: `handoff_alert:<handoff>:<member>`, `handoff_sla:<handoff>:<member>`, `visit_outcome:<booking>:<member>`, `low_rating:<booking>:<member>` (added 14 Oct; before, these three jobs relied on Inngest dropping a repeated event id within 24 hours), `credit_alert:<level>:<grant>:<member>`, `<event id>:<member>` (event-alerts), `own_number_outcome:<handoff>`. Every Inngest function and both webhooks name the test that proves a replay changes nothing in `backend/src/inngest/replay-coverage.test.ts` (exit test 1); a new function fails it until its replay is proved.
+
 | Alert | When | Headline | Link |
 |---|---|---|---|
 | `handoff_opened` | a handoff that is not one of the two below | "{name} is waiting for a person on WhatsApp." | `/dashboard/inbox?chat=<id>` |
@@ -270,6 +279,12 @@ that message has gone out (its `messages` row exists), a repeat returns the firs
 sending, charging or checking toggles again. A message that fell back to the template went out under the key
 `<key>#template`, and a repeat finds that one too. A send whose outcome is unknown wrote no row, so it is still never
 retried automatically (`outcomeUnknown`).
+**At most once, even across a crash (Day 7, 0045).** A keyed send claims its message id in `notify_attempts` before WhatsApp is
+asked. A repeat that finds the claim still `sending` and no `messages` row (the earlier attempt died after WhatsApp accepted it, or its
+`notify_record` failed) does not send: it answers `failed` with `outcomeUnknown` ("An earlier attempt to send this message may have gone
+out"), and the earlier attempt's credit stays spent. A refusal for certain (WhatsApp said no, the window closed, no credits) releases
+the claim, so a later attempt may send. The price: a process that dies after claiming and before WhatsApp got the message leaves that
+message unsent. Never twice is the rule (Day 7: "failures must never produce a second message").
 
 **Template catalogue (built, 9 Oct; `backend/src/notify/template-catalogue.ts`, review sheet `docs/templates.md`):**
 every template the jobs send outside the window, English and a Tamil draft, with variables, examples and quick replies;
@@ -764,6 +779,8 @@ invalid `phone` is `invalid` with `fields.phone`.
 - `GET /api/admin/payments/refunds` → `RefundCandidate[]` (refund each in PayU's dashboard).
 - `GET /api/admin/whatsapp/connections` → `AdminConnection[]` (`backend/src/admin/connections.ts`, Day 7): every business's connections, newest first (up to 500): business, `method`, `status`, the number as Meta displays it, verified name, coexistence, quality, messaging limit, a manual token's expiry, and `lastCheck` `{ ranAt, overall, checks: [{ key, status, message }] }` read from `last_check` in the shape of `docs/whatsapp-connection-contract.md` (null when never checked or in an older shape). No token or secret is ever selected.
 Not built: opening a business's dashboard as an admin (logged) needs its own design.
+
+**Message media (`backend/src/lib/storage.ts`, 0047; agreed with Dev 1, 14 Oct).** Downloaded WhatsApp media goes to the private bucket `message-media` at `<tenant_id>/<conversation_id>/<message_id>.<ext>`: build it with `messageMediaPath` (refuses anything that is not an id) and `mediaExtension(mimeType)` (`.bin` for an unknown type). Written by the server only; a member of the business reads with their own session, or the server hands out a signed URL. **To do once files are stored:** a contact's data deletion and a business's deletion must also remove its folders through the Storage API (deleting rows does not touch storage).
 
 **A customer's data deletion (`backend/src/consent/deletion.ts`, 0043; types in `@pakka/types` `privacy.ts`; Settings → Data & privacy).**
 Owner or admin; a contact of another business is `not_found`.

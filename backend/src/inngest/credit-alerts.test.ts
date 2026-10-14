@@ -34,6 +34,14 @@ describe("credit-alerts", () => {
     expect(alert).toHaveBeenCalledWith(TENANT, OWNER_B, { kind: "credits_low", credits: { left: 280, monthly: 1500 } }, `credit_alert:low:7:${OWNER_B}`);
   });
 
+  // Exit test 1 (Day 7; inngest/replay-coverage.test.ts): notify.send keeps one message per key (notify/send.test.ts).
+  it("replay: the same event twice alerts each owner under the same key (level, grant, owner), so each hears once", async () => {
+    const { d, alert } = deps({ balance: 280, monthlyCredits: 1500, grantId: 7 });
+    await handleCreditsSpent({ event, step }, d);
+    await handleCreditsSpent({ event, step }, d);
+    expect(alert.mock.calls.map((x) => x[3])).toEqual([`credit_alert:low:7:${OWNER_A}`, `credit_alert:low:7:${OWNER_B}`, `credit_alert:low:7:${OWNER_A}`, `credit_alert:low:7:${OWNER_B}`]);
+  });
+
   it("tells them the credits are gone at 100%", async () => {
     const { d, alert } = deps({ balance: 0, monthlyCredits: 1500, grantId: 9 });
     await handleCreditsSpent({ event, step }, d);
