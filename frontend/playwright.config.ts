@@ -26,7 +26,8 @@ const supabaseEnv = {
   NEXT_PUBLIC_SUPABASE_ANON_KEY: "e2e-anon-key",
 };
 // Env shared by both app servers: public values only, like Vercel.
-const appEnv = { ...supabaseEnv, NEXT_PUBLIC_API_URL: API_URL };
+// The demo number is a fictional one (a reserved 555-01xx range number): no test ever opens a real chat.
+const appEnv = { ...supabaseEnv, NEXT_PUBLIC_API_URL: API_URL, NEXT_PUBLIC_DEMO_WHATSAPP_NUMBER: "15555550100" };
 // The API's env. Placeholder server secrets keep serverEnv() valid without a .env.local and stop the
 // tests from ever using real ones; they only ever reach the mock. Both app servers may call it.
 const apiEnv = {

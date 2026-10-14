@@ -17,7 +17,18 @@ describe("startTrial", () => {
     expect(result).toEqual({ status: "ready", trial: { routeCode: "TRIAL-7KQM", trialDays: 7, credits: 300 } });
   });
 
+  it("sends the typed WhatsApp number when there is one, and no phone key when there is not", async () => {
+    apiFetch.mockResolvedValue(Response.json({ status: "ready", trial: { routeCode: "TRIAL-7KQM", trialDays: 7, credits: 300 } }));
+    await startTrial({ name: "Sunrise Homes", industry: "re", phone: "+919876543210" });
+    expect(apiFetch).toHaveBeenLastCalledWith("/api/onboarding/trial", { method: "POST", body: { name: "Sunrise Homes", industry: "re", phone: "+919876543210" } });
+    await startTrial({ name: "Sunrise Homes", industry: "re", phone: undefined });
+    const body = (apiFetch.mock.calls.at(-1)?.[1] as { body: Record<string, unknown> }).body;
+    expect(JSON.parse(JSON.stringify(body))).toEqual({ name: "Sunrise Homes", industry: "re" });
+  });
+
   it.each([
+    [409, { status: "phone_used", message: "This WhatsApp number has already had a free trial, so we can't start another. Contact us to start on a paid plan." }],
+    [422, { status: "invalid", fields: { phone: "Enter the number with country code, like +919840012345" } }],
     [409, { status: "has_business" }],
     [422, { status: "unavailable" }],
     [422, { status: "invalid", fields: { name: "Enter your business name" } }],

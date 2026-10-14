@@ -197,7 +197,14 @@ function Notice({ id, tone, title, body, testId, details = [] }: { id?: string; 
   );
 }
 
-function SetupCall({ url }: { url: string | null }) {
+/** `fallback` is what is said when no valid setup-call address is configured (the button is never shown without one). */
+export function SetupCall({
+  url,
+  fallback = "Reply to the person who sent you this link and we’ll set it up with you on a call.",
+}: {
+  url: string | null;
+  fallback?: string;
+}) {
   return (
     <div className="flex flex-col gap-1 text-sm" data-testid="setup-call">
       <strong>Prefer to do it with us?</strong>
@@ -206,7 +213,7 @@ function SetupCall({ url }: { url: string | null }) {
           Book a setup call
         </a>
       ) : (
-        <span className="text-neutral-700">Reply to the person who sent you this link and we’ll set it up with you on a call.</span>
+        <span className="text-neutral-700">{fallback}</span>
       )}
     </div>
   );

@@ -1,0 +1,31 @@
+name: "A site visit or a price asked for an unserved area gets the areas the business has first: no time, no price, no knowledge-base answer"
+description: "Raja, 14 Oct. The customer asks to book a visit in Adyar, and then asks the price of a 2BHK in Adyar, where the business has nothing. The first is answered by the options line: no time is offered (a booking intent comes before the answer in the table, and the area comes before both), and the price from the knowledge base for another area is not given for this one. The second message names the same area, so after the options it is not answered from the knowledge base either, and gets the 'nothing there' line; one staff reminder in all."
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, areas: [Velachery, Tambaram] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb: ["2BHK of 950 sq ft in Velachery starts at ₹78 lakh."]
+turns:
+  - customer: "Can I book a site visit in Adyar?"
+    mock:
+      extraction: { language: en, intent: book, fields: { location: Adyar }, question: null }
+    expect:
+      reply: { sent: true, contains: ["Adyar", "Velachery, Tambaram"], notContains: ["10:00 am", "3:00 pm", "5:30 pm"] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+      areaReminder: false
+    mockOnly:
+      case: area_options
+  - customer: "What is the price of a 2BHK in Adyar?"
+    mock:
+      extraction: { language: en, intent: question, fields: { location: Adyar }, question: "What is the price of a 2BHK in Adyar?" }
+    expect:
+      reply: { sent: true, contains: ["any property in Adyar for now"], notContains: ["78", "lakh"] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+      areaReminder: true
+    mockOnly:
+      case: area_unavailable
