@@ -4,6 +4,7 @@ import { isEnabled } from "../../features/is-enabled";
 import { writeAudit } from "../../lib/audit";
 import { serverEnv } from "../../lib/env";
 import { send } from "../../notify/send";
+import { createAreaReminder } from "../handoff/area-reminder";
 import { llm } from "../llm";
 import type { PackSource } from "../packs/load";
 import { createDbPackSource } from "../packs/store";
@@ -47,6 +48,7 @@ function deepFreeze<T>(value: T): T {
 }
 
 const scheduling = createSchedulingDeps();
+const areaReminder = createAreaReminder();
 
 /** The real dependencies of the reply step: notify.send (including the system notice), the audit and the queue. Owners are alerted by the handoff-alert job, not here. */
 export function replyDeps(store: PipelineStore): ReplyDeps {
@@ -60,6 +62,8 @@ export function replyDeps(store: PipelineStore): ReplyDeps {
     privacyPolicyUrl: serverEnv().PRIVACY_POLICY_URL,
     // Booking (step 6): Dev 2's booking functions, used only when the business has the booking feature on.
     scheduling,
+    // A customer who keeps asking for an area the business has nothing in: the owners and admins are reminded once (a staff_alert with our own text).
+    areaReminder,
   };
 }
 

@@ -173,3 +173,26 @@ describe("loadChats", () => {
     expect(() => loadChats(dirWith({ "x.yaml": "name: x\npack: salon\nturns:\n  - customer: hi\n    expect: { aiReplies: 1 }\n" }))).toThrow(/folder/);
   });
 });
+
+describe("runChat with an area the business has no sites in", () => {
+  const unserved = (second: Record<string, unknown>) =>
+    Chat.parse({
+      name: "an unserved area",
+      booking: { now: "2026-10-10T04:30:00.000Z", slots: ["2026-10-11T04:30:00.000Z"], catalog: [{ priceFrom: 6000000, attributes: { price_to: 8000000, area: "Velachery" } }] },
+      turns: [
+        { customer: "2BHK in Adyar", mock: { extraction: { intent: "give_details", fields: { config: "2BHK", location: "Adyar" } } }, expect: { case: "area_options", reply: { contains: ["Velachery"] }, areaReminder: false, aiReplies: 1 } },
+        { customer: "only Adyar", mock: { extraction: { intent: "give_details", fields: { location: "Adyar" } } }, ...second },
+      ],
+    });
+
+  it("passes: the options, then 'nothing there' with one staff reminder, the lead still open", async () => {
+    const report = await runChat(unserved({ expect: { case: "area_unavailable", reply: { contains: ["don't have any property in Adyar"] }, areaReminder: true, leadStage: "engaged", handoff: null, calendar: { confirmed: [] } } }), { mode: "mock" });
+    expect(report.failures).toEqual([]);
+    expect(report.transcript.map((t) => t.planCase)).toEqual(["area_options", "area_unavailable"]);
+  });
+
+  it("fails an expectation that says nobody is reminded when staff were", async () => {
+    const report = await runChat(unserved({ expect: { areaReminder: false } }), { mode: "mock" });
+    expect(report.failures.join("\n")).toMatch(/area reminder this turn: wanted false, got true/);
+  });
+});

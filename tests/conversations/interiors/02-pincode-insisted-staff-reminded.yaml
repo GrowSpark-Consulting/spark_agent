@@ -1,0 +1,29 @@
+name: An interiors customer who insists on a pincode the business does not work in is told there is nothing there for now, and staff are reminded once
+description: "Raja, 14 Oct. After the pincodes were listed, the customer gives the same pincode again, typed with a space (641 001): it is the same place once normalised. They are told politely there is nothing there for now; one staff reminder; the lead stays open and the chat stays with the assistant. A different, also unserved pincode would get the options again instead (plan-area.test.ts)."
+pack: interiors
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { type: service, priceFrom: 1000000, attributes: { price_to: 3000000, areas: ["600042", "600020"] } }
+turns:
+  - customer: "Full home interiors, apartment, 1150 sq ft, pincode 641001, budget 12 to 15 lakh"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { property_type: apartment, area_sqft: 1150, scope: full_home, budget: 12-15L, pincode: "641001" }, question: null }
+    expect:
+      reply: { sent: true, contains: ["641001", "600042, 600020"] }
+      aiReplies: 1
+      areaReminder: false
+    mockOnly:
+      case: area_options
+  - customer: "The flat is at 641 001, that is where I need it"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { pincode: "641 001" }, question: null }
+    expect:
+      reply: { sent: true, contains: ["any property in 641 001 for now"], notContains: ["600042"] }
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      leadStage: engaged
+      areaReminder: true
+    mockOnly:
+      case: area_unavailable
