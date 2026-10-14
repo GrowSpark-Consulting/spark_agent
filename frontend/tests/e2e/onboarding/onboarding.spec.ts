@@ -577,6 +577,26 @@ test.describe("the trial route's phone check", () => {
     await expect(page.getByRole("heading", { name: "Teach your assistant" })).toBeVisible();
     expect(bodies).toEqual([{ name: "Sunrise Homes", industry: "re" }]);
   });
+
+  test("a missing or malformed number stops the first step with a message and sends nothing", async ({ page }) => {
+    const bodies: unknown[] = [];
+    await page.route(TRIAL_ROUTE, async (route) => {
+      if (route.request().method() === "OPTIONS") return route.fallback();
+      bodies.push(route.request().postDataJSON());
+      return route.fulfill({ status: 500, contentType: "application/json", body: "{}" });
+    });
+    await openOnboarding(page);
+    const phone = page.getByLabel("Your WhatsApp number");
+    for (const [typed, message] of [["", /Enter your WhatsApp number/], ["98765 4321", /10-digit/], ["12345", /10-digit/]] as const) {
+      await phone.fill(typed);
+      await expect(page.getByTestId("phone-error")).toContainText(message);
+      await expect(next(page, "Send code on WhatsApp")).toBeDisabled();
+    }
+    await phone.fill("98765 43210");
+    await expect(page.getByTestId("phone-error")).toHaveCount(0);
+    await expect(next(page, "Send code on WhatsApp")).toBeEnabled();
+    expect(bodies).toEqual([]);
+  });
 });
 
 test.describe("onboarding → dashboard", () => {

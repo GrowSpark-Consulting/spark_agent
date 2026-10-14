@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { OnboardingState, SetState } from "@/features/onboarding/state";
+import { phoneProblem, type OnboardingState, type SetState } from "@/features/onboarding/state";
 import { StepIntro } from "@/components/onboarding/primitives";
 
 export function StepVerifyPhone({
@@ -13,6 +13,7 @@ export function StepVerifyPhone({
   s: OnboardingState;
   set: SetState;
 }) {
+  const problem = phoneProblem(s);
   return (
     <>
       <StepIntro title="Start your free trial">
@@ -31,9 +32,16 @@ export function StepVerifyPhone({
             onChange={(e) => set({ phone: e.target.value })}
             inputMode="tel"
             placeholder="98400 12345"
+            aria-invalid={!!problem}
+            aria-describedby={problem ? "pk-phone-error" : undefined}
             className="min-h-12 text-[17px]"
           />
         </div>
+        {problem ? (
+          <p id="pk-phone-error" role="alert" data-testid="phone-error" className="mt-1.5 text-sm">
+            {problem}
+          </p>
+        ) : null}
       </div>
 
       {s.otpSent && (

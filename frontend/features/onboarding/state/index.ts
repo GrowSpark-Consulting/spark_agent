@@ -106,9 +106,21 @@ export const SAMPLE_PHONE_DIGITS = "9840012345";
  * number that is not the pre-filled sample counts; anything else sends nothing (the route treats a missing number as no check).
  */
 export function trialPhoneOf(state: OnboardingState): string | undefined {
-  const digits = state.phone.replace(/\D/g, "").replace(/^(91|0)(?=\d{10}$)/, "");
-  if (!/^[6-9]\d{9}$/.test(digits) || digits === SAMPLE_PHONE_DIGITS) return undefined;
+  const digits = indianMobileDigits(state.phone);
+  if (!digits || digits === SAMPLE_PHONE_DIGITS) return undefined;
   return `+91${digits}`;
+}
+
+/** The ten digits of an Indian mobile number typed in any usual way (spaces, dashes, +91, 91 or a leading 0); null when it is not one. */
+function indianMobileDigits(text: string): string | null {
+  const digits = text.replace(/\D/g, "").replace(/^(91|0)(?=\d{10}$)/, "");
+  return /^[6-9]\d{9}$/.test(digits) ? digits : null;
+}
+
+/** Why the first field cannot be used, or null when it can. A missing or malformed number is stopped here, never sent on or dropped quietly. */
+export function phoneProblem(state: OnboardingState): string | null {
+  if (!state.phone.trim()) return "Enter your WhatsApp number.";
+  return indianMobileDigits(state.phone) ? null : "Enter a 10-digit Indian mobile number, like 98765 43210.";
 }
 
 /** The route code the backend returned when it created the trial; null when there is no trial (never a sample code). */
