@@ -54,6 +54,7 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0038_plan_change` | `begin_plan_change(tenant, plan, txnid)`: the same plan cancels a scheduled downgrade (`kept`) or does nothing (`unchanged`); a cheaper plan is scheduled for the next renewal (`next_plan_key`; `scheduled`); a dearer one is an upgrade now (`upgrade`): the price difference for the rest of the period (at least ₹1, GST added) and a new mandate at the new full price, as a pending subscription that `replaces_subscription_id` the current one, with the rest of the month's extra credits. PA409 without a plan, PA428 while a renewal is past due. `settle_payment` applies a paid upgrade: old plan cancelled (the server revokes its mandate at PayU), new one active over the same period, extra credits joining the current month's. Service role only |
 | `0039_trial_lifecycle` | The trial's messages and its end: `trial_notices` (server-only; one row per business and day, claimed before sending; `claimed_by` = the job run, so a retry of that run may send again and another run may not); `trial_notices_due(now)` (each trial's latest due day: 3 four days before the end, 5 two days before, 6 one day before, 7 once paused at the end, within 3 days); `claim_trial_notice(tenant, day, run)` → `claimed` / `already` / `superseded` / `not_eligible`, rechecked under the business's row lock (never a business with an active or past_due subscription); `pause_expired_trials(now)` (an ended trial with no live subscription and no subscription payment pending → `paused`, audited `tenant.trial_ended`; a business being paid for is skipped). Service role only |
 | `0040_staff_alert_platform_fallback` | `notify_staff_target`: when the business has no active number of its own and no chat on one of ours (its only number failed, or a trial nobody has written to yet), alerts and account notices go through our oldest active platform number (the demo number), with the staff conversation on its channel under the business. Customers (`notify_target`) unchanged. Outside the member's 24-hour window it still needs an approved `staff_alert` template on that connection (Dev 1's health-jobs note, item 1) |
+| `0041_admin_billing` | The admin panel's billing functions (service role only; the routes check `platform_admins` first; each change and its audit row in one transaction, actor `admin:<user id>`): `admin_tenants()` (every business: status, plan, live credits, trial end, live subscription, setup-fee flag, members, own active numbers); `admin_extend_trial(tenant, days, actor)` (1 to 30 days from the later of its end and now; a trial paused at its end reopens; the TRIAL code follows; trial notices start over; trial credits are not extended; PA409 for a business with a plan); `admin_grant_credits(tenant, amount, expires_at, request_id, note, actor)` (`grant_credits` 'admin'; a repeated request id grants nothing); `admin_update_plan(key, ...)` (null = unchanged; a price change is refused, PA409, while a business is subscribed at the plan or has a downgrade to it scheduled, because mandates were approved for the old amount; only real feature keys; the trial stays free); `admin_update_feature(key, name, description, default_on)`; `admin_refund_candidates()` (payments flagged `payment.needs_refund`) |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -721,6 +722,18 @@ one of the caller's own memberships (the same rule as the `pakka_tenant` cookie)
 from allowed origins only (CORS). New route: `POST /api/onboarding/trial` `{ name, industry }` →
 `StartTrialResult` (`@pakka/types`), with status 200 `ready`, 409 `has_business`, 422 `invalid` or
 `unavailable`, 500 `failed`; 401 envelope when signed out. It replaces the onboarding server action.
+
+**Admin panel, billing (`backend/src/billing/admin.ts`, 0041; types in `@pakka/types` `admin.ts`).** Platform admins only
+(`adminRoute`); every change is audited with the admin as the actor.
+- `GET /api/admin/tenants` → `AdminTenant[]`, newest first.
+- `POST /api/admin/tenants/:id/extend-trial` `{ days: 1..30 }` → `{ trialEndsAt }`; `conflict` for a business with a plan.
+- `POST /api/admin/tenants/:id/credits` `{ amount: 1..100000, expiresInDays?, note?, requestId? }` → `{ granted, credits }`
+  (`granted: false` when `requestId` was already used; send a new id per form submission).
+- `PATCH /api/admin/plans/:key` `{ name?, priceInr?, monthlyCredits?, seats?, whatsappNumbers?, featureKeys? }` → `AdminPlan`;
+  `conflict` for a price change while businesses are subscribed at it.
+- `PATCH /api/admin/features/:key` `{ name?, description?, defaultOn? }` → `AdminFeature`.
+- `GET /api/admin/payments/refunds` → `RefundCandidate[]` (refund each in PayU's dashboard).
+Not built: opening a business's dashboard as an admin (logged) needs its own design.
 
 **Who may call a route (`backend/src/server/auth.ts`, built):**
 
