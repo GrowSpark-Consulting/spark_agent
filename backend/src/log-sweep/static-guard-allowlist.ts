@@ -32,21 +32,13 @@ export const DEV1_ALLOWED: Allowed[] = [
 ];
 
 /**
- * Flagged log calls in files that are NOT Dev 1's (Dev 2's and shared code), by file: how many are flagged today. Reported to their owner in the task note
- * (docs/task-notes/2026-10-14-day7-dev1-log-sweep.md), not edited and not judged here: a flagged line is a candidate, not a proven leak. A NEW flagged
- * line in these files fails the guard until it is added here (so it is seen); a line that is fixed never fails it.
+ * Splits flagged log calls by owner. Dev 1's files: a call that is not in the allowlist FAILS the guard. Every other file (Dev 2's and shared code) is
+ * REPORT-ONLY: its flagged calls are printed with a count in the test output as a warning and never fail anything, so a red check can never land on a PR of
+ * someone who cannot easily fix a line in this folder. A flagged line there is a candidate, not a proven leak; the owners are told in the task note.
  */
-export const FOREIGN_FLAGGED: { file: string; count: number; note: string }[] = [
-  { file: "billing/checkout.ts", count: 6, note: "prints an error's message after redactSecrets" },
-  { file: "billing/renewals.ts", count: 3, note: "errorText(e): an error's message after redactSecrets" },
-  { file: "billing/start-trial.ts", count: 4, note: "errorText(e) and a `${text}`" },
-  { file: "billing/trial.ts", count: 1, note: "prints an error's message as it is" },
-  { file: "booking/bookings.ts", count: 2, note: "prints an error's message as it is" },
-  { file: "booking/google-calendar.ts", count: 3, note: "Google's error text and describe(e)" },
-  { file: "booking/google-sync.ts", count: 1, note: "prints an error's message as it is" },
-  { file: "consent/deletion.ts", count: 1, note: "prints an error's message after redactSecrets" },
-  { file: "conversations/mode.ts", count: 3, note: "prints a database error's message" },
-  { file: "notify/send.ts", count: 2, note: "the sender's error message after redactSecrets, and notify_record's database message" },
-  { file: "notify/templates.ts", count: 1, note: "prints an error's message as it is" },
-  { file: "server/main.ts", count: 5, note: "start-up lines: the environment error message (names variables, not values), the pack-sync report lines, a non-literal line" },
-];
+export function partitionFlagged<T extends { file: string; text: string }>(flagged: readonly T[], allowed: readonly Allowed[] = DEV1_ALLOWED): { dev1Unaccounted: T[]; reportOnly: T[] } {
+  return {
+    dev1Unaccounted: flagged.filter((c) => isDev1(c.file) && !allowed.some((a) => a.file === c.file && c.text.includes(a.contains))),
+    reportOnly: flagged.filter((c) => !isDev1(c.file)),
+  };
+}
