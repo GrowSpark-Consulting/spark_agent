@@ -25,14 +25,7 @@ export function StepBusiness({
 }) {
   // The trade's sample business name is only a placeholder: the name becomes the real business's.
   const pickIndustry = (i: number) =>
-    set(() => {
-      const profile = PROFILES[INDUSTRIES[i].key];
-      return {
-        ind: i,
-        staff: profile.staff.map((p) => ({ ...p })),
-        trialError: null,
-      };
-    });
+    set({ ind: i, trialError: null });
   const trialOpen = trades.some((t) => t.index === s.ind);
 
   return (

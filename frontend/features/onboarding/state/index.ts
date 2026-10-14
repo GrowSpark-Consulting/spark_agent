@@ -5,7 +5,6 @@ import {
   type Coex,
   type IndustryKey,
   type ManualMode,
-  type StaffMember,
   type WaMethod,
   INDUSTRIES,
   trialChatUrl,
@@ -52,10 +51,7 @@ export interface OnboardingState {
   chkRun: number;
   waitHi: boolean;
 
-  /* step 5 — team */
-  staff: StaffMember[];
-  cal: boolean;
-  feats: boolean[];
+  /* step 5 — team: nothing is kept here. The feature switches are read from and saved to the server (features/onboarding/persistence.ts). */
 }
 
 export const initialState: OnboardingState = {
@@ -83,9 +79,6 @@ export const initialState: OnboardingState = {
   chkPlannedFail: -1,
   chkRun: 0,
   waitHi: false,
-  staff: PROFILES.re.staff.map((p) => ({ ...p })),
-  cal: false,
-  feats: [true, true, true, true, true, true],
 };
 
 export type Patch =
