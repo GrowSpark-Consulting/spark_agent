@@ -88,6 +88,23 @@ describe("parseServerEnv", () => {
     });
   });
 
+  describe("failure injection (staging only)", () => {
+    const TEST_BUSINESS = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+    it("is off unless both settings are there, and takes a list of known failures for named businesses", () => {
+      expect(parseServerEnv(base).FAILURE_INJECTION).toBeUndefined();
+      const on = parseServerEnv({ ...base, FAILURE_INJECTION: "llm_timeout, whatsapp_send_error", FAILURE_INJECTION_TENANTS: TEST_BUSINESS });
+      expect(on.FAILURE_INJECTION).toBe("llm_timeout, whatsapp_send_error");
+      expect(() => parseServerEnv({ ...base, FAILURE_INJECTION: "llm_timeout" })).toThrow(/FAILURE_INJECTION and FAILURE_INJECTION_TENANTS must be set together/);
+      expect(() => parseServerEnv({ ...base, FAILURE_INJECTION_TENANTS: TEST_BUSINESS })).toThrow(/must be set together/);
+    });
+
+    it("refuses an unknown failure, a business that is not an id, and live PayU", () => {
+      expect(() => parseServerEnv({ ...base, FAILURE_INJECTION: "llm_timeout,db_down", FAILURE_INJECTION_TENANTS: TEST_BUSINESS })).toThrow(/FAILURE_INJECTION/);
+      expect(() => parseServerEnv({ ...base, FAILURE_INJECTION: "llm_timeout", FAILURE_INJECTION_TENANTS: "all" })).toThrow(/FAILURE_INJECTION_TENANTS/);
+      expect(() => parseServerEnv({ ...base, FAILURE_INJECTION: "llm_timeout", FAILURE_INJECTION_TENANTS: TEST_BUSINESS, PAYU_MODE: "live" })).toThrow(/refused with PAYU_MODE=live/);
+    });
+  });
+
   it("names the bad variable without echoing its value", () => {
     try {
       parseServerEnv({ ...base, WHATSAPP_REGISTER_PIN: "12ab-secret" });

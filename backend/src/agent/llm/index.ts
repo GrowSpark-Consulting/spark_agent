@@ -1,4 +1,5 @@
 import { serverEnv } from "../../lib/env";
+import { serverFailureInjection, withLlmFailures } from "../../lib/failure-injection";
 import { createAnthropicClient, type LlmClient } from "./anthropic";
 import { tracerFromEnv, type TracerHandle } from "./tracing";
 
@@ -17,7 +18,8 @@ export function llm(): LlmClient {
   if (!client) {
     const env = serverEnv();
     tracing = tracerFromEnv(env);
-    client = createAnthropicClient(env.ANTHROPIC_API_KEY, tracing.tracer);
+    // On staging, failure injection may break it for named test businesses (lib/failure-injection.ts).
+    client = withLlmFailures(createAnthropicClient(env.ANTHROPIC_API_KEY, tracing.tracer), serverFailureInjection());
   }
   return client;
 }
