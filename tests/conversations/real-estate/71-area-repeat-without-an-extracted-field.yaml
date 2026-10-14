@@ -1,0 +1,49 @@
+name: "A plain repeat of an unserved area is read from the customer's own words even when the model returns no place for it"
+description: "Raja, 14 Oct. The real extraction model gives only what a message adds, so for 'only Adyar' (Adyar is already on the lead) it returns no field; measured live, 5 of 5 plain repeats. After the options were shown, a message that contains the stored unserved area as a whole word, with the same normalising, counts as insisting: the 'nothing there for now' line, one staff reminder, lead open, no time offered. The strict path (the model names the place again) is chat 66 and stays the first path."
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6000000, attributes: { price_to: 8000000, areas: [Velachery, Tambaram] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+turns:
+  - customer: "I want a 2BHK in Adyar, my budget is around 60 lakh and I plan to buy within 3 months"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { config: 2BHK, location: Adyar, budget: 60L, timeline: 0-3m }, question: null }
+    expect:
+      reply: { sent: true, contains: ["Adyar", "Velachery, Tambaram"], notContains: ["for now"] }
+      aiReplies: 1
+      areaReminder: false
+    mockOnly:
+      case: area_options
+  - customer: "only Adyar"
+    mock:
+      extraction: { language: en, intent: give_details, fields: {}, question: null, confidence: 0.6 }
+    expect:
+      reply: { sent: true, contains: ["any property in Adyar for now"], notContains: ["10:00 am", "Velachery"] }
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      leadStage: engaged
+      calendar: { confirmed: [] }
+      areaReminder: true
+    mockOnly:
+      case: area_unavailable
+  - customer: "No, I want Adyar only"
+    mock:
+      extraction: { language: en, intent: give_details, fields: {}, question: null }
+    expect:
+      reply: { sent: true, contains: ["any property in Adyar for now"] }
+      aiReplies: 1
+      handoff: null
+      areaReminder: false
+    mockOnly:
+      case: area_unavailable
+  - customer: "Not interested in other areas, only Adyar please"
+    mock:
+      extraction: { language: en, intent: give_details, fields: {}, question: null }
+    expect:
+      reply: { sent: true, contains: ["any property in Adyar for now"] }
+      aiReplies: 1
+      areaReminder: false
+    mockOnly:
+      case: area_unavailable
