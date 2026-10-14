@@ -2,6 +2,7 @@ import { cleanDisplayText } from "../../agent/scoring/area-text";
 import { inngest } from "../../inngest/client";
 import { serverEnv } from "../../lib/env";
 import { AppError } from "../../lib/errors";
+import { MEDIA_RECEIVED_EVENT } from "../../media/event";
 import { stripUnsafeCharacters } from "../../lib/text";
 import { storeEchoedMessage, type EchoArgs, type EchoOutcome } from "./echo";
 import * as db from "./inbound-db";
@@ -269,6 +270,15 @@ export async function handleWhatsAppWebhook(request: Request, deps: WebhookDeps 
           name: "whatsapp/message.received",
           data: { tenantId, conversationId: stored.conversationId, messageId: stored.messageId },
         });
+        // A photo or document is kept in storage by its own job, after the reply is queued, so it never delays or blocks the answer. Sent for a replay too,
+        // like the event above, and for the same reason (the first send may have failed). A voice note is not saved.
+        if ((storable.kind === "image" || storable.kind === "document") && storable.media) {
+          await deps.sendEvent({
+            id: `media_received:${stored.messageId}`,
+            name: MEDIA_RECEIVED_EVENT,
+            data: { tenantId, conversationId: stored.conversationId, messageId: stored.messageId },
+          });
+        }
       } catch (err) {
         fail(err);
       }

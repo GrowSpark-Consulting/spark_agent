@@ -11,6 +11,7 @@ import { handoffSla } from "./handoff-sla";
 import { kbIngest } from "./kb-ingest";
 import { kbSweep } from "./kb-sweep";
 import { leadNudges } from "./lead-nudges";
+import { mediaDownload } from "./media-download";
 import { noShowRebooking } from "./noshow-rebooking";
 import { ownNumberOutcome } from "./own-number-outcome";
 import { phoneReplyReturn } from "./phone-reply-return";
@@ -47,4 +48,5 @@ export const functions = [
   trialLifecycle,
   trialLifecycleSweep,
   demoReply,
+  mediaDownload,
 ];

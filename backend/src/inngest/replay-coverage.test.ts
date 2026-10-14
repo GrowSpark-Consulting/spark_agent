@@ -75,6 +75,12 @@ const PROOFS: Record<string, Proof[]> = {
   "trial-lifecycle": [INNGEST("trial-lifecycle", "replay: the same event in another run finds day 0 claimed and sends nothing")],
   "trial-lifecycle-sweep": [INNGEST("trial-lifecycle", "a repeat run sends nothing another run already claimed")],
   "demo-reply": [INNGEST("demo-reply", "replay: the same event twice answers under the same key"), SINK],
+  // Sends nothing: a message that already has its file is left alone, and the upload is an overwrite of a fixed path.
+  "media-download": [
+    INNGEST("media-download", "replay: the same event twice asks for the same message both times"),
+    { file: "backend/src/media/download.test.ts", test: "replay: the same event twice, the second run finding the first one's record, saves one file at one path" },
+    { file: "backend/src/media/download.test.ts", test: "a message that already has its file does nothing: no Graph call, no upload, no write" },
+  ],
 };
 
 const WEBHOOKS: Record<string, Proof[]> = {

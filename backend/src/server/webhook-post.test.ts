@@ -642,3 +642,77 @@ describe("a client's own Meta app (manual_byo)", () => {
     expect(db.state.messages).toEqual([]);
   });
 });
+
+describe("a customer's photo or document (Day 7, PR F: saving the file)", () => {
+  const mediaMessage = (type: string, media: Record<string, unknown>, id = "wamid.SYNTHETIC_MEDIA_0001") =>
+    edit(fixture("synthetic-image-message"), (b) => {
+      const m = b.entry[0].changes[0].value.messages[0];
+      m.id = id;
+      m.type = type;
+      delete m.image;
+      m[type] = media;
+    });
+  const names = () => send.mock.calls.map(([event]) => event.name);
+
+  it("queues the reply first and then the download, each under its own fixed id, with ids only", async () => {
+    expect((await post(fixture("synthetic-image-message"))).status).toBe(200);
+    const message = db.state.messages[0];
+    expect(names()).toEqual(["whatsapp/message.received", "whatsapp/media.received"]);
+    expect(send.mock.calls[1][0]).toEqual({
+      id: `media_received:${message.id}`,
+      name: "whatsapp/media.received",
+      data: { tenantId: TENANT_A, conversationId: message.conversationId, messageId: message.id },
+    });
+    const sent = JSON.stringify(send.mock.calls[1][0]);
+    for (const secret of ["synthetic-media-0001", "image/jpeg", "Kitchen photo", "910000000101", "SYNTHETIC"]) expect(sent).not.toContain(secret);
+  });
+
+  it("does the same for a document", async () => {
+    await post(mediaMessage("document", { id: "doc-1", mime_type: "application/pdf", caption: "Floor plan" }));
+    expect(names()).toEqual(["whatsapp/message.received", "whatsapp/media.received"]);
+  });
+
+  it.each([
+    ["a voice note", () => mediaMessage("audio", { id: "voice-1", mime_type: "audio/ogg; codecs=opus" })],
+    ["a text", () => fixture("synthetic-text-message")],
+    ["a button reply", () => fixture("synthetic-button-reply")],
+    ["a sticker", () => mediaMessage("sticker", { id: "s-1", mime_type: "image/webp" })],
+    ["an image the parser could not read", () => mediaMessage("image", { mime_type: "image/jpeg" })],
+  ])("does not queue a download for %s", async (_name, make) => {
+    await post(make());
+    expect(db.state.messages).toHaveLength(1);
+    expect(names()).toEqual(["whatsapp/message.received"]);
+  });
+
+  it("a replay of the same photo queues the same two ids again (Inngest drops the repeats), and stores one message", async () => {
+    const raw = fixture("synthetic-image-message");
+    await post(raw);
+    await post(raw);
+    expect(db.state.messages).toHaveLength(1);
+    expect(names()).toEqual(["whatsapp/message.received", "whatsapp/media.received", "whatsapp/message.received", "whatsapp/media.received"]);
+    expect(new Set(send.mock.calls.map(([event]) => event.id)).size).toBe(2);
+  });
+
+  it("when the download can't be queued the answer is 500 (the message stays stored, the reply was already queued) and Meta's retry queues it", async () => {
+    send.mockResolvedValueOnce({ ids: ["x"] }).mockRejectedValueOnce(new Error("inngest unreachable for 910000000101"));
+    const raw = fixture("synthetic-image-message");
+    expect((await post(raw)).status).toBe(500);
+    expect(db.state.messages).toHaveLength(1);
+    expect(names()).toEqual(["whatsapp/message.received", "whatsapp/media.received"]);
+    expect(allLogs()).not.toContain("910000000101");
+    expect((await post(raw)).status).toBe(200);
+    expect(names()).toEqual(["whatsapp/message.received", "whatsapp/media.received", "whatsapp/message.received", "whatsapp/media.received"]);
+  });
+
+  it("the business in the event is the one of the number's connection, never anything in the payload", async () => {
+    await post(forTenantB(fixture("synthetic-image-message")));
+    expect(db.state.messages[0].tenantId).toBe(TENANT_B);
+    expect(send.mock.calls.map(([event]) => event.data.tenantId)).toEqual([TENANT_B, TENANT_B]);
+  });
+
+  it("stores the media as before (id and type) and the lines it logs hold no media id", async () => {
+    await post(fixture("synthetic-image-message"));
+    expect(db.state.messages[0].media).toEqual({ id: "synthetic-media-0001", mime: "image/jpeg" });
+    expect(allLogs()).not.toContain("synthetic-media-0001");
+  });
+});
