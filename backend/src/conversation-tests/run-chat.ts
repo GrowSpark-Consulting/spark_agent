@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { AuditEntry } from "../lib/audit";
+import type { InjectableFailure } from "../lib/env";
+import { withLlmFailures, type FailureInjection } from "../lib/failure-injection";
 import type { LlmClient, LlmRequest, LlmResult } from "../agent/llm";
 import { NonRetriableError } from "inngest";
 import { amountsIn } from "../agent/pipeline/postcheck";
@@ -170,6 +172,9 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
   let replyScript: string[] = [];
   let kb: string[] = chat.kb;
   let creditsZero = false;
+  // The failures this turn injects (`mock.inject`), through the same wrapper staging uses.
+  let injected: readonly InjectableFailure[] = [];
+  const turnInjection: FailureInjection = { breaks: (_tenantId, failure) => injected.includes(failure) };
   const sends: { kind: string; text: string; buttons: string[] }[] = [];
   const confirmations: string[] = [];
   const audits: AuditEntry[] = [];
@@ -183,13 +188,17 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
       return result(next);
     },
   };
-  const chosenLlm = live ? options.llm : mockLlm;
-  if (!chosenLlm) throw new Error("live mode needs a language-model client");
+  const realOrMock = live ? options.llm : mockLlm;
+  if (!realOrMock) throw new Error("live mode needs a language-model client");
+  const chosenLlm = withLlmFailures(realOrMock, turnInjection);
   const llm: LlmClient = options.probe ? { complete: timed(options.probe, (request: LlmRequest) => `llm:${request.role}`, (request: LlmRequest) => chosenLlm.complete(request)) } : chosenLlm;
 
   const plainSend: ReplyDeps["send"] = async (_tenantId, kind, payload): Promise<SendOutcome> => {
     // Out of credits: notify.send refuses the reply and spends nothing.
     if (creditsZero) return { status: "skipped", reason: "insufficient_credits" };
+    // An injected WhatsApp failure, as notify.send reports the sender's SendError: nothing went out (or, on a timeout, maybe).
+    if (injected.includes("whatsapp_send_timeout")) return { status: "failed", error: { code: "upstream_failed", message: "WhatsApp did not answer (injected failure).", retryable: true, outcomeUnknown: true } };
+    if (injected.includes("whatsapp_send_error")) return { status: "failed", error: { code: "upstream_failed", message: "WhatsApp refused the message (injected failure).", retryable: true, outcomeUnknown: false } };
     const interactive = payload.interactive;
     const text = interactive ? interactive.body : (payload.text ?? "");
     sends.push({ kind, text, buttons: interactive?.type === "buttons" ? interactive.buttons.map((b) => b.title) : [] });
@@ -258,6 +267,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
     replyScript = turnSpec.mock?.reply === undefined ? [] : [...(Array.isArray(turnSpec.mock.reply) ? turnSpec.mock.reply : [turnSpec.mock.reply])];
     kb = turnSpec.mock?.kb ?? chat.kb;
     creditsZero = turnSpec.mock?.credits === "zero";
+    injected = turnSpec.mock?.inject ?? [];
     const sendsBefore = sends.length;
     const confirmationsBefore = confirmations.length;
     const logsBefore = fake.consentLogs.length;

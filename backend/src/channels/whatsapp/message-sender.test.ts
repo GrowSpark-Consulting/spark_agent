@@ -17,6 +17,7 @@ vi.mock("../../features/is-enabled", () => ({ isEnabled: async () => true }));
 const { send } = await import("../../notify/send");
 const { OutsideWindowError, registerSender, SendError, senderFactory } = await import("../../notify/sender");
 const { loadSendConnection, registerWhatsAppSender, whatsAppSender, whatsAppSenderFactory } = await import("./message-sender");
+const { failureInjection, withSendFailures } = await import("../../lib/failure-injection");
 
 // Synthetic values only: nothing here is a real token, number or Meta response.
 const env = { ENCRYPTION_KEY: randomBytes(32).toString("base64"), META_GRAPH_API_VERSION: "v26.0" };
@@ -249,6 +250,28 @@ describe("notify.send through the registered WhatsApp sender", () => {
     expect(meta).toHaveBeenCalledTimes(1);
     expect(calls("refund_credits")).toHaveLength(1);
     expect(calls("notify_record")).toHaveLength(0);
+  });
+
+  // Failure injection (lib/failure-injection.ts, Day 7): an injected failure takes the real failure path of notify.send.
+  it.each([
+    ["whatsapp_send_error", false],
+    ["whatsapp_send_timeout", true],
+  ] as const)("an injected %s: Meta is never called, the credit is refunded and nothing is recorded as sent", async (failure, outcomeUnknown) => {
+    registerSender(withSendFailures(whatsAppSenderFactory({ fetch: meta, env, timeoutMs: 50 }), failureInjection([failure], [TENANT])));
+    await expect(send(TENANT, "ai_reply", { conversationId: CONVERSATION, text: "Hi" })).resolves.toMatchObject({
+      status: "failed",
+      error: { code: "upstream_failed", retryable: true, outcomeUnknown },
+    });
+    expect(meta).not.toHaveBeenCalled();
+    expect(calls("spend_credits")).toHaveLength(1);
+    expect(calls("refund_credits")).toEqual([expect.objectContaining({ p_ref_id: calls("spend_credits")[0].p_ref_id })]);
+    expect(calls("notify_record")).toHaveLength(0);
+  });
+
+  it("an injection for another business changes nothing here", async () => {
+    registerSender(withSendFailures(whatsAppSenderFactory({ fetch: meta, env, timeoutMs: 50 }), failureInjection(["whatsapp_send_error"], ["00000000-0000-4000-8000-000000000001"])));
+    await expect(send(TENANT, "ai_reply", { conversationId: CONVERSATION, text: "Hi" })).resolves.toMatchObject({ status: "sent" });
+    expect(meta).toHaveBeenCalledTimes(1);
   });
 
   it("never calls Meta or spends credits for a connection that is no longer active", async () => {

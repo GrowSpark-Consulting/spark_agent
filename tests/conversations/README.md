@@ -65,6 +65,14 @@ booking:
 - `calendar: { confirmed: [starts], cancelled: n }` is what the booking engine holds after the turn. `leadTemperature` and `leadScore`
   are what the code worked out (they are `mockOnly`: they depend on what the model extracted).
 - A turn can say `mock: { credits: zero }`: notify.send refuses the reply for lack of credits and spends nothing.
+- A turn can inject failures (Day 7, `backend/src/lib/failure-injection.ts`, the same wrappers staging uses), e.g.
+  `mock: { inject: [llm_timeout] }`. The runner's own check still applies: never more than one AI reply a turn.
+  | `inject` | What happens | The pipeline today |
+  |---|---|---|
+  | `llm_timeout` | every model call times out (`LlmError` `timeout`) | one fixed reply, case `model_unavailable` |
+  | `llm_bad_json` | the extraction answers a cut-off JSON object, every try | one clarifying reply, case `clarify_invalid_output` |
+  | `whatsapp_send_error` | WhatsApp refuses the reply (`upstream_failed`, retryable) | the step throws so Inngest retries it (nothing went out); the run reports "the pipeline threw" |
+  | `whatsapp_send_timeout` | WhatsApp never answers (`outcomeUnknown`) | nothing counts as sent, and nothing resends it |
 - The calendar copies Dev 2's booking engine only where a chat needs it (a taken time is `slot_taken`, a hold is not a booking until it is
   confirmed, a lead holds one time at a time). Confirming a booking moves the lead to booked, as Dev 2's `confirm_booking` does in the database.
   The engine itself is tested by Dev 2's own tests and `supabase/tests`; what these chats test is how the assistant uses it.
