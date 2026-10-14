@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 // `test` fails on any console or page error, except the browser's own line for an API answer that
 // isn't 2xx: the owner's Business step gets 409 has_business from POST /api/onboarding/trial.
-import { PASSWORD, SIGNED_OUT, expect, signUp, test, uniqueEmail } from "../support/app";
+import { PASSWORD, SIGNED_OUT, expect, signIn, signUp, test, uniqueEmail } from "../support/app";
 
 /** The wizard's footer button that moves to the next step (label changes per step). */
 const next = (page: Page, label: string | RegExp) => page.getByRole("button", { name: label });
@@ -576,6 +576,26 @@ test.describe("the trial route's phone check", () => {
     await next(page, "Continue").click();
     await expect(page.getByRole("heading", { name: "Teach your assistant" })).toBeVisible();
     expect(bodies).toEqual([{ name: "Sunrise Homes", industry: "re" }]);
+  });
+
+  test("a missing or malformed number stops the first step with a message and sends nothing", async ({ page }) => {
+    const bodies: unknown[] = [];
+    await page.route(TRIAL_ROUTE, async (route) => {
+      if (route.request().method() === "OPTIONS") return route.fallback();
+      bodies.push(route.request().postDataJSON());
+      return route.fulfill({ status: 500, contentType: "application/json", body: "{}" });
+    });
+    await openOnboarding(page);
+    const phone = page.getByLabel("Your WhatsApp number");
+    for (const [typed, message] of [["", /Enter your WhatsApp number/], ["98765 4321", /10-digit/], ["12345", /10-digit/]] as const) {
+      await phone.fill(typed);
+      await expect(page.getByTestId("phone-error")).toContainText(message);
+      await expect(next(page, "Send code on WhatsApp")).toBeDisabled();
+    }
+    await phone.fill("98765 43210");
+    await expect(page.getByTestId("phone-error")).toHaveCount(0);
+    await expect(next(page, "Send code on WhatsApp")).toBeEnabled();
+    expect(bodies).toEqual([]);
   });
 });
 

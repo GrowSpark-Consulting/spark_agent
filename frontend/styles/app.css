@@ -4,14 +4,14 @@
 
 .app-root, .app-root *, .app-root *::before, .app-root *::after { box-sizing: border-box; }
 .app-root {
-  min-height: 100vh; display: flex; background: var(--color-bg); color: var(--color-text);
+  min-height: 100vh; min-height: 100dvh; display: flex; background: var(--color-bg); color: var(--color-text);
   font-family: var(--font-body);
 }
 
 /* — sidebar — */
 .app-side {
-  width: 236px; flex: none; display: flex; flex-direction: column; min-height: 100vh;
-  border-right: 2px solid var(--color-divider); position: sticky; top: 0; height: 100vh;
+  width: 236px; flex: none; display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh;
+  border-right: 2px solid var(--color-divider); position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; overscroll-behavior: contain;
 }
 .app-brand { display: flex; align-items: center; gap: 10px; padding: 18px 20px; border-bottom: 2px solid var(--color-divider); text-decoration: none; color: inherit; }
 .app-brand-mark { width: 20px; height: 20px; background: var(--color-accent); flex: none; }
@@ -40,12 +40,12 @@
 .app-skip:focus { transform: none; }
 
 /* — main — */
-.app-main { flex: 1; min-width: 0; padding: 32px 40px 56px; }
+.app-main { flex: 1; min-width: 0; padding: clamp(20px, 3vw, 32px) clamp(16px, 4vw, 40px) clamp(40px, 5vw, 56px); }
 /* Focused only by the skip link; the whole column outlined would just be noise. */
 .app-main:focus, .app-main:focus-visible { outline: none; }
 .app-page { max-width: 880px; display: flex; flex-direction: column; gap: 28px; }
 .app-eyebrow { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-neutral-700); margin: 0 0 6px; }
-.app-h1 { font-size: 42px; line-height: 1.05; margin: 0; letter-spacing: -0.02em; }
+.app-h1 { font-size: clamp(30px, 24px + 1.6vw, 42px); line-height: 1.05; margin: 0; letter-spacing: -0.02em; }
 .app-lede { margin: 8px 0 0; font-size: 16px; color: var(--color-neutral-700); max-width: 640px; }
 .app-section-title {
   font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; margin: 0;
@@ -160,6 +160,7 @@ a.app-card:hover { border-color: var(--color-text); }
 
 /* — login — */
 .app-auth { min-height: 100vh; display: grid; place-items: center; padding: 32px 16px; background: var(--color-bg); color: var(--color-text); font-family: var(--font-body); }
+.app-auth { min-height: 100dvh; }
 .app-auth, .app-auth *, .app-auth *::before, .app-auth *::after { box-sizing: border-box; }
 .app-auth-card { width: min(420px, 100%); display: flex; flex-direction: column; gap: 22px; }
 .app-auth-card .app-brand { padding: 0; border: 0; }
@@ -170,12 +171,11 @@ a.app-card:hover { border-color: var(--color-text); }
   .app-side { width: 100%; min-height: 0; height: auto; position: static; border-right: 0; border-bottom: 2px solid var(--color-divider); }
   .app-brand { padding: 12px 16px; }
   .app-biz { padding: 10px 16px; }
-  .app-nav { flex-direction: row; overflow-x: auto; padding: 6px 10px; gap: 4px; }
+  .app-nav { flex-direction: row; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; padding: 6px 10px; gap: 4px; }
+  .app-nav::-webkit-scrollbar { display: none; }
   .app-nav-link { white-space: nowrap; padding: 8px 10px; }
   .app-nav-note { display: none; }
   .app-user { flex-direction: row; align-items: center; justify-content: space-between; padding: 10px 16px; border-top: 1px solid var(--color-divider); }
-  .app-main { padding: 20px 16px 40px; }
-  .app-h1 { font-size: 30px; }
 }
 
 /* — calendar — the /dashboard/preview Calendar (features/calendar/pakka-calendar.tsx): the hour grid
@@ -184,14 +184,14 @@ a.app-card:hover { border-color: var(--color-text); }
 .app-cal-agenda { display: none; }
 .app-cal-backdrop { display: none; }
 .app-cal-panel {
-  position: sticky; top: 0; align-self: flex-start; width: 320px; flex: none; max-height: 100vh; overflow: auto;
+  position: sticky; top: 0; align-self: flex-start; width: 320px; flex: none; max-height: 100vh; max-height: 100dvh; overflow: auto; overscroll-behavior: contain;
   border-left: 2px solid var(--color-divider); padding: 4px 0 20px 20px; display: flex; flex-direction: column; gap: 16px;
   background: var(--color-bg);
 }
 @media (max-width: 1023px) {
   .app-cal-backdrop { display: block; position: fixed; inset: 0; z-index: 40; background: color-mix(in srgb, var(--color-neutral-900) 50%, transparent); }
   .app-cal-panel {
-    position: fixed; left: 0; right: 0; bottom: 0; top: auto; width: auto; max-height: 80vh; z-index: 41;
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto; width: auto; max-height: 80vh; max-height: 80dvh; z-index: 41;
     border-left: 0; border-top: 2px solid var(--color-text); padding: 20px 16px; box-shadow: var(--shadow-lg);
   }
 }
@@ -201,7 +201,24 @@ a.app-card:hover { border-color: var(--color-text); }
 }
 
 /* — leads board — stage columns scroll sideways inside the board; the page itself never does. */
-.app-leads-board { overflow-x: auto; padding-bottom: 8px; }
+.app-leads-board { overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: 8px; }
 .app-lead-card { box-shadow: none; }
 @media (hover: hover) { .app-lead-card:hover { box-shadow: inset 0 0 0 2px var(--color-text); } }
 .app-lead-card:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+/* — scrolling inside panes — a pane that reaches its end stops there instead of scrolling the page behind it. */
+.app-inbox-list, .app-inbox-lead, .app-inbox-chat { overscroll-behavior: contain; }
+
+/* — restrained motion — colour and shadow only, never layout; off for people who ask for less motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .btn, .input, .app-nav-link, a.app-card, .app-lead-card { transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease, color .15s ease; }
+}
+
+/* — touch — comfortable hit areas and no iOS zoom-on-focus; fine pointers keep the compact sizes. */
+@media (pointer: coarse) {
+  .btn { min-height: 44px; }
+  .btn-icon { min-width: 44px; min-height: 44px; }
+  .input { min-height: 44px; font-size: 16px; }
+  .app-nav-link { min-height: 44px; }
+  .app-seg label { min-height: 44px; display: inline-flex; align-items: center; }
+}

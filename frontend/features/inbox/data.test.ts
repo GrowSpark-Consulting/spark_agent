@@ -330,7 +330,9 @@ describe("AI / Needs human / Human tag", () => {
   });
 
   it("explains why a chat was handed over", () => {
-    expect(handoffReason("asked_human")).toBe("asked to talk to a person");
+    expect(handoffReason("asked_human")).toBe("Asked for a person");
+    expect(handoffReason("complaint")).toBe("Upset / complaint");
+    expect(handoffReason("opt_out")).toBe("Opted out – don’t WhatsApp unless they write again");
     expect(handoffReason("custom_itinerary")).toBe("custom itinerary");
     expect(handoffReason(undefined)).toBe("handed to your team");
   });
