@@ -15,7 +15,7 @@ import { captureLogs, describeLeaks, poison, type Fixtures, type LogCapture } fr
 // flows run on fake dependencies: Meta (the Graph client, the code exchange, the probe), the database and the audit; every failure carries the poison. The
 // business token, the one-time code, our app secret and the connect-link token are synthetic. The link's token must never be logged, and neither the code
 // exchange's URL (it holds our app secret). NOT PROVED: the real Meta, the real database, the router's access log for these paths (request-logger.test.ts has
-// it, including the KNOWN LEAKS), the real notify.send behind the test message, staging.
+// it), the real notify.send behind the test message, staging.
 
 vi.stubEnv("ENCRYPTION_KEY", randomBytes(32).toString("base64"));
 vi.stubEnv("NEXT_PUBLIC_APP_URL", "http://localhost:3000");
