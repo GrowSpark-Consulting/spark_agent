@@ -565,6 +565,131 @@ test.describe("Billing · back from PayU", () => {
   });
 });
 
+// Cancel plan and Keep my plan (POST /api/billing/cancel and /resume, owner only) --------------------------------------------------
+
+const CANCEL = /\/api\/billing\/cancel$/;
+const RESUME = /\/api\/billing\/resume$/;
+const ENDS = "2026-11-01T00:00:00.000Z";
+
+/** Opens Billing for an owner; the first balance read is `first`, every later one is `later`. */
+async function openCancelable(page: Page, first: Record<string, unknown>, later: Record<string, unknown> = first) {
+  const balance = await stubApi(page, BALANCE, (n) => ({ status: 200, body: status(n === 1 ? first : later) }));
+  await stubTable(page, "plans", () => PLAN_ROWS);
+  await stubTable(page, "credit_ledger", () => []);
+  await page.goto("/dashboard/billing");
+  await expect(page.getByTestId("plan-card")).toBeVisible();
+  return balance;
+}
+const dialog = (page: Page) => page.getByRole("dialog");
+
+test.describe("Billing · cancel and keep", () => {
+  test("Cancel plan asks first, names the end date, and Keep my plan sends nothing", async ({ page }) => {
+    const calls = await stubApi(page, CANCEL, () => ({ status: 200, body: { status: "scheduled", endsAt: ENDS } }));
+    await openCancelable(page, {});
+    await page.getByRole("button", { name: "Cancel plan" }).click();
+    await expect(dialog(page)).toContainText("ends on 1 Nov 2026");
+    await expect(dialog(page)).toContainText("you can change your mind before that day");
+    await expectNoHorizontalOverflow(page);
+    await dialog(page).getByRole("button", { name: "Keep my plan" }).click();
+    await expect(dialog(page)).toHaveCount(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  test("confirming cancels with no body, re-reads the plan, and shows it as ending and not renewing", async ({ page }) => {
+    const calls = await stubApi(page, CANCEL, () => ({ status: 200, body: { status: "scheduled", endsAt: ENDS } }));
+    const balance = await openCancelable(page, {}, { renewsAt: null, endsAt: ENDS });
+    await page.getByRole("button", { name: "Cancel plan" }).click();
+    await dialog(page).getByRole("button", { name: "Cancel plan" }).click();
+    await expect(page.getByTestId("plan-ending-done")).toContainText("stays active until 1 Nov 2026 and won't renew");
+    await expect(dialog(page)).toHaveCount(0);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe("POST");
+    expect(calls[0].body).toBeNull();
+    expect(calls[0].tenant).not.toBeNull();
+    // The card shows what the server now says, not what the button assumed.
+    await expect(page.getByTestId("plan-ends")).toContainText("Your plan is cancelled.");
+    await expect(page.getByTestId("ends-at")).toHaveText("1 Nov 2026");
+    await expect(page.getByTestId("renews-at")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Cancel plan" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Keep my plan" })).toBeVisible();
+    expect(balance).toHaveLength(2);
+  });
+
+  test("a past-due plan that ends now says the assistant is paused (what the API answered)", async ({ page }) => {
+    await stubApi(page, CANCEL, () => ({ status: 200, body: { status: "ended" } }));
+    await openCancelable(page, {}, { status: "paused", aiPaused: true, aiPausedReason: "paused", renewsAt: null });
+    await page.getByRole("button", { name: "Cancel plan" }).click();
+    await dialog(page).getByRole("button", { name: "Cancel plan" }).click();
+    await expect(page.getByTestId("plan-ending-done")).toContainText("Your plan has ended and your assistant is paused");
+    await expect(page.getByTestId("plan-card")).toHaveAttribute("data-status", "paused");
+    await expect(page.getByRole("button", { name: "Cancel plan" })).toHaveCount(0);
+  });
+
+  for (const [name, answer, shown] of [
+    ["the owner-only refusal", refusal(403, "forbidden", "Only the business owner can cancel the plan."), "Only the business owner can cancel the plan."],
+    ["no plan to cancel", refusal(409, "conflict", "There is no plan to cancel."), "There is no plan to cancel."],
+    ["a server error", refusal(500, "internal", "Something went wrong. Try again in a moment."), "Something went wrong"],
+    ["an answer that is not a cancel result", { status: 200, body: { status: "refunded" } }, "answered something we didn't expect"],
+  ] as const) {
+    test(`cancel: ${name} keeps the dialog open with the reason and claims nothing`, async ({ page }) => {
+      await stubApi(page, CANCEL, () => answer);
+      const balance = await openCancelable(page, {});
+      await page.getByRole("button", { name: "Cancel plan" }).click();
+      await dialog(page).getByRole("button", { name: "Cancel plan" }).click();
+      await expect(dialog(page)).toContainText(shown);
+      await expect(page.getByTestId("plan-ending-done")).toHaveCount(0);
+      await expect(page.getByTestId("plan-ends")).toHaveCount(0);
+      expect(balance).toHaveLength(1);
+    });
+  }
+
+  test("one press of Cancel plan is one request", async ({ page }) => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const calls = await stubApi(page, CANCEL, async () => {
+      await gate;
+      return { status: 200, body: { status: "scheduled", endsAt: ENDS } };
+    });
+    await openCancelable(page, {}, { renewsAt: null, endsAt: ENDS });
+    await page.getByRole("button", { name: "Cancel plan" }).click();
+    await dialog(page).getByRole("button", { name: "Cancel plan" }).click();
+    await expect(dialog(page).getByRole("button", { name: "Cancelling…" })).toBeDisabled();
+    release();
+    await expect(page.getByTestId("plan-ending-done")).toBeVisible();
+    expect(calls).toHaveLength(1);
+  });
+
+  test("Keep my plan resumes with no body, says when it renews, and re-reads the plan", async ({ page }) => {
+    const calls = await stubApi(page, RESUME, () => ({ status: 200, body: { renewsAt: ENDS } }));
+    const balance = await openCancelable(page, { renewsAt: null, endsAt: ENDS }, { renewsAt: ENDS, endsAt: null });
+    await expect(page.getByTestId("plan-ends")).toContainText("stays active until 1 Nov 2026");
+    await page.getByRole("button", { name: "Keep my plan" }).click();
+    await expect(page.getByTestId("plan-ending-done")).toContainText("Your plan will renew on 1 Nov 2026");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].body).toBeNull();
+    await expect(page.getByTestId("plan-ends")).toHaveCount(0);
+    await expect(page.getByTestId("renews-at")).toHaveText("1 Nov 2026");
+    await expect(page.getByRole("button", { name: "Cancel plan" })).toBeVisible();
+    expect(balance).toHaveLength(2);
+  });
+
+  test("a refused resume says why and leaves the plan shown as ending", async ({ page }) => {
+    await stubApi(page, RESUME, () => refusal(409, "conflict", "There is no cancelled plan to keep."));
+    const balance = await openCancelable(page, { renewsAt: null, endsAt: ENDS });
+    await page.getByRole("button", { name: "Keep my plan" }).click();
+    await expect(page.getByTestId("plan-ending-error")).toContainText("There is no cancelled plan to keep.");
+    await expect(page.getByTestId("plan-ends")).toBeVisible();
+    await expect(page.getByTestId("plan-ending-done")).toHaveCount(0);
+    expect(balance).toHaveLength(1);
+  });
+
+  test("a trial has nothing to cancel", async ({ page }) => {
+    await openCancelable(page, TRIAL);
+    await expect(page.getByTestId("plan-ending")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Cancel plan" })).toHaveCount(0);
+  });
+});
+
 // Who can pay ----------------------------------------------------------------------------------------------------
 
 test.describe("Billing · admin", () => {
@@ -583,6 +708,7 @@ test.describe("Billing · admin", () => {
     await expect(page.getByTestId("topup-card")).toHaveCount(0);
     await expect(page.getByTestId("setup-fee-card")).toHaveCount(0);
     await expect(page.getByTestId("cycle-choice")).toHaveCount(0);
+    await expect(page.getByTestId("plan-ending")).toHaveCount(0);
     expect(calls).toHaveLength(0);
   });
 });

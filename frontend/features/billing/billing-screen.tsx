@@ -18,6 +18,7 @@ import {
   type PlanOption,
 } from "./billing-data";
 import { ActionFeedback, PhonePrompt, sameAction, useBillingActions, type BillingAction, type BillingActions, type BillingCycle } from "./billing-actions";
+import { PlanEnding } from "./billing-cancel";
 import { PaymentReturn } from "./payment-return";
 
 // /dashboard/billing (Day 6, Dev 3). Shows the plan and its status, the credit balance, the credit history (credit_ledger under RLS) and the
@@ -92,6 +93,8 @@ function BillingView({ tenantId, timeZone, isOwner, paymentId }: { tenantId: str
         <Body state={status} loading="Loading your plan" missing="Your plan isn't available yet" errorTitle="Couldn't load your plan" onRetry={retryStatus}>
           {(s) => <PlanCard status={s} timeZone={timeZone} />}
         </Body>
+        {/* Outside Body on purpose: the plan is re-read after a cancel or resume, and its message must survive that reload. */}
+        {isOwner ? <PlanEnding tenantId={tenantId} timeZone={timeZone} status={status.status === "ready" ? status.data : null} onChanged={retryStatus} /> : null}
       </Section>
 
       <Section id="credits" title="Credits">
@@ -192,6 +195,12 @@ function PlanCard({ status, timeZone }: { status: AccountStatus; timeZone: strin
           <div>
             <dt>Renews</dt>
             <dd data-testid="renews-at">{date(status.renewsAt, timeZone)}</dd>
+          </div>
+        ) : null}
+        {status.endsAt ? (
+          <div>
+            <dt>Ends</dt>
+            <dd data-testid="ends-at">{date(status.endsAt, timeZone)}</dd>
           </div>
         ) : null}
         {status.status === "trial" && status.trialEndsAt ? (

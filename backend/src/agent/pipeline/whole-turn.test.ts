@@ -40,6 +40,28 @@ async function oneMessage(options: WorldOptions = {}, run: { inject?: Injection[
   return { w, reports: await w.drain(run) };
 }
 
+// Day 7 (Dev 2, lib/ai-limits.ts): exit test 4, "hitting the per-contact rate limit or a tenant's daily LLM cap stops further AI calls". The owners'
+// notice is the "limit-notice" step, left out of the mirror (it has its own tests).
+describe("a chat over a rate limit or the daily AI spend cap", () => {
+  it.each(["contact_rate_limit", "tenant_rate_limit", "ai_spend_cap"] as const)("%s: no model call, no reply, no credit; the message waits for staff", async (aiLimit) => {
+    const { w, reports } = await oneMessage({ aiLimit });
+    expect(reports[0]).toMatchObject({ status: "completed", returned: { status: "gated_off", reason: aiLimit } });
+    expect(w.model.calls).toEqual({ extraction: 0, reply: 0 });
+    const r = w.report();
+    expect(r.replies).toHaveLength(0);
+    expect(r.creditsNet).toBe(0);
+    expect(r.answered).toEqual([]);
+  });
+
+  it("still honours STOP", async () => {
+    const w = await createWorld({ aiLimit: "ai_spend_cap" });
+    expect((await w.post("wamid.S1", { text: "STOP" })).status).toBe(200);
+    await w.drain();
+    expect(w.report().notices).toHaveLength(1);
+    expect(w.fake.contacts.values().next().value?.optedOut).toBe(true);
+  });
+});
+
 describe("a clean turn, through the real webhook and the emulator", () => {
   it("one message in, one reply out, one row, one credit, the message answered", async () => {
     const { w, reports } = await oneMessage();
@@ -75,9 +97,9 @@ describe("the mirror of inngest/process-message.ts (drift guard)", () => {
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
   });
 
-  it("has no other step of its own than 'started' and 'external-notice' (a new step would be missing from the mirror)", () => {
+  it("has no other step of its own than 'started', 'external-notice' and 'limit-notice' (a new step would be missing from the mirror)", () => {
     const own = [...code.matchAll(/\b(?:steps|step)\.run(?:<[^>]*>)?\(\s*"([a-z-]+)"/g)].map((m) => m[1]);
-    expect(own.sort()).toEqual(["external-notice", "started"]);
+    expect(own.sort()).toEqual(["external-notice", "limit-notice", "started"]);
   });
 
   it("still retries a failing step 3 times and runs the failure handler", () => {
@@ -86,11 +108,11 @@ describe("the mirror of inngest/process-message.ts (drift guard)", () => {
     expect(code).toMatch(/answerRunThatGaveUp\(/);
   });
 
-  it("still runs the understanding and the read receipt together, and the gated-off branch for a chat a person has or the feature off", () => {
+  it("still runs the understanding and the read receipt together, and the gated-off branch for a chat a person has, the feature off or a limit", () => {
     const flat = code.replace(/\s+/g, " ");
     expect(flat).toContain("Promise.all([understandTurn(");
     expect(flat.indexOf("markReadStep(")).toBeGreaterThan(flat.indexOf("Promise.all([understandTurn("));
-    expect(flat).toContain('turn.status === "gated_off" && (turn.reason === "not_ai_mode" || turn.reason === "feature_off")');
+    expect(flat).toContain('turn.status === "gated_off" && (turn.reason === "not_ai_mode" || turn.reason === "feature_off" || isAiLimit(turn.reason))');
     expect(flat).toContain('turn.status !== "ready"');
     expect(flat).toContain('stop.status === "opted_out"');
   });
