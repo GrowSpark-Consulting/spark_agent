@@ -1,3 +1,4 @@
+import type { Extraction } from "@pakka/types";
 import type { ActRequest, ActResult } from "../scheduling/act";
 import { offerFacts, type OfferedSlot } from "../scheduling/offer";
 import { matchSlotChoice } from "../scheduling/slot-choice";
@@ -46,6 +47,8 @@ interface Args {
   qualification: QualificationSummary | undefined;
   retrieval: Retrieval;
   language: TextLanguage;
+  /** The language the reply model is told (plan.ts: a low-confidence "other" is decided in code). */
+  modelLanguage: Extraction["language"] | null;
 }
 
 const fixed = (text: FixedTextKey, language: TextLanguage): ReplyPlan => ({ mode: "fixed", text, language });
@@ -56,8 +59,8 @@ const personTakesOver = (language: TextLanguage, caseName: string): Plan => ({ r
 const movingLine = (s: Scheduling) => (s.booking ? [`The customer's booking is on ${s.booking.label} and they want to move it.`] : []);
 
 function afterAct(act: ActResult, args: Args, s: Scheduling): Plan {
-  const { language, summary } = args;
-  const model = (action: Extract<ReplyPlan, { mode: "model" }>["action"], facts: string[]): ReplyPlan => ({ mode: "model", action, facts, language: summary.language });
+  const { language, modelLanguage } = args;
+  const model = (action: Extract<ReplyPlan, { mode: "model" }>["action"], facts: string[]): ReplyPlan => ({ mode: "model", action, facts, language: modelLanguage });
   switch (act.kind) {
     case "offered": {
       const retaken = act.retaken === true;
@@ -93,14 +96,14 @@ function afterAct(act: ActResult, args: Args, s: Scheduling): Plan {
 
 /** The booking part of the decision, or null when it is not about booking and the rest of plan.ts decides. */
 export function planBooking(args: Args): Plan | null {
-  const { input, summary, qualification, retrieval, language } = args;
+  const { input, summary, qualification, retrieval, language, modelLanguage } = args;
   const s = input.scheduling;
   const bookingKind = qualification?.bookingKind ?? null;
   if (!s || !qualification || !bookingKind) return null;
 
   if (s.act) return afterAct(s.act, args, s);
 
-  const model = (action: Extract<ReplyPlan, { mode: "model" }>["action"], facts: string[]): ReplyPlan => ({ mode: "model", action, facts, language: summary.language });
+  const model = (action: Extract<ReplyPlan, { mode: "model" }>["action"], facts: string[]): ReplyPlan => ({ mode: "model", action, facts, language: modelLanguage });
   /** A question the knowledge base can answer is answered first; what is waiting is asked again on the next message. */
   const answerFirst = summary.hasQuestion && retrieval.outcome === "found";
 

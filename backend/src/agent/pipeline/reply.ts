@@ -175,7 +175,7 @@ async function loadPlanInput(turn: TurnContext, understood: UnderstandResult, de
     settings,
     businessName: info?.name ?? null,
     lastAt,
-    input: { ...(scheduling ? { scheduling } : {}), ...(hotLeadAlerted === undefined ? {} : { hotLeadAlerted }), ...(voiceNote ? { voiceNote, voiceNoteRepeat: previousCase === "voice_note" } : {}), ...(coverage ? { coverage } : {}), ...(area.success && area.data.served && area.data.named ? { areaServedNamed: true } : {}), understood, question: typeof asked === "string" ? asked : null, contactLanguage: contact?.language ?? null, previousMisses, settings, deadlineExceeded, exitQuestionPending: previousCase === "exit_unclear", customerSaidOne: texts.some((t) => isJustOne(t.body)), talkButtonTapped: texts.some((t) => t.buttonId === EXIT_BUTTON_IDS.talk) },
+    input: { ...(scheduling ? { scheduling } : {}), ...(hotLeadAlerted === undefined ? {} : { hotLeadAlerted }), ...(voiceNote ? { voiceNote, voiceNoteRepeat: previousCase === "voice_note" } : {}), ...(coverage ? { coverage } : {}), ...(area.success && area.data.served && area.data.named ? { areaServedNamed: true } : {}), understood, question: typeof asked === "string" ? asked : null, contactLanguage: contact?.language ?? null, customerWords: words, previousMisses, settings, deadlineExceeded, exitQuestionPending: previousCase === "exit_unclear", customerSaidOne: texts.some((t) => isJustOne(t.body)), talkButtonTapped: texts.some((t) => t.buttonId === EXIT_BUTTON_IDS.talk) },
   };
 }
 

@@ -108,6 +108,8 @@ A STOP chat's later turns show the gate's opted-out outcome.
 
 - `real-estate/104`-`105` (Day 7, Finding 4): a reply that talks about the prompt ("The task says...", a copied rule) is refused as a `leak` and written again once (104), and when the second try leaks too the customer gets the safe line, once (105). Chat 84 now also forbids the wording the live run found.
 
+- `real-estate/106`-`108` (Day 7, the low-confidence "other" language fix): the exact message of chat 84 read as `other` at 0.1 is never talked about (106), and a Tamil (107) or Tanglish (108) price question the extractor is unsure about is still answered in the customer's language, not English. The language the reply model is told is decided in code (`pipeline/reply-language.ts`) and checked in `reply-language-whole-turn.test.ts`; the real model is only seen with `--live`.
+
 ## Latency (Day 6, local only)
 
 `pnpm --filter @pakka/backend latency:chats [--live] [--max-calls N] [--rounds N]` times the steps and calls of these same chats and prints a table per stage, every number labelled mocked, live, configured or not measured. Mocked is the pipeline's own code time. `--live` runs the first turn of seven chats with the real models, at most 15 requests (hard limit 20), with a fake sender, knowledge base and store. Never in CI. The reading of the numbers is in `docs/task-notes/2026-10-13-day6-dev1-step8-audit.md`.
