@@ -1,8 +1,9 @@
-import { INDUSTRY_KEYS, PhoneInput, redactSecrets, TRIAL_PACKS, type IndustryKey, type StartTrialResult } from "@pakka/types";
+import { INDUSTRY_KEYS, PhoneInput, TRIAL_PACKS, type IndustryKey, type StartTrialResult } from "@pakka/types";
 import { z } from "zod";
 import type { TenantResolution } from "../lib/tenant";
 import type { Balance } from "./credits";
 import type { TrialSignup } from "./trial";
+import { errorTextForLog } from "../lib/redact";
 
 // The onboarding Business step (POST /api/onboarding/trial): creates the signed-in account's trial
 // business through createTrialTenant. The browser sends the name and the trade it picked, and may send the
@@ -40,7 +41,7 @@ export function trialPackKey(industry: IndustryKey): string | null {
   return TRIAL_PACKS[industry] ?? null;
 }
 
-const errorText = (e: unknown) => redactSecrets(e instanceof Error ? e.message : String(e));
+const errorText = errorTextForLog;
 
 export async function startTrialFor(rawInput: unknown, deps: StartTrialDeps): Promise<StartTrialResult> {
   const user = await deps.currentUser();

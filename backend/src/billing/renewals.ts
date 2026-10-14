@@ -1,9 +1,9 @@
-import { redactSecrets } from "@pakka/types";
 import { z } from "zod";
 import { invalidateFeatureCache } from "../features/is-enabled";
 import { sendAccountNotice, type NoticeCounts, type NoticeMessage } from "../notify/account-notices";
 import { billingDeps, revokeQuietly, syncPayment, type BillingDeps } from "./checkout";
 import { chargeMandate, indiaDate, newTxnid, preDebit, PayuError, type VerifiedPayment } from "./payu";
+import { errorTextForLog } from "../lib/redact";
 
 // Renewing plans by PayU auto-debit (decision 20; migration 0037), for the billing-renewals job (inngest/billing-renewals.ts),
 // which runs these once a day at 06:00 in India (NPCI asks for UPI debits outside 10:00-13:00 and 17:00-21:30):
@@ -96,7 +96,7 @@ export function lapsedMessage(appUrl: string): NoticeMessage {
   return { text: `${headline}\nChoose a plan in Billing to switch the assistant back on.\n${link}`, templateParams: [headline, link] };
 }
 
-const errorText = (e: unknown) => redactSecrets(e instanceof Error ? e.message : String(e));
+const errorText = errorTextForLog;
 
 const Renewal = z.object({ payment_id: z.string(), txnid: z.string(), amount_paise: z.number().int(), period_end: z.string(), status: z.string(), created: z.boolean() });
 type Renewal = z.infer<typeof Renewal>;

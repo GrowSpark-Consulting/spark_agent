@@ -93,6 +93,11 @@ describe("POST /api/billing/checkout", () => {
       await expect(startCheckout(context(role), { planKey: "starter", cycle: "monthly" }, deps(tables).d)).rejects.toMatchObject({ code: "forbidden" });
     }
     await expect(startCheckout(context(), { planKey: "starter", cycle: "monthly" }, deps(tables, { payu: null }).d)).rejects.toMatchObject({ code: "not_available" });
+    // The role is checked before the configuration: a non-owner learns nothing about how billing is set up.
+    for (const role of ["admin", "staff"] as const) {
+      await expect(startCheckout(context(role), { planKey: "starter", cycle: "monthly" }, deps(tables, { payu: null }).d)).rejects.toMatchObject({ code: "forbidden" });
+      await expect(startTopup(context(role), {}, deps(tables, { payu: null }).d)).rejects.toMatchObject({ code: "forbidden" });
+    }
     await expect(startCheckout(context(), { planKey: "starter", cycle: "monthly" }, deps(tables, { apiPublicUrl: undefined }).d)).rejects.toMatchObject({ code: "not_available" });
   });
 
