@@ -21,6 +21,24 @@ export function parseOrigins(list: string): string[] | null {
   return origins;
 }
 
+/** What failure injection can break (lib/failure-injection.ts). */
+export const INJECTABLE_FAILURES = ["llm_timeout", "llm_bad_json", "whatsapp_send_error", "whatsapp_send_timeout"] as const;
+export type InjectableFailure = (typeof INJECTABLE_FAILURES)[number];
+
+/** "llm_timeout, whatsapp_send_error" → the failures; null when any entry is not one. */
+export function parseFailureList(list: string): InjectableFailure[] | null {
+  const entries = list.split(",").map((s) => s.trim()).filter(Boolean);
+  if (entries.length === 0 || !entries.every((e): e is InjectableFailure => (INJECTABLE_FAILURES as readonly string[]).includes(e))) return null;
+  return entries;
+}
+
+/** Comma-separated business ids → the ids, lower-cased; null when any entry is not a UUID. */
+export function parseTenantList(list: string): string[] | null {
+  const entries = list.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (entries.length === 0 || !entries.every((e) => z.uuid().safeParse(e).success)) return null;
+  return entries;
+}
+
 const serverEnvSchema = z
   .object({
   // The frontend's address (Vercel). The API accepts browser requests from it (CORS).
@@ -135,6 +153,27 @@ const serverEnvSchema = z
       "must be 32 random bytes, base64 (openssl rand -base64 32)",
     )
     .optional(),
+
+  // Failure injection (lib/failure-injection.ts), for the failure tests on staging. Off unless both are set.
+  // FAILURE_INJECTION lists what to break (llm_timeout, llm_bad_json, whatsapp_send_error, whatsapp_send_timeout);
+  // FAILURE_INJECTION_TENANTS names the test businesses it breaks it for (ids, comma-separated): no other business
+  // is ever touched. Refused alongside PAYU_MODE=live, since a deployment that takes real money is production.
+  FAILURE_INJECTION: z
+    .string()
+    .refine((v) => parseFailureList(v) !== null, `must be a comma-separated list of ${INJECTABLE_FAILURES.join(", ")}`)
+    .optional(),
+  FAILURE_INJECTION_TENANTS: z
+    .string()
+    .refine((v) => parseTenantList(v) !== null, "must be business ids (UUIDs), comma-separated")
+    .optional(),
+  })
+  .refine((env) => (env.FAILURE_INJECTION === undefined) === (env.FAILURE_INJECTION_TENANTS === undefined), {
+    message: "FAILURE_INJECTION and FAILURE_INJECTION_TENANTS must be set together",
+    path: ["FAILURE_INJECTION_TENANTS"],
+  })
+  .refine((env) => env.FAILURE_INJECTION === undefined || env.PAYU_MODE !== "live", {
+    message: "FAILURE_INJECTION is for staging: it is refused with PAYU_MODE=live",
+    path: ["FAILURE_INJECTION"],
   })
   // The two Langfuse keys go together: one alone would silently leave tracing off.
   .refine((env) => (env.LANGFUSE_PUBLIC_KEY === undefined) === (env.LANGFUSE_SECRET_KEY === undefined), {
