@@ -59,6 +59,7 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0043_contact_deletion` | A customer's request to delete their data (DPDP): `contacts.deleted_at`; `contact_deletion_preview(tenant, contact)` (counts of chats, messages, leads, bookings and upcoming bookings) and `delete_contact_data(tenant, contact, actor)`: in one transaction it deletes the contact's conversations (with messages and handoffs) and leads (with bookings and quotes), unlinks `kb_gaps.last_contact_id`, scrubs the contact (phone `deleted:<id>`, no name, language or tags) instead of deleting it so its `consent_logs` survive, writes `consent_logs` `deletion_requested` and `deleted` (source `dashboard`) and `audit_logs` `contact.deleted` (actor, counts only), and returns the past bookings' Google Calendar events to take down. PA404 for a contact of another business, PA409 while it has an upcoming held or confirmed booking, `already_deleted` when asked again. Server only |
 | `0044_ai_limits` | Rate limits and the daily AI spend cap: `ai_spend_daily` (server only; one row per business and India's day: the models' estimated `cost_usd` and `calls`), `tenants.ai_daily_cap_usd` (a platform admin's cap for one business; null: the plan's, monthly credits x USD 0.002, at least USD 1), `record_ai_spend(tenant, cost)` and `ai_limits(tenant, conversation?)` (today's spend and cap, and the AI replies in the last hour to the chat and by the business). Server only. (0043 is the contact deletion, #191) |
 | `0045_notify_attempts` | A keyed send is claimed before WhatsApp is asked (closes the Day 6 reply-key note, section 3.1): `notify_attempts` (server only; `message_id` = the keyed message id, `status` `sending` or `released`), `claim_notify_attempt(tenant, message, kind)` (`claimed`, `sent` when the message is recorded, `in_doubt` when an earlier attempt neither recorded nor released it) and `release_notify_attempt(tenant, message)` (after a refusal for certain). Server only |
+| `0046_rls_tightening` | The Day 7 row-level-security review: `consent_logs` loses its browser INSERT (the server's functions write every entry); staff update only the leads assigned to them and cannot reassign them (owners and admins any lead); `anon` loses every write grant on every table and view, and on tables created later. (0045 is the notify claim, #201) |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -82,12 +83,16 @@ can TRUNCATE. **A new business table needs one fixture row in that file**, or th
 | Table | Members can |
 |---|---|
 | `catalog_items` | read own tenant; **owners and admins** write (0028) |
-| `quotes` | read/write own tenant; lead and catalog item must be in the same tenant |
+| `quotes` | read/write own tenant; lead and catalog item must be in the same tenant. **Open (Day 7 review):** any member can also set `approved_by`, `sent_at` and `status`; whether approving or marking a quote sent should be server-only waits for the quote builder's design (Raja) |
 | `services`, `resources` | read own tenant; **owners and admins** insert/update/delete (0028) |
-| `leads` | update `stage`, `owner_user_id`, `outcome`, `fields` |
+| `leads` | update `stage`, `owner_user_id`, `outcome`, `fields`: **owners and admins** any lead of their business; **staff** only the leads assigned to them, and never to someone else (0046) |
 | `tenants` | **owners and admins** update `name`, `timezone`, `business_hours`, `agent_settings` (0028) |
 | `memberships` | update their own `whatsapp_phone`, `takeover_pref` |
-| `consent_logs` | read and insert own tenant (no update or delete) |
+| `consent_logs` | read own tenant only: every entry is written by the server's functions (0046; no insert, update or delete from the browser) |
+
+A visitor who is not signed in (`anon`) has no INSERT, UPDATE, DELETE or TRUNCATE grant on any table or view, nor on any table a later migration creates (0046); row-level security already refused those writes.
+
+**Server queries and tokens at rest (Day 7 review, 14 Oct).** The server uses the service role, so every query must name the business itself. Every `.from(...)` in `backend/src` was checked: each filters by `tenant_id`, or reads a global table (`plans`, `features`, `vertical_packs`, `platform_admins`), or finds a row by a secret or a provider id before the business is known (a connect-link token hash, a PayU txnid, a trial phone hash), or is a sweep across businesses by design (daily agenda, KB sweep, renewals), or follows an id the database itself returned. None was missing a filter. Tokens at rest on the staging database: every app secret, webhook token and WhatsApp token of a real connection is `v1:<iv>:<tag>:<ciphertext>` (AES-256-GCM, `ENCRYPTION_KEY`); the only exceptions were two placeholder rows of the businesses "Isolation Test A" and "Isolation Test B" (6 Oct, `pending`), to be deleted. Read-only check: count rows whose `token_enc` does not match `^v1:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$`.
 
 **Agreed: template status table** (Dev 2 builds it as the next free migration):
 
