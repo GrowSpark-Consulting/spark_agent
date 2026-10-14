@@ -4,7 +4,7 @@ import { getLeadCard } from "../agent/leadcard/route";
 import { suggestReply } from "../agent/leadcard/suggest";
 import { accountStatus } from "../billing/account-status";
 import { editFeature, editPlan, extendTrial, grantCredits, listTenants, refundCandidates } from "../billing/admin";
-import { changePlan, handlePayuReturn, handlePayuWebhook, paymentStatus, startCheckout, startSetupFee, startTopup } from "../billing/checkout";
+import { cancelPlan, changePlan, handlePayuReturn, handlePayuWebhook, paymentStatus, resumePlan, startCheckout, startSetupFee, startTopup } from "../billing/checkout";
 import { getBalance } from "../billing/credits";
 import { startTrialFor } from "../billing/start-trial";
 import { createTrialTenant } from "../billing/trial";
@@ -135,6 +135,16 @@ const billingSetupFee: RouteHandler = async (request, deps) => {
 // { planKey, cycle?, phone? } → ChangePlanResult: an upgrade now (PayU: the rest of the period's difference and a new
 // auto-debit), a downgrade at the next renewal, or cancelling a scheduled downgrade. Owner only.
 const billingChangePlan = tenantRoute(({ context, body }) => changePlan(context, body));
+// no body → CancelPlanResult: the plan stops renewing and ends with the period already paid (a past-due one ends now). Owner only.
+const billingCancel: RouteHandler = async (request, deps) => {
+  const { context } = await requireTenant(request, deps.userClient);
+  return Response.json(await cancelPlan(context));
+};
+// no body → ResumePlanResult: a cancelled plan renews again, while its period lasts. Owner only.
+const billingResume: RouteHandler = async (request, deps) => {
+  const { context } = await requireTenant(request, deps.userClient);
+  return Response.json(await resumePlan(context));
+};
 // → PaymentView: one payment, for the Billing screen after PayU sends the payer back (asks PayU again while not final). Any member.
 const billingPayment: RouteHandler = (request, deps, params) =>
   tenantRoute(({ context, params: p }) => paymentStatus(context, p.id))(request, deps.userClient, params);
@@ -284,6 +294,8 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/billing/topup", browser: true, methods: { POST: billingTopup } },
   { path: "/api/billing/setup-fee", browser: true, methods: { POST: billingSetupFee } },
   { path: "/api/billing/change-plan", browser: true, methods: { POST: (request, deps) => billingChangePlan(request, deps.userClient) } },
+  { path: "/api/billing/cancel", browser: true, methods: { POST: billingCancel } },
+  { path: "/api/billing/resume", browser: true, methods: { POST: billingResume } },
   { path: "/api/billing/payments/:id", browser: true, methods: { GET: billingPayment } },
   // PayU's surl and furl: the payer's browser posts here from PayU's page (a navigation, not a fetch, so not `browser`).
   // Nothing posted is trusted: the server asks PayU, then redirects to the Billing screen.

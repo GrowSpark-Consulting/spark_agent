@@ -2,7 +2,7 @@ import { redactSecrets } from "@pakka/types";
 import { z } from "zod";
 import { invalidateFeatureCache } from "../features/is-enabled";
 import { sendAccountNotice, type NoticeCounts, type NoticeMessage } from "../notify/account-notices";
-import { billingDeps, syncPayment, type BillingDeps } from "./checkout";
+import { billingDeps, revokeQuietly, syncPayment, type BillingDeps } from "./checkout";
 import { chargeMandate, indiaDate, newTxnid, preDebit, PayuError, type VerifiedPayment } from "./payu";
 
 // Renewing plans by PayU auto-debit (decision 20; migration 0037), for the billing-renewals job (inngest/billing-renewals.ts),
@@ -11,11 +11,14 @@ import { chargeMandate, indiaDate, newTxnid, preDebit, PayuError, type VerifiedP
 //      (cards and UPI; RBI), announcing the job's first run at least 48 hours away and not before the period ends.
 //   2. charges: at that run the mandate is charged. The payment is marked pending before PayU is asked, so a crash or
 //      timeout never charges twice: step 3 asks PayU what happened. A failure alerts the owners; retries come 2 days
-//      apart, 3 attempts a period.
+//      apart, 3 attempts a period, and the last failure's alert says when the plan pauses. Until then the owner can pay
+//      another way by choosing the plan again in Billing, which replaces the failing mandate (0042).
 //   3. pending: charges still pending after 10 minutes are verified with PayU; one PayU has no record of after an hour
 //      is failed, so it can be retried.
 //   4. annual months: an annual plan's credits arrive month by month.
-//   5. lapse: a mandate still unpaid 7 days after its period ended is cancelled and the business paused (owners told).
+//   5. ended: a plan its owner cancelled (0042) ends with its paid period: the business is paused, the mandate revoked
+//      at PayU and the owners told.
+//   6. lapse: a mandate still unpaid 7 days after its period ended is cancelled and the business paused (owners told).
 // Each step is safe to run again: the database decides what is due, and every payment applies once (settle_payment).
 //
 // UNVERIFIED against a real PayU account: whether a retry of a card or UPI debit needs a fresh pre-debit notice (PayU's
@@ -41,6 +44,9 @@ const NOTICE_LEAD_MS = 48 * HOUR;
 /** A charge still pending this long is asked about; one PayU never saw this long is failed. */
 const PENDING_RECHECK_MS = 10 * 60_000;
 const PENDING_GIVE_UP_MS = HOUR;
+/** Attempts a period gets (renewals_to_charge's p_max_attempts) and its grace before the plan lapses (lapse_overdue_subscriptions's p_grace). */
+const MAX_ATTEMPTS = 3;
+const LAPSE_GRACE_MS = 7 * 24 * HOUR;
 
 /** The first daily run (00:30 UTC) at or after `at`: the debit time a notice announces. */
 export function nextRunAt(at: Date): Date {
@@ -56,14 +62,31 @@ export function invoiceNumber(subscriptionId: string, periodEnd: Date): string {
 const rupees = (paise: number) => `₹${(paise / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const billingLink = (appUrl: string) => `${appUrl.replace(/\/$/, "")}/dashboard/billing`;
 
+const dayInIndia = (at: Date) => new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" }).format(at);
+
 /**
- * A renewal that did not go through: how much, and that it is retried automatically (there is no manual "pay now": the
- * mandate is charged again in 2 days). Placeholder wording until Raja's.
+ * A renewal that did not go through: how much, and what happens next. Before the last attempt it is tried again in 2
+ * days; after it (or when the mandate can no longer be charged) the plan pauses on `finalPausesOn` unless the owner
+ * chooses the plan again in Billing, which replaces the failing mandate (0042). Placeholder wording until Raja's.
  */
-export function renewalFailedMessage(amountPaise: number, appUrl: string): NoticeMessage {
-  const headline = `Your Spark Agent plan payment of ${rupees(amountPaise)} didn't go through. We'll try again in 2 days.`;
+export function renewalFailedMessage(amountPaise: number, appUrl: string, finalPausesOn: Date | null = null): NoticeMessage {
   const link = billingLink(appUrl);
-  return { text: `${headline}\nCheck that the account or card you pay with can cover it. Your plan and payments are in Billing.\n${link}`, templateParams: [headline, link] };
+  if (finalPausesOn) {
+    const headline = `Your Spark Agent plan payment of ${rupees(amountPaise)} didn't go through and won't be tried again.`;
+    return {
+      text: `${headline}\nYour assistant pauses on ${dayInIndia(finalPausesOn)} unless you choose your plan again in Billing.\n${link}`,
+      templateParams: [headline, link],
+    };
+  }
+  const headline = `Your Spark Agent plan payment of ${rupees(amountPaise)} didn't go through. We'll try again in 2 days.`;
+  return { text: `${headline}\nTo pay another way, choose your plan again in Billing.\n${link}`, templateParams: [headline, link] };
+}
+
+/** A plan its owner cancelled, at the end of its paid period. */
+export function planEndedMessage(appUrl: string): NoticeMessage {
+  const headline = "Your Spark Agent plan has ended as you asked, and your assistant is paused. Your inbox is still there.";
+  const link = billingLink(appUrl);
+  return { text: `${headline}\nChoose a plan in Billing to switch it back on.\n${link}`, templateParams: [headline, link] };
 }
 
 /** A plan that lapsed: the assistant is paused until a plan is chosen again. */
@@ -103,9 +126,34 @@ async function settle(deps: RenewalDeps, txnid: string, result: Pick<VerifiedPay
   return Settled.parse(data)[0];
 }
 
-/** After a renewal is applied: a failure tells the owners; a success may have changed the plan (a downgrade). */
-async function afterSettle(deps: RenewalDeps, row: z.infer<typeof Settled>[number], amountPaise: number): Promise<"success" | "failed" | "pending"> {
-  if (row.applied && row.status === "failed") await deps.alert(row.tenant_id, renewalFailedMessage(amountPaise, deps.appUrl), `renewal_failed:${row.payment_id}`);
+/**
+ * When this failure was the period's last attempt (none is left, or, `final`, the mandate can't be charged at all): the
+ * run that will pause the plan (step 6), unless it is paid another way first. Null while attempts remain.
+ */
+async function finalPause(deps: RenewalDeps, failure: { subscriptionId: string; periodEnd: string; final?: boolean }): Promise<Date | null> {
+  const pausesOn = nextRunAt(new Date(Date.parse(failure.periodEnd) + LAPSE_GRACE_MS));
+  if (failure.final) return pausesOn;
+  const { count, error } = await deps.db
+    .from("payments")
+    .select("id", { count: "exact", head: true })
+    .eq("subscription_id", failure.subscriptionId)
+    .eq("kind", "renewal")
+    .eq("for_period_end", failure.periodEnd)
+    .eq("status", "failed");
+  if (error) throw new Error(`billing: failed attempts read failed: ${error.message}`);
+  return (count ?? 0) >= MAX_ATTEMPTS ? pausesOn : null;
+}
+
+/** After a renewal is applied: a failure tells the owners (and whether it was the last try); a success may have changed the plan. */
+async function afterSettle(
+  deps: RenewalDeps,
+  row: z.infer<typeof Settled>[number],
+  amountPaise: number,
+  failure: { subscriptionId: string; periodEnd: string; final?: boolean },
+): Promise<"success" | "failed" | "pending"> {
+  if (row.applied && row.status === "failed") {
+    await deps.alert(row.tenant_id, renewalFailedMessage(amountPaise, deps.appUrl, await finalPause(deps, failure)), `renewal_failed:${row.payment_id}`);
+  }
   if (row.applied && row.status === "success") invalidateFeatureCache(row.tenant_id);
   return row.status === "success" || row.status === "failed" ? row.status : "pending";
 }
@@ -140,7 +188,7 @@ export async function sendRenewalNotices(deps: RenewalDeps): Promise<{ due: numb
           if (e instanceof PayuError && !e.retryable) {
             // The mandate is revoked or inactive: this period cannot be charged.
             const row2 = await settle(deps, renewal.txnid, { state: "failed", providerPaymentId: null, method: null, amountPaise: null, reason: e.message.replace(/^PayU pre_debit_SI: /, "") });
-            await afterSettle(deps, row2, renewal.amount_paise);
+            await afterSettle(deps, row2, renewal.amount_paise, { subscriptionId: row.subscription_id, periodEnd: row.period_end, final: true });
           } else {
             console.error(`[billing] renewal notice for subscription ${row.subscription_id} not sent yet: ${errorText(e)}`);
           }
@@ -191,13 +239,15 @@ export async function chargeDueRenewals(deps: RenewalDeps): Promise<{ due: numbe
         continue;
       }
     }
-    const outcome = await afterSettle(deps, await settle(deps, renewal.txnid, result), renewal.amount_paise);
+    const outcome = await afterSettle(deps, await settle(deps, renewal.txnid, result), renewal.amount_paise, { subscriptionId: row.subscription_id, periodEnd: row.period_end });
     counts[outcome]++;
   }
   return counts;
 }
 
-const PendingRow = z.array(z.object({ id: z.string(), txnid: z.string(), tenant_id: z.string(), amount_paise: z.number().int(), updated_at: z.string() }));
+const PendingRow = z.array(
+  z.object({ id: z.string(), txnid: z.string(), tenant_id: z.string(), subscription_id: z.string(), for_period_end: z.string(), amount_paise: z.number().int(), updated_at: z.string() }),
+);
 
 /** Step 3: renewals still pending: what PayU says now. */
 export async function resolvePendingRenewals(deps: RenewalDeps): Promise<{ checked: number; settled: number }> {
@@ -206,7 +256,7 @@ export async function resolvePendingRenewals(deps: RenewalDeps): Promise<{ check
   const now = deps.now().getTime();
   const { data, error } = await deps.db
     .from("payments")
-    .select("id, txnid, tenant_id, amount_paise, updated_at")
+    .select("id, txnid, tenant_id, subscription_id, for_period_end, amount_paise, updated_at")
     .eq("kind", "renewal")
     .eq("status", "pending")
     .lt("updated_at", new Date(now - PENDING_RECHECK_MS).toISOString())
@@ -219,13 +269,20 @@ export async function resolvePendingRenewals(deps: RenewalDeps): Promise<{ check
       if (synced?.status === "success" || synced?.status === "failed") {
         counts.settled++;
         // syncPayment applied it; the owners hear about a failure here.
-        if (synced.status === "failed") await deps.alert(p.tenant_id, renewalFailedMessage(p.amount_paise, deps.appUrl), `renewal_failed:${p.id}`);
+        if (synced.status === "failed") {
+          const pausesOn = await finalPause(deps, { subscriptionId: p.subscription_id, periodEnd: p.for_period_end });
+          await deps.alert(p.tenant_id, renewalFailedMessage(p.amount_paise, deps.appUrl, pausesOn), `renewal_failed:${p.id}`);
+        }
         continue;
       }
-      // PayU still has no record an hour on: the charge never reached it, so the period can be tried again.
+      // PayU still has no record an hour on: the charge never reached it, so the period can be tried again. Nothing was
+      // taken, so the owners hear only when that was the last attempt.
       if (now - Date.parse(p.updated_at) >= PENDING_GIVE_UP_MS) {
         const row = await settle(deps, p.txnid, { state: "failed", providerPaymentId: null, method: null, amountPaise: null, reason: "PayU has no record of the charge" });
-        if (row.applied) counts.settled++;
+        if (!row.applied) continue;
+        counts.settled++;
+        const pausesOn = await finalPause(deps, { subscriptionId: p.subscription_id, periodEnd: p.for_period_end });
+        if (pausesOn) await deps.alert(p.tenant_id, renewalFailedMessage(p.amount_paise, deps.appUrl, pausesOn), `renewal_failed:${p.id}`);
       }
     } catch (e) {
       console.error(`[billing] pending renewal ${p.id}: ${errorText(e)}`);
@@ -241,7 +298,22 @@ export async function grantAnnualMonths(deps: RenewalDeps): Promise<{ granted: n
   return { granted: z.number().int().parse(data) };
 }
 
-/** Step 5: plans unpaid 7 days after their period ended: cancelled, the business paused, the owners told. */
+/** Step 5: plans their owner cancelled, at the end of their paid period: ended, the business paused, the mandate revoked, the owners told. */
+export async function endCancelledPlans(deps: RenewalDeps): Promise<{ ended: number }> {
+  const { data, error } = await deps.db.rpc("end_cancelled_subscriptions", { p_now: deps.now().toISOString() });
+  if (error) throw new Error(`end_cancelled_subscriptions failed: ${error.message}`);
+  const ended = z
+    .array(z.object({ tenant_id: z.string(), subscription_id: z.string(), mandate_id: z.string().nullable(), mandate_method: z.string().nullable() }))
+    .parse(data ?? []);
+  for (const row of ended) {
+    invalidateFeatureCache(row.tenant_id);
+    if (row.mandate_id) await revokeQuietly(row.mandate_id, row.mandate_method, deps, `ended plan ${row.subscription_id}`);
+    await deps.alert(row.tenant_id, planEndedMessage(deps.appUrl), `subscription_ended:${row.subscription_id}`);
+  }
+  return { ended: ended.length };
+}
+
+/** Step 6: plans unpaid 7 days after their period ended: cancelled, the business paused, the owners told. */
 export async function lapseOverdue(deps: RenewalDeps): Promise<{ lapsed: number }> {
   const { data, error } = await deps.db.rpc("lapse_overdue_subscriptions", { p_now: deps.now().toISOString() });
   if (error) throw new Error(`lapse_overdue_subscriptions failed: ${error.message}`);
