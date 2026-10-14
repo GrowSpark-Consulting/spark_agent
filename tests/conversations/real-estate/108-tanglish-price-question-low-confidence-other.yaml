@@ -1,0 +1,15 @@
+name: A Tanglish price question the extractor reads as 'other' at low confidence is not forced into English
+description: "Day 7, the low-confidence 'other' fix (pipeline/reply-language.ts). Latin letters carry no script, and this contact has no stored language, so the reply model is told no language at all and reply rule 5 applies from the message (the line is checked in reply-language-whole-turn.test.ts). Live: the real extractor will usually read this as ta-en; what is checked live is that the reply is in Tanglish, with the price from the knowledge base only."
+kb:
+  - "2BHK of 950 sq ft in Velachery starts at ₹78 lakh. Site visits are free on weekdays."
+turns:
+  - customer: "Velachery la 2BHK vilai enna sir?"
+    mock:
+      extraction: {"language": "other", "intent": "question", "fields": {"location": "Velachery", "config": "2BHK"}, "question": "What is the price of a 2BHK in Velachery?", "confidence": 0.3}
+      reply: "Velachery la 2BHK ₹78 lakh la irundhu start aagum. Site visit plan pannalama?"
+    expect:
+      reply: {"sent": true, "matches": ["\\b(la|aagum|irundhu|pannalama|illa|enna|vilai|ungalukku|neenga)\\b"]}
+      noInventedPrice: true
+      aiReplies: 1
+    mockOnly:
+      case: answered_from_kb

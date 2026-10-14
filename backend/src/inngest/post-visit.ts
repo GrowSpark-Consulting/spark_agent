@@ -33,7 +33,8 @@ export interface PostVisitDeps {
   /** The booked staff member if they can get alerts, else the owners and admins. */
   outcomeRecipients: (tenantId: string, staffUserId: string | null) => Promise<string[]>;
   owners: (tenantId: string) => Promise<string[]>;
-  alert: (tenantId: string, userId: string, alert: StaffAlert) => Promise<SendOutcome>;
+  /** `idempotencyKey` names this exact alert, so a replayed event or a repeat run never sends it twice (notify.send). */
+  alert: (tenantId: string, userId: string, alert: StaffAlert, idempotencyKey: string) => Promise<SendOutcome>;
 }
 
 const defaults = (): PostVisitDeps => ({
@@ -44,7 +45,7 @@ const defaults = (): PostVisitDeps => ({
   outcomeRecipients: async (tenantId, staffUserId) =>
     staffUserId && (await hasAlertNumber(tenantId, staffUserId, supabaseAdmin())) ? [staffUserId] : staffAlertRecipients(tenantId),
   owners: (tenantId) => staffAlertRecipients(tenantId, undefined, ["owner"]),
-  alert: (tenantId, userId, alert) => sendStaffAlert(tenantId, userId, alert),
+  alert: (tenantId, userId, alert, idempotencyKey) => sendStaffAlert(tenantId, userId, alert, undefined, { idempotencyKey }),
 });
 
 interface Step {
@@ -92,7 +93,7 @@ export async function handlePostVisit({ event, step }: { event: { data: unknown 
   });
 
   const outcomeAlerts = await alertEach(step, "outcome", await step.run("outcome-recipients", () => deps.outcomeRecipients(tenantId, visit.staffUserId)), (userId) =>
-    deps.alert(tenantId, userId, { kind: "visit_outcome", conversationId: visit.conversationId ?? undefined, what: visit.what }),
+    deps.alert(tenantId, userId, { kind: "visit_outcome", conversationId: visit.conversationId ?? undefined, what: visit.what }, `visit_outcome:${bookingId}:${userId}`),
   );
 
   if (feedback.status !== "sent" || !visit.conversationId) return { feedback, outcomeAlerts };
@@ -117,7 +118,7 @@ export async function handlePostVisit({ event, step }: { event: { data: unknown 
   }
 
   const lowRatingAlerts = await alertEach(step, "low-rating", await step.run("owners", () => deps.owners(tenantId)), (userId) =>
-    deps.alert(tenantId, userId, { kind: "low_rating", conversationId, what: visit.what, rating }),
+    deps.alert(tenantId, userId, { kind: "low_rating", conversationId, what: visit.what, rating }, `low_rating:${bookingId}:${userId}`),
   );
   return { feedback, outcomeAlerts, rating, lowRatingAlerts };
 }

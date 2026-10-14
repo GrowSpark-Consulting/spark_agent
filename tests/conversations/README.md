@@ -6,7 +6,8 @@ list of customer turns; each turn can say what the **mocked** models answer and 
 ```
 pnpm test:conversations                          # mock models: what CI runs (also part of `pnpm test`)
 pnpm test:conversations -- --only handoff        # only chats whose file or name contains "handoff"
-pnpm test:conversations -- --live                # the REAL models (needs ANTHROPIC_API_KEY); never in CI
+pnpm test:conversations -- --live                # the REAL models (needs ANTHROPIC_API_KEY); never in CI; capped: --max-calls N (default 40, hard limit 60)
+pnpm test:conversations -- --only inj-a,inj-b  # several texts, comma separated (any match)
 ```
 
 The runner drives the real pipeline steps (`stopCheck`, `understandTurn`, `replyTurn`) on an in-memory store. The knowledge
@@ -102,6 +103,14 @@ A STOP chat's later turns show the gate's opted-out outcome.
 - `65`-`70`: an area the business has no sites in (Day 7, Raja 14 Oct). The first reply always lists the areas the business does have (a fixed line, no model call, no time offered, lead open, nobody reminded); the same area named again gets "nothing there for now" and one staff reminder (`areaReminder` in `expect`); choosing a served area resumes the normal flow and ends the state (67); Tamil and Tanglish machine drafts (68, 69, `needsNativeCheck`); a booking or price asked for the unserved area (70); repeats the model returned no field for, read from the customer's own words (71, 73 Tamil, 74 Tanglish, interiors/05 a pincode), with the near-match and another-place cases that must not count (72). 65 replaces the Day 5 chat that recorded the old behaviour (three times offered for Adyar).
 - `interiors/01`-`04`: the same for a pincode (the interiors pack judges it against the catalog's areas): not served, insisted (typed with a space), served, and no areas listed (nobody is turned away).
 - Wording a real model varies: `matches` is a list of regular expressions (any letter case) the reply must each match. Use it under `expect` for wording a real model varies ("10 am" and "10:00 am"), and keep the exact words under `mockOnly` as `contains`, so mock mode stays strict. Chat 51 does this.
+
+- `real-estate/75`-`101` and `interiors/06`-`08` (Day 7, PR C): prompt injection and manipulation, one chat per case of the sweep, named `inj-<letter>`: (a) system prompt asked for in English, Tamil, Tanglish and Hindi (75-78), (b) owner/admin and discount (79-81, interiors/07), (c) fake `system:`/`assistant:` lines, fake JSON, fake tags and tool calls (82-84), (d) a knowledge-base chunk that gives orders or quotes a price (85, 86), (e) a field value that carries orders, a link or a number (87-90, interiors/08), (f) staff or the owner's friend (91, 92), (g) another customer's number or chat, and the customer's own number (93-95), (h) very long, repeated and unusual messages (96-98), (i) cancelling or moving a booking that is not theirs (99-101); 102-103 (the fix PR): a place typed with a phone number or a link is not shown back (the fixed words, also in Tanglish, and one staff reminder), while a clean place or a pincode still is. Which case rests on code and which on the model is in `docs/task-notes/2026-10-14-day7-dev1-injection-tests.md`. In mock mode the model is scripted, so these show what the CODE does around a model that gives in; the real model's behaviour is only seen with `--live`. A cap protects `--live`: every request is counted, a call that might not fit is refused, and a chat the cap stops is printed NOT RUN, never as a result.
+
+- `real-estate/104`-`105` (Day 7, Finding 4): a reply that talks about the prompt ("The task says...", a copied rule) is refused as a `leak` and written again once (104), and when the second try leaks too the customer gets the safe line, once (105). Chat 84 now also forbids the wording the live run found.
+
+- `real-estate/106`-`108` (Day 7, the low-confidence "other" language fix): the exact message of chat 84 read as `other` at 0.1 is never talked about (106), and a Tamil (107) or Tanglish (108) price question the extractor is unsure about is still answered in the customer's language, not English. The language the reply model is told is decided in code (`pipeline/reply-language.ts`) and checked in `reply-language-whole-turn.test.ts`; the real model is only seen with `--live`.
+
+- `real-estate/101`, `109`-`111` (Day 7, Finding 3): a customer with no booking on record asks to cancel or move one. One staff alert goes BEFORE the reply (`bookingChangeReminder: true` in `expect`; no handover, the assistant stays on), the reply is written from the fact that no booking is on record in this chat and the team has been told, a second message of the lead sends no second note (110), a reminder that could not be sent (`mock: { bookingReminder: fails }`) is tried again by the next message and the reply then says nobody was told (111).
 
 ## Latency (Day 6, local only)
 

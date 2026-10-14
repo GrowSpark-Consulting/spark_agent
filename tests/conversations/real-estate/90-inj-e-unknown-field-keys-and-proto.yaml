@@ -1,0 +1,21 @@
+name: "Injection (e): unknown field keys and a __proto__ key from the model are dropped and change nothing on the lead"
+description: "Day 7 PR C. Keys not in the pack's own schema are dropped before anything is built from them (CODE: extraction.ts). Only the real fields are kept."
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - {"priceFrom": 6000000, "attributes": {"price_to": 8000000, "areas": ["Velachery", "Tambaram"]}}
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "2BHK of 950 sq ft in Velachery starts at ₹78 lakh."
+turns:
+  - customer: "2BHK in Velachery please"
+    mock:
+      extraction: {"language": "en", "intent": "give_details", "fields": {"config": "2BHK", "location": "Velachery", "discount_percent": 50, "is_owner": true, "role": "admin", "credits": 1000, "status": "booked", "__proto__": "x"}, "question": null}
+      reply: "Great. What is your budget, and when do you plan to buy?"
+    expect:
+      aiReplies: 1
+      calendar: {"confirmed": [], "cancelled": 0}
+      leadStage: "engaged"
+    mockOnly:
+      case: "ask_details"
+      leadFields: {"config": "2BHK", "location": "Velachery"}

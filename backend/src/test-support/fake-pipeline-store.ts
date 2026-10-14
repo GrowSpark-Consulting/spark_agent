@@ -84,13 +84,15 @@ export function fakePipelineStore(
   const consentLogs: FakeConsentLog[] = [];
   /** record_kb_gap's rows: one per business and normalised question, with the business-wide count. */
   const gaps = new Map<string, { tenantId: string; norm: string; question: string; contactId: string; askedCount: number }>();
-  const state = { failNext: new Set<keyof PipelineStore>(), /** Fails on EVERY call, until removed. */ failAlways: new Set<keyof PipelineStore>(), leadCounter: 0, handoffCounter: 0 };
+  const state = { /** Appended to the message of every simulated failure (a test puts things in it that must never be logged). */ failMessage: "", failNext: new Set<keyof PipelineStore>(), /** Fails on EVERY call, until removed. */ failAlways: new Set<keyof PipelineStore>(), leadCounter: 0, handoffCounter: 0 };
   const maybeFail = (op: keyof PipelineStore) => {
-    if (state.failAlways.has(op)) throw new Error(`${op} failed (simulated, always)`);
-    if (state.failNext.delete(op)) throw new Error(`${op} failed (simulated)`);
+    if (state.failAlways.has(op)) throw new Error(`${op} failed (simulated, always)${state.failMessage}`);
+    if (state.failNext.delete(op)) throw new Error(`${op} failed (simulated)${state.failMessage}`);
   };
   /** Leads staff were told are hot (the audit row the reply step writes; a test's audit fake adds to it). */
   const hotAlerted = new Set<string>();
+  /** Leads staff were told asked to cancel or move a booking they do not have (the audit row a test's audit fake adds to it). */
+  const bookingReminded = new Set<string>();
   const isAnsweredAt = (id: string, since: string) => {
     const at = answered.get(id);
     return at !== undefined && at >= Date.parse(since) - DAY_MS;
@@ -258,6 +260,11 @@ export function fakePipelineStore(
       }
       return null;
     },
+    async hasBookingChangeReminder(tenantId, leadId) {
+      calls.push("hasBookingChangeReminder");
+      maybeFail("hasBookingChangeReminder");
+      return leads.get(leadId)?.tenantId === tenantId && bookingReminded.has(leadId);
+    },
     async hasHotLeadAlert(tenantId, leadId) {
       calls.push("hasHotLeadAlert");
       maybeFail("hasHotLeadAlert");
@@ -337,5 +344,5 @@ export function fakePipelineStore(
     },
   };
 
-  return { store, tenants, messages, conversations, contacts, leads, answered, hotAlerted, handoffs, gaps, consentLogs, calls, state };
+  return { store, tenants, messages, conversations, contacts, leads, answered, hotAlerted, bookingReminded, handoffs, gaps, consentLogs, calls, state };
 }

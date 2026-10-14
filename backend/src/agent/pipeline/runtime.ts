@@ -5,6 +5,7 @@ import { writeAudit } from "../../lib/audit";
 import { serverEnv } from "../../lib/env";
 import { send } from "../../notify/send";
 import { createAreaReminder } from "../handoff/area-reminder";
+import { createBookingChangeReminder } from "../handoff/booking-change-reminder";
 import { llm } from "../llm";
 import type { PackSource } from "../packs/load";
 import { createDbPackSource } from "../packs/store";
@@ -50,6 +51,7 @@ function deepFreeze<T>(value: T): T {
 
 const scheduling = createSchedulingDeps();
 const areaReminder = createAreaReminder();
+const bookingChangeReminder = createBookingChangeReminder();
 
 /** The real dependencies of the reply step: notify.send (including the system notice), the audit and the queue. Owners are alerted by the handoff-alert job, not here. */
 export function replyDeps(store: PipelineStore): ReplyDeps {
@@ -65,6 +67,8 @@ export function replyDeps(store: PipelineStore): ReplyDeps {
     scheduling,
     // A customer who keeps asking for an area the business has nothing in: the owners and admins are reminded once (a staff_alert with our own text).
     areaReminder,
+    // A cancel or a move asked for by a customer with no booking on record: the owners and admins are told, before the reply (a staff_alert with our own text).
+    bookingChangeReminder,
     // The failure handler's second signal that a reply already went out: the row notify.send recorded for it.
     sentReplyRecorded: createSentReplyRecorded(store),
   };

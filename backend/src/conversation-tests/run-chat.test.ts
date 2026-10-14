@@ -229,3 +229,39 @@ describe("runChat with an area the business has no sites in", () => {
     expect(report.failures.join("\n")).toMatch(/area reminder this turn: wanted false, got true/);
   });
 });
+
+// Finding 3 (Day 7): a customer with no booking on record asks to cancel or move one: staff are told before the reply, nothing else changes.
+describe("a cancel with no booking on record", () => {
+  const cancelChat = (second: Record<string, unknown>) =>
+    Chat.parse({
+      name: "no booking",
+      booking: { now: "2026-10-10T04:30:00.000Z", slots: ["2026-10-11T04:30:00.000Z"], catalog: [{ priceFrom: 6000000, attributes: { price_to: 8000000, area: "Velachery" } }] },
+      turns: [
+        { customer: "cancel my visit", mock: { extraction: { intent: "cancel", confidence: 0.9 }, reply: "I can't see a booking. The team has been told." }, expect: { case: "no_booking_to_change", bookingChangeReminder: true, handoff: null, mode: "ai", aiReplies: 1 } },
+        { customer: "cancel it please", mock: { extraction: { intent: "cancel", confidence: 0.9 }, reply: "The team already knows." }, ...second },
+      ],
+    });
+
+  it("passes: one reminder the first time, none the second (it went out), no handover, the assistant on", async () => {
+    const report = await runChat(cancelChat({ expect: { bookingChangeReminder: false, handoff: null, mode: "ai" } }), { mode: "mock" });
+    expect(report.failures).toEqual([]);
+    expect(report.transcript.map((t) => t.planCase)).toEqual(["no_booking_to_change", "no_booking_to_change"]);
+  });
+
+  it("fails an expectation that says nobody is told when staff were, and one that says staff were told when they were not", async () => {
+    expect((await runChat(cancelChat({ expect: { bookingChangeReminder: true } }), { mode: "mock" })).failures.join("\n")).toMatch(/booking change reminder this turn: wanted true, got false/);
+  });
+
+  it("a turn that says the reminder cannot be sent fails it, and the next turn tries again", async () => {
+    const chat = Chat.parse({
+      name: "reminder fails",
+      booking: { now: "2026-10-10T04:30:00.000Z", slots: ["2026-10-11T04:30:00.000Z"], catalog: [{ priceFrom: 6000000, attributes: { price_to: 8000000, area: "Velachery" } }] },
+      turns: [
+        { customer: "cancel my visit", mock: { extraction: { intent: "cancel", confidence: 0.9 }, reply: "I can't see a booking.", bookingReminder: "fails" }, expect: { bookingChangeReminder: true } },
+        { customer: "cancel it please", mock: { extraction: { intent: "cancel", confidence: 0.9 }, reply: "The team has been told." }, expect: { bookingChangeReminder: true } },
+        { customer: "any news", mock: { extraction: { intent: "cancel", confidence: 0.9 }, reply: "The team knows." }, expect: { bookingChangeReminder: false } },
+      ],
+    });
+    expect((await runChat(chat, { mode: "mock" })).failures).toEqual([]);
+  });
+});

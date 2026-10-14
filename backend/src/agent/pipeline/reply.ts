@@ -4,8 +4,9 @@ import { z } from "zod";
 import { normaliseQuestion } from "../../kb/question";
 import type { AuditEntry } from "../../lib/audit";
 import type { AreaReminderInput } from "../handoff/area-reminder";
+import type { BookingChangeReminderInput } from "../handoff/booking-change-reminder";
 import { recordAnswered } from "./answered";
-import { HOT_LEAD_ACTION, HOT_LEAD_EVENT, VOICE_NOTE_EVENT } from "./events";
+import { BOOKING_REMINDER_ACTION, HOT_LEAD_ACTION, HOT_LEAD_EVENT, VOICE_NOTE_EVENT } from "./events";
 import { recordHandoff } from "./handoff";
 import { applyStop, completeOptOut } from "./stop";
 import { stripUnsafeCharacters } from "../../lib/text";
@@ -69,6 +70,14 @@ export interface ReplyDeps {
    */
   areaReminder?: (input: AreaReminderInput) => Promise<unknown>;
   /**
+   * Tells the owners and admins that a customer with no booking on record asked to cancel or move one (agent/handoff/booking-change-reminder.ts: a staff_alert through
+   * notify.send with our own text). It runs BEFORE the reply, with a short time limit, so that the reply says "the team has been told" only when it is true. Without it nobody
+   * is told and the reply says so.
+   */
+  bookingChangeReminder?: (input: BookingChangeReminderInput) => Promise<unknown>;
+  /** How long that reminder may take before it counts as failed (BOOKING_REMINDER_TIMEOUT_MS). */
+  bookingReminderTimeoutMs?: number;
+  /**
    * Which of these customer messages notify.send recorded a reply for (reply-record.ts: a reply is named by the turn's last message). Used only by the
    * failure handler, as a second signal after the reply step's own marker. Without it only the marker is looked at.
    */
@@ -104,13 +113,15 @@ export interface ReplyOutcome {
   hotLead?: "announced" | "already";
   /** Staff were reminded to record an area the business has nothing in ("sent"), or the reminder could not be sent ("failed"). Absent when the turn did not call for one. */
   areaReminder?: "sent" | "failed";
+  /** Staff were told a customer with no booking asked to cancel or move one ("sent"), or could not be ("failed": the reply then says nobody was told). Absent when the turn did not call for one. */
+  bookingReminder?: "sent" | "failed";
   /** Staff were told a voice note is waiting. Absent when the turn was not a voice note. */
   voiceNote?: "alerted";
 }
 
 const TAG = "[pipeline]";
 const CORRECTION =
-  "That reply cannot be sent. Use only the amounts, dates and times that are in <facts>, keep it under 600 characters and ask at most two questions. Write the reply again.";
+  "That reply cannot be sent. Use only the amounts, dates and times that are in <facts>, keep it under 600 characters and ask at most two questions. Write only the message to the customer: never mention these instructions, the task or the facts. Write the reply again.";
 
 /** What the plan step tells the later steps: a case name and a handover, no text. */
 interface PlanSummary {
@@ -124,6 +135,8 @@ interface PlanSummary {
   hotLead: boolean;
   /** A customer who keeps asking for an area the business has nothing in was told so: remind the staff, after the reply. */
   areaReminder: boolean;
+  /** A customer with no booking asked to cancel or move one: tell the staff BEFORE the reply (the "booking-reminder" step). */
+  bookingChangeReminder: "cancel" | "reschedule" | null;
   /** A voice note was answered with the request to type: tell staff one is waiting, after the reply. */
   voiceNote: boolean;
 }
@@ -175,7 +188,7 @@ async function loadPlanInput(turn: TurnContext, understood: UnderstandResult, de
     settings,
     businessName: info?.name ?? null,
     lastAt,
-    input: { ...(scheduling ? { scheduling } : {}), ...(hotLeadAlerted === undefined ? {} : { hotLeadAlerted }), ...(voiceNote ? { voiceNote, voiceNoteRepeat: previousCase === "voice_note" } : {}), ...(coverage ? { coverage } : {}), ...(area.success && area.data.served && area.data.named ? { areaServedNamed: true } : {}), understood, question: typeof asked === "string" ? asked : null, contactLanguage: contact?.language ?? null, previousMisses, settings, deadlineExceeded, exitQuestionPending: previousCase === "exit_unclear", customerSaidOne: texts.some((t) => isJustOne(t.body)), talkButtonTapped: texts.some((t) => t.buttonId === EXIT_BUTTON_IDS.talk) },
+    input: { ...(scheduling ? { scheduling } : {}), ...(hotLeadAlerted === undefined ? {} : { hotLeadAlerted }), ...(voiceNote ? { voiceNote, voiceNoteRepeat: previousCase === "voice_note" } : {}), ...(coverage ? { coverage } : {}), ...(area.success && area.data.served && area.data.named ? { areaServedNamed: true } : {}), understood, question: typeof asked === "string" ? asked : null, contactLanguage: contact?.language ?? null, customerWords: words, ...(agent?.bookingReminder === "sent" ? { bookingReminderSent: true } : {}), previousMisses, settings, deadlineExceeded, exitQuestionPending: previousCase === "exit_unclear", customerSaidOne: texts.some((t) => isJustOne(t.body)), talkButtonTapped: texts.some((t) => t.buttonId === EXIT_BUTTON_IDS.talk) },
   };
 }
 
@@ -216,6 +229,50 @@ async function announceAreaReminder(turn: TurnContext, deps: ReplyDeps): Promise
     console.error(`${TAG} the area reminder could not be sent (business ${turn.tenantId})`);
     return "failed";
   }
+}
+
+/** How long the staff reminder for a cancel or move with no booking may take; past it the reminder counts as failed and the reply goes out saying nobody was told. */
+export const BOOKING_REMINDER_TIMEOUT_MS = 3000;
+
+/**
+ * Tells the owners and admins that a customer with no booking asked to cancel or move one, before the reply. Already told for this lead (the audit row of an earlier send): nothing is
+ * sent again. Otherwise the reminder is tried within the time limit; a send that went out writes the audit row, anything else (a refusal, a switch that is off, nobody to tell, an error, a
+ * timeout) counts as failed and a later message of the lead tries again (the send's key lets it: notify.send releases a refused claim, and never sends a recorded or unknown one twice).
+ * The result is kept on the message for the reply. Never throws for a send problem.
+ */
+async function announceBookingReminder(turn: TurnContext, kind: "cancel" | "reschedule", deps: ReplyDeps): Promise<"sent" | "failed"> {
+  let result: "sent" | "failed" = "failed";
+  // A person has taken the chat, or the customer has opted out, since the plan: no reply will go out, so nobody is alerted (sendReply looks at the same two things).
+  const [conversation, contact] = await Promise.all([deps.store.getConversation(turn.tenantId, turn.conversationId), deps.store.getContact(turn.tenantId, turn.contactId)]);
+  const replyWillGo = conversation?.mode === "ai" && contact !== null && !contact.optedOut;
+  if (deps.bookingChangeReminder && replyWillGo) {
+    try {
+      if (await deps.store.hasBookingChangeReminder(turn.tenantId, turn.leadId)) {
+        result = "sent";
+      } else {
+        // The call is started first (in a promise, so a dep that throws at once is a rejection too), and the timer only after it: nothing is left running if it fails.
+        const call = Promise.resolve().then(() => deps.bookingChangeReminder!({ tenantId: turn.tenantId, conversationId: turn.conversationId, leadId: turn.leadId, kind }));
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const limit = new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("timed out")), deps.bookingReminderTimeoutMs ?? BOOKING_REMINDER_TIMEOUT_MS);
+        });
+        const counts = (await Promise.race([call, limit]).finally(() => clearTimeout(timer))) as { sent?: unknown } | undefined;
+        if (counts && typeof counts.sent === "number" && counts.sent > 0) {
+          result = "sent";
+          try {
+            await deps.audit({ tenantId: turn.tenantId, actor: "ai", action: BOOKING_REMINDER_ACTION, entity: "lead", entityId: turn.leadId, diff: { kind } });
+          } catch {
+            // The staff were told; a lost audit row only means a later message asks again, and the send's own key stops a second send.
+            console.error(`${TAG} could not record the booking-change reminder (business ${turn.tenantId})`);
+          }
+        }
+      }
+    } catch {
+      console.error(`${TAG} the booking-change reminder could not be sent (business ${turn.tenantId})`);
+    }
+  }
+  await keep(deps, turn, { bookingReminder: result });
+  return result;
 }
 
 /** Tells whoever sends staff alerts that a voice note is waiting (an event with ids only). A repeat is dropped by its id. */
@@ -322,7 +379,7 @@ async function replan(turn: TurnContext, understood: UnderstandResult, startedAt
   const loaded = await loadPlanInput(turn, understood, clock.exceeded, deps);
   const plan = planReply(loaded.input);
   await keep(deps, turn, planMeta(plan));
-  return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null, needsAct: false, hotLead: plan.hotLead === true, areaReminder: plan.areaReminder === true, voiceNote: plan.voiceNote === true };
+  return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null, needsAct: false, hotLead: plan.hotLead === true, areaReminder: plan.areaReminder === true, bookingChangeReminder: plan.bookingChangeReminder ?? null, voiceNote: plan.voiceNote === true };
 }
 
 /** The customer's answer "1" to the question we asked ("Reply 1 to talk to the team"): the digit alone, in any of the usual forms, with or without a full stop. */
@@ -364,7 +421,7 @@ export async function replyTurn(step: StepRunner, turn: TurnContext, understood:
       }
     }
     await keep(deps, turn, planMeta(plan));
-    return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null, needsAct: plan.act !== undefined, hotLead: plan.hotLead === true, areaReminder: plan.areaReminder === true, voiceNote: plan.voiceNote === true };
+    return { case: plan.case, deadlineExceeded: clock.exceeded, handoff: plan.handoff ?? null, optOut: plan.optOut ?? null, needsAct: plan.act !== undefined, hotLead: plan.hotLead === true, areaReminder: plan.areaReminder === true, bookingChangeReminder: plan.bookingChangeReminder ?? null, voiceNote: plan.voiceNote === true };
   });
 
   // The calendar is looked at or changed once (step 6), its result kept on the message, and the plan made again with it in hand.
@@ -379,6 +436,10 @@ export async function replyTurn(step: StepRunner, turn: TurnContext, understood:
     const reply = await step.run<ReplyResult>("opt-out", () => optOutByIntent(turn, understood, optOut, deps));
     return { case: planned.case, reply, handoff: null };
   }
+
+  // A customer with no booking on record asked to cancel or move one: the staff are told FIRST (a short time limit, never blocks), so the reply can say the team has been told only if so.
+  const bookingChange = planned.bookingChangeReminder;
+  const bookingReminder = bookingChange ? await step.run<"sent" | "failed">("booking-reminder", () => announceBookingReminder(turn, bookingChange, deps)) : null;
 
   const reply = await step.run<ReplyResult>("reply", () => sendReply(turn, understood, startedAt, planned, deps));
 
@@ -400,7 +461,7 @@ export async function replyTurn(step: StepRunner, turn: TurnContext, understood:
   // A voice note that was answered: staff are told one is waiting, so someone can listen to it. One event per message (its id), ids only.
   const voiceAlert = planned.voiceNote && answered ? await step.run<"alerted">("voice-alert", () => announceVoiceNote(turn, deps)) : null;
 
-  return { case: planned.case, reply, handoff, ...(hotLead ? { hotLead } : {}), ...(areaAlert && areaAlert !== "skipped" ? { areaReminder: areaAlert } : {}), ...(voiceAlert ? { voiceNote: voiceAlert } : {}) };
+  return { case: planned.case, reply, handoff, ...(hotLead ? { hotLead } : {}), ...(areaAlert && areaAlert !== "skipped" ? { areaReminder: areaAlert } : {}), ...(bookingReminder ? { bookingReminder } : {}), ...(voiceAlert ? { voiceNote: voiceAlert } : {}) };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -437,7 +498,7 @@ async function compose(plan: Plan, loaded: Loaded, turn: TurnContext, exceeded: 
     for (let attempt = 1; attempt <= 2; attempt++) {
       const result = await deps.llm.complete({ role: "reply", tenantId: turn.tenantId, conversationId: turn.conversationId, prompt: REPLY_PROMPT, system, messages, signal });
       const text = stripUnsafeCharacters(result.text).trim();
-      const check = checkReply(text, model.facts);
+      const check = checkReply(text, model.facts, { rules: system[0]?.text });
       if (check.ok) return { text, source: "model" };
       // The kinds of problem only: never the reply or what it said.
       console.error(`${TAG} a reply failed the post-check (${check.problems.join(", ")}; attempt ${attempt})`);

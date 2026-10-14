@@ -4,6 +4,7 @@ import { sendToAdmins, type AlertCounts, type AlertMessage, type AlertSendDeps }
 import { serverEnv } from "../../lib/env";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { send } from "../../notify/send";
+import { AREA_NOT_SHOWN_STAFF, cleanAreaText } from "../scoring/area-text";
 import { staffAlertRecipients } from "../../notify/staff-alerts";
 
 // A customer keeps asking for an area the business has no sites in (Raja, 14 Oct): the assistant has told them there is nothing there for now,
@@ -35,7 +36,8 @@ const oneLine = (text: string, max: number) => {
 };
 
 export function areaReminderMessage(info: { label: string; area: string }, conversationId: string, appUrl: string): AlertMessage {
-  const headline = `${oneLine(info.label, 40)} wants ${oneLine(info.area, 40)}, where you have no sites.`;
+  // The area and the name are a stranger's words: each passes the strict cleaner (no link, no @, no phone number) or is not shown.
+  const headline = `${oneLine(cleanAreaText(info.label) ?? "A customer", 40)} wants ${cleanAreaText(info.area) ?? AREA_NOT_SHOWN_STAFF}, where you have no sites.`;
   const link = `${appUrl.replace(/\/$/, "")}/dashboard/inbox?chat=${conversationId}`;
   return { text: `${headline}\nThe assistant has told them there is nothing there for now. Please add it to your CRM.\n${link}`, templateParams: [headline, link] };
 }
@@ -55,12 +57,13 @@ export async function sendAreaReminder(input: AreaReminderInput, deps: AreaRemin
 }
 
 /** The customer's name, or their masked number. Service role: the business and the chat are both named. */
-async function customerLabel(tenantId: string, conversationId: string): Promise<string> {
+export async function customerLabel(tenantId: string, conversationId: string): Promise<string> {
   const { data, error } = await supabaseAdmin().from("conversations").select("contacts(name, phone)").eq("tenant_id", tenantId).eq("id", conversationId).maybeSingle();
   if (error) throw new Error("area reminder: the chat could not be read");
   const contact = (data as { contacts?: { name: string | null; phone: string } | null } | null)?.contacts;
   if (!contact) return "A customer";
-  return contact.name?.trim() ? oneLine(contact.name, 40) : maskPhone(contact.phone);
+  // The name is the customer's own profile name: it passes the same strict cleaner, or their masked number is shown.
+  return (contact.name ? cleanAreaText(contact.name) : null) ?? maskPhone(contact.phone);
 }
 
 /** The real reminder: Dev 2's staffAlertRecipients and notify.send. */

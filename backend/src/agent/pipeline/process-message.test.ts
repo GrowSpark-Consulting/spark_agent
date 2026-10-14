@@ -130,11 +130,11 @@ describe("messages that arrive together", () => {
     expect(BATCH_WINDOW_MS).toBe(15_000);
   });
 
-  it("the message that started the run is in the batch even when the newest ten do not include it", async () => {
+  it("a message that is not among the newest ten is not added back: it has more than ten newer ones, a newer turn answers for it (a flood of more than ten gets one reply)", async () => {
     const w = world();
     w.store.recentUnanswered = async () => []; // it was not among the newest ten
     const result = await runTurn(runner().step, event, w.deps);
-    expect(result).toMatchObject({ status: "ready", turn: { messageIds: [M1] } });
+    expect(result).toEqual({ status: "skipped", reason: "already_answered" });
   });
 
   it("a burst of more than ten is answered from its newest ten", async () => {

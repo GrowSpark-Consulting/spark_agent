@@ -165,6 +165,8 @@ describe("notify.send through the registered WhatsApp sender", () => {
     rpcHandlers.notify_target = () => ok([target()]);
     rpcHandlers.notify_template = () => ok([{ name: "booking_confirmed_v1", language: "en", category: "utility" }]);
     rpcHandlers.notify_record = () => ok(null);
+    rpcHandlers.claim_notify_attempt = () => ok("claimed");
+    rpcHandlers.release_notify_attempt = () => ok(null);
     rpcHandlers.spend_credits = () => ok(true);
     rpcHandlers.refund_credits = () => ok(1);
     registerSender(whatsAppSenderFactory({ fetch: meta, env, timeoutMs: 50 }));

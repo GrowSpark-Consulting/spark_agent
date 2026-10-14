@@ -27,13 +27,14 @@ type StepResult = { status: "sent" } | { status: "skipped"; reason: string } | {
 export interface HandoffAlertDeps {
   db: SupabaseClient;
   recipients: (tenantId: string) => Promise<string[]>;
-  alert: (tenantId: string, userId: string, alert: StaffAlert) => Promise<SendOutcome>;
+  /** `idempotencyKey` names this exact alert, so a replayed event or a repeat run never sends it twice (notify.send). */
+  alert: (tenantId: string, userId: string, alert: StaffAlert, idempotencyKey: string) => Promise<SendOutcome>;
 }
 
 const defaults = (): HandoffAlertDeps => ({
   db: supabaseAdmin(),
   recipients: (tenantId) => staffAlertRecipients(tenantId),
-  alert: (tenantId, userId, alert) => sendStaffAlert(tenantId, userId, alert),
+  alert: (tenantId, userId, alert, idempotencyKey) => sendStaffAlert(tenantId, userId, alert, undefined, { idempotencyKey }),
 });
 
 interface Step {
@@ -64,7 +65,7 @@ export async function handleHandoffOpened(
   const results: ({ userId: string } & StepResult)[] = [];
   for (const userId of recipients) {
     const result = await step.run(`alert-${userId}`, async (): Promise<StepResult> => {
-      const outcome = await deps.alert(tenantId, userId, { kind, conversationId, handoffId, priority: handoff.priority === "high" ? "high" : "normal" });
+      const outcome = await deps.alert(tenantId, userId, { kind, conversationId, handoffId, priority: handoff.priority === "high" ? "high" : "normal" }, `handoff_alert:${handoffId}:${userId}`);
       if (outcome.status === "sent") return { status: "sent" };
       if (outcome.status === "skipped") return { status: "skipped", reason: outcome.reason };
       // Throwing makes Inngest retry this step; never when WhatsApp may already have delivered it.

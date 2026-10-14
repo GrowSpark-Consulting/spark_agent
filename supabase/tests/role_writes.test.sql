@@ -23,7 +23,8 @@ insert into public.resources (id, tenant_id, type, name) values
 insert into public.catalog_items (id, tenant_id, type, title) values
   ('0e400000-0000-0000-0000-000000000001', '0e100000-0000-0000-0000-000000000001', 'property', 'Towers');
 insert into public.contacts (id, tenant_id, phone) values ('0e500000-0000-0000-0000-000000000001', '0e100000-0000-0000-0000-000000000001', '+919800000501');
-insert into public.leads (id, tenant_id, contact_id) values ('0e600000-0000-0000-0000-000000000001', '0e100000-0000-0000-0000-000000000001', '0e500000-0000-0000-0000-000000000001');
+-- Assigned to the staff member: since 0046 staff move only the leads assigned to them (supabase/tests/rls_tightening.test.sql).
+insert into public.leads (id, tenant_id, contact_id, owner_user_id) values ('0e600000-0000-0000-0000-000000000001', '0e100000-0000-0000-0000-000000000001', '0e500000-0000-0000-0000-000000000001', '0e000000-0000-0000-0000-0000000000a3');
 
 create function pg_temp.changed(p_sql text) returns int language plpgsql as $$
 declare n int;
@@ -51,7 +52,7 @@ select throws_ok($$insert into public.catalog_items (tenant_id, type, title) val
 select is(pg_temp.changed($$delete from public.catalog_items where id = '0e400000-0000-0000-0000-000000000001'$$), 0, 'staff cannot delete from the catalog');
 select is(pg_temp.changed($$update public.tenants set agent_settings = '{"persona":"Raj"}' where id = '0e100000-0000-0000-0000-000000000001'$$), 0,
   'staff cannot change the business''s settings');
-select is(pg_temp.changed($$update public.leads set stage = 'qualified' where id = '0e600000-0000-0000-0000-000000000001'$$), 1, 'staff still move a lead');
+select is(pg_temp.changed($$update public.leads set stage = 'qualified' where id = '0e600000-0000-0000-0000-000000000001'$$), 1, 'staff still move a lead assigned to them');
 select is(pg_temp.changed($$update public.memberships set whatsapp_phone = '+919800000502' where user_id = '0e000000-0000-0000-0000-0000000000a3'$$), 1,
   'staff still set their own alert number');
 

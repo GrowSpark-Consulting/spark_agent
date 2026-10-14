@@ -3,6 +3,7 @@ import { handleHandoffLink } from "../agent/handoff/takeover";
 import { getLeadCard } from "../agent/leadcard/route";
 import { suggestReply } from "../agent/leadcard/suggest";
 import { accountStatus } from "../billing/account-status";
+import { listConnections } from "../admin/connections";
 import { editFeature, editPlan, extendTrial, grantCredits, listTenants, refundCandidates } from "../billing/admin";
 import { cancelPlan, changePlan, handlePayuReturn, handlePayuWebhook, paymentStatus, resumePlan, startCheckout, startSetupFee, startTopup } from "../billing/checkout";
 import { getBalance } from "../billing/credits";
@@ -275,6 +276,8 @@ const adminManualConnect = adminRoute(({ admin, body }) => connectManual(body, a
 // The admin panel's billing routes (billing/admin.ts, 0041). Platform admins only; every change audited with the admin.
 // → AdminTenant[]: every business with status, plan, credits, trial end, subscription, setup-fee flag.
 const adminTenants = adminRoute(({ admin }) => listTenants(admin));
+// → AdminConnection[] (admin/connections.ts): every business's WhatsApp connections with method, status and last check; no token or secret.
+const adminConnections = adminRoute(({ admin }) => listConnections(admin));
 // { days } → { trialEndsAt }: a trial extended (one paused at its end reopens).
 const adminExtendTrial: RouteHandler = (request, deps, params) =>
   adminRoute(({ admin, body, params: p }) => extendTrial(admin, p.id, body))(request, deps.userClient, params);
@@ -334,6 +337,7 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/whatsapp/connections/:id/recheck", browser: true, methods: { POST: whatsappRecheck } },
   { path: "/api/whatsapp/connections/:id/disconnect", browser: true, methods: { POST: whatsappDisconnect } },
   { path: "/api/admin/tenants", browser: true, methods: { GET: (request, deps) => adminTenants(request, deps.userClient) } },
+  { path: "/api/admin/whatsapp/connections", browser: true, methods: { GET: (request, deps) => adminConnections(request, deps.userClient) } },
   { path: "/api/admin/tenants/:id/extend-trial", browser: true, methods: { POST: adminExtendTrial } },
   { path: "/api/admin/tenants/:id/credits", browser: true, methods: { POST: adminGrantCredits } },
   { path: "/api/admin/plans/:key", browser: true, methods: { PATCH: adminUpdatePlan } },
