@@ -30,5 +30,10 @@ export const ContactDeletionResult = z.object({
    * how many could not be (Google unreachable, the calendar disconnected): the business removes those by hand.
    */
   calendarEvents: z.object({ removed: z.number().int().nonnegative(), left: z.number().int().nonnegative() }),
+  /**
+   * The deleted chats' photos, voice notes and documents, removed from storage (0048). `left` counts files that could not be: they are logged
+   * for the team. Absent from an API older than 15 Oct.
+   */
+  mediaFiles: z.object({ removed: z.number().int().nonnegative(), left: z.number().int().nonnegative() }).optional(),
 });
 export type ContactDeletionResult = z.infer<typeof ContactDeletionResult>;

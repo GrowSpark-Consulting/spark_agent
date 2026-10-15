@@ -21,6 +21,7 @@ import { processMessage } from "./process-message";
 import { releaseHolds } from "./release-holds";
 import { tokenExpiry } from "./token-expiry";
 import { trialLifecycle, trialLifecycleSweep } from "./trial-lifecycle";
+import { unpaidTrialCleanup } from "./unpaid-trial-cleanup";
 
 // Every Inngest function is registered here and served from the API's /api/inngest (see serve.ts).
 export const functions = [
@@ -49,4 +50,5 @@ export const functions = [
   trialLifecycleSweep,
   demoReply,
   mediaDownload,
+  unpaidTrialCleanup,
 ];
