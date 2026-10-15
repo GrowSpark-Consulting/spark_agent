@@ -17,6 +17,7 @@
     "latency:chats": "tsx --env-file-if-exists=.env.local src/conversation-tests/latency-cli.ts",
     "seed:connection": "tsx --env-file-if-exists=.env.local src/scripts/seed-connection.ts",
     "packs:sync": "tsx --env-file-if-exists=.env.local src/scripts/sync-packs.ts",
+    "webhook:burst": "tsx --env-file-if-exists=.env.local src/scripts/webhook-burst.ts",
     "cost:per-message": "tsx --env-file-if-exists=.env.local src/scripts/cost-per-message.ts"
   },
   "dependencies": {
