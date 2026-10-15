@@ -124,12 +124,18 @@ export class FakeNotify {
   private readonly recorded = new Map<string, SendOutcome>();
   /** Keyed sends claimed before the provider is asked (0045): "sending" until recorded, or released by a refusal for certain. */
   private readonly claims = new Map<string, "sending" | "released">();
+  /** The message ids of the claims still 'sending': what notify_attempts holds for the failure handler to read (the real id is keyedMessageId of the key). */
+  claimedIds(tenantId: string, ids: string[]): string[] {
+    const sending = new Set([...this.claims].filter(([, status]) => status === 'sending').map(([recordedKey]) => recordedKey));
+    return ids.filter((id) => this.claimKeys.some(([kind, key]) => sending.has(`${kind}:${key}`) && keyedMessageId(tenantId, kind, key) === id));
+  }
+  private readonly claimKeys: ["ai_reply" | "system_notice", string][] = [];
   private scripts: SendScript[];
   private seq = 0;
 
   private readonly isOptedOut: () => boolean;
 
-  /** Called right after a reply was delivered and reported as sent, recorded or not (`ok` and `ok_unrecorded`). */
+  /** Called right after a reply was delivered and reported as sent, recorded or not (`ok`, `ok_unrecorded` and `crash_after_accept`, where the caller then sees an exception). */
   afterDelivered: () => void = () => undefined;
   /** Called when a send is recorded (the row notify_record writes), with the id notify.send gives it (keyedMessageId, as the real one does). */
   onRecorded: (delivery: Delivery, messageId: string) => void = () => undefined;
@@ -178,6 +184,7 @@ export class FakeNotify {
     if (recordedKey !== undefined) {
       if (this.claims.get(recordedKey) === "sending") return inDoubt;
       this.claims.set(recordedKey, "sending");
+      this.claimKeys.push([kind, key as string]);
     }
     const release = () => void (recordedKey !== undefined && this.claims.set(recordedKey, "released"));
     const cost = kind === "ai_reply" ? 1 : 0;
@@ -227,6 +234,7 @@ export class FakeNotify {
         return failed(false, true, "timeout");
       case "crash_after_accept":
         this.deliveries.push(delivery);
+        this.afterDelivered();
         throw new Error(`the process died after the provider accepted the message (simulated)${this.poison}`);
     }
   };
@@ -355,6 +363,8 @@ export async function createWorld(options: WorldOptions = {}) {
     tenantInfo: { [TENANT]: { name: "Skyline Homes", agentSettings: {} } },
   });
   const notify = new FakeNotify({ balance: options.balance, scripts: options.sends, isOptedOut: () => fake.contacts.get(CONTACT)?.optedOut === true });
+  // notify_attempts: the claims the send fake holds, read by the failure handler through the store.
+  fake.state.claimsFrom = (tenantId, ids) => notify.claimedIds(tenantId, ids);
   // notify_record wrote a row: it is a message of the chat, under the id notify.send gave it.
   notify.onRecorded = (delivery, messageId) => {
     fake.messages.set(messageId, { id: messageId, tenantId: TENANT, conversationId: CONV, direction: "out", sender: delivery.kind === "ai_reply" ? "ai" : "system", kind: "text", createdAt: new Date().toISOString(), body: delivery.text, meta: {} } as FakeMessage);

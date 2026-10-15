@@ -20,11 +20,14 @@ export function replyRecordIds(tenantId: string, messageIds: string[]): string[]
  * Which of these customer messages a RECORDED reply belongs to (the reply is named by the turn's last message, so that message). A store that cannot be
  * read throws: the handler decides what to do.
  */
-export function createSentReplyRecorded(store: Pick<PipelineStore, "recordedMessageIds">): NonNullable<ReplyDeps["sentReplyRecorded"]> {
+export function createSentReplyRecorded(store: Pick<PipelineStore, "recordedMessageIds" | "claimedMessageIds">): NonNullable<ReplyDeps["sentReplyRecorded"]> {
   return async (tenantId, conversationId, messageIds) => {
     const ids = replyRecordIds(tenantId, messageIds);
     if (ids.length === 0) return [];
-    const recorded = new Set(await store.recordedMessageIds(tenantId, conversationId, ids));
+    // A row notify_record wrote, or a claim notify.send made before it asked WhatsApp and never released (it may have gone out; a refusal for certain
+    // releases it). Either one is enough; either read failing throws and the handler fails open.
+    const [rows, claims] = await Promise.all([store.recordedMessageIds(tenantId, conversationId, ids), store.claimedMessageIds(tenantId, ids)]);
+    const recorded = new Set([...rows, ...claims]);
     return messageIds.slice(-NEWEST).filter((id) => recorded.has(keyedMessageId(tenantId, "ai_reply", replyKey(id))) || recorded.has(keyedMessageId(tenantId, "ai_reply", `${replyKey(id)}#template`)));
   };
 }
