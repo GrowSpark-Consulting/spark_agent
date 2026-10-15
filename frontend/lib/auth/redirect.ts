@@ -6,7 +6,15 @@
  * `/onboarding…`, optionally with a simple query string. Anything else becomes `fallback`.
  */
 export function safeNext(next: unknown, fallback = "/dashboard"): string {
-  return typeof next === "string" && /^\/(dashboard|onboarding)(\/[\w\-/]*)?(\?[\w\-=&%.]*)?$/.test(next) ? next : fallback;
+  return typeof next === "string" && (/^\/(dashboard|onboarding)(\/[\w\-/]*)?(\?[\w\-=&%.]*)?$/.test(next) || INVITE_PATH.test(next)) ? next : fallback;
+}
+
+/** A team invitation page, /invite/<token> (the token is 32 random bytes, base64url). The only path outside the app proper that sign-in may return to. */
+const INVITE_PATH = /^\/invite\/[A-Za-z0-9_-]{43}$/;
+
+/** `next` if it is an invitation page, else null: for sign-up, which otherwise always continues to onboarding. */
+export function inviteNext(next: unknown): string | null {
+  return typeof next === "string" && INVITE_PATH.test(next) ? next : null;
 }
 
 /**
@@ -15,6 +23,9 @@ export function safeNext(next: unknown, fallback = "/dashboard"): string {
  * existing member is never sent back into onboarding.
  */
 export function destinationAfterAuth(hasBusiness: boolean, next: unknown): string {
+  // Someone following an invitation goes back to it, with a business or without: accepting it is what gives them one.
+  const invite = inviteNext(next);
+  if (invite) return invite;
   if (!hasBusiness) return "/onboarding";
   const safe = safeNext(next);
   return safe.startsWith("/dashboard") ? safe : "/dashboard";

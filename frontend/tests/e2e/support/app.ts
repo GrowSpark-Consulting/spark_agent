@@ -12,7 +12,7 @@ export const SIGNED_OUT = { cookies: [], origins: [] };
  * the browser's own "Failed to load resource" line for our API routes, which tests trigger on
  * purpose to check error states (the response is asserted instead).
  */
-export const test = base.extend<{ consoleErrors: string[]; quietRealtime: void }>({
+export const test = base.extend<{ consoleErrors: string[]; quietRealtime: void; quietTeam: void }>({
   // Screens subscribe to Realtime for the tables the database publishes (lib/realtime/published-tables.ts: inbox, leads, calendar...).
   // The mock Supabase has no socket, so without this every such page logs a failed WebSocket handshake and the console guard below
   // fails the test. This answers joins and does nothing else; a test that needs to push a change (or refuse the join) calls
@@ -20,6 +20,29 @@ export const test = base.extend<{ consoleErrors: string[]; quietRealtime: void }
   quietRealtime: [
     async ({ page }, use) => {
       await mockRealtime(page);
+      await use();
+    },
+    { auto: true },
+  ],
+  // The Team screen lists members and invitations from GET /api/team (backend/src/team). The mock Supabase has no service-role reads of memberships,
+  // so by default the screen gets a plain one-member answer; team-invites.spec.ts registers its own stand-in later, which wins.
+  quietTeam: [
+    async ({ page }, use) => {
+      await page.route(/\/api\/team$/, (route) => {
+        if (route.request().method() === "OPTIONS") return route.fallback();
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          headers: { "access-control-allow-origin": route.request().headers()["origin"] ?? "*" },
+          body: JSON.stringify({
+            viewerRole: "owner",
+            inviteRoles: ["admin", "staff"],
+            seats: { used: 1, members: 1, pending: 0, limit: 5, planName: "Growth" },
+            members: [{ userId: "00000000-0000-4000-8000-000000000001", role: "owner", name: null, email: "owner@test.local", you: true }],
+            invites: [],
+          }),
+        });
+      });
       await use();
     },
     { auto: true },

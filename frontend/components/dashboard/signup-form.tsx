@@ -5,7 +5,7 @@ import { useActionState } from "react";
 import { EmptyState, ErrorState } from "@/components/shared/states";
 import { signup, type SignupState } from "@/lib/auth/actions";
 
-export function SignupForm() {
+export function SignupForm({ next }: { next?: string }) {
   const [state, action, pending] = useActionState<SignupState, FormData>(signup, {});
 
   // The same message whether or not the address already has an account.
@@ -25,6 +25,7 @@ export function SignupForm() {
 
   return (
     <form action={action} className="app-form" noValidate>
+      {next ? <input type="hidden" name="next" value={next} /> : null}
       <div className="field">
         <label htmlFor="email">Email</label>
         <input
