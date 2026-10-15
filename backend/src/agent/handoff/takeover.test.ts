@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fakeTables, type Row } from "../../test-support/fake-tables";
 import type { SendOutcome } from "../../notify/send";
 import { handleHandoffLink, type LinkDeps } from "./takeover";
@@ -30,6 +31,47 @@ interface Options {
   contact?: Row | null;
   language?: string | null;
   now?: Date;
+  /** Makes one database call fail, to see what the page says and what is left behind. `count` is how many times that table and operation have been called. */
+  break?: (call: { table: string; op: string; count: number }) => "error" | "throw" | "throw-after" | undefined;
+}
+
+afterEach(() => vi.restoreAllMocks());
+
+/** A database where chosen calls fail: "error" is the database saying no (nothing applied), "throw" is a dropped connection before it ran, "throw-after" a dropped connection after it ran. */
+function breaking(real: SupabaseClient, decide: NonNullable<Options["break"]>): SupabaseClient {
+  const counts = new Map<string, number>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const wrap = (target: any, state: { op: string }, table: string): any => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const proxy: any = new Proxy(target, {
+      get(t, prop) {
+        if (prop === "then") {
+          return (resolve: (value: unknown) => unknown, reject?: (error: unknown) => unknown) => {
+            const key = `${table}:${state.op}`;
+            const count = (counts.get(key) ?? 0) + 1;
+            counts.set(key, count);
+            const mode = decide({ table, op: state.op, count });
+            if (mode === "error") return resolve({ data: null, error: { code: "XX001" } });
+            if (mode === "throw") return reject?.(new Error("connection reset"));
+            if (mode === "throw-after") {
+              t.then(() => undefined);
+              return reject?.(new Error("connection reset"));
+            }
+            return t.then(resolve);
+          };
+        }
+        const value = t[prop];
+        if (typeof value !== "function") return value;
+        return (...args: unknown[]) => {
+          if (prop === "update" || prop === "insert") state.op = prop;
+          const result = value.apply(t, args);
+          return result === t ? proxy : result;
+        };
+      },
+    });
+    return proxy;
+  };
+  return { from: (table: string) => wrap(real.from(table), { op: "select" }, table) } as unknown as SupabaseClient;
 }
 
 function world(over: Options = {}) {
@@ -42,13 +84,13 @@ function world(over: Options = {}) {
     messages: [],
     audit_logs: [],
   });
-  const sent: { tenantId: string; kind: string; payload: { conversationId: string; text: string } }[] = [];
+  const sent: { tenantId: string; kind: string; payload: { conversationId: string; text: string; idempotencyKey?: string } }[] = [];
   const events: { id: string; name: string; data: Record<string, string> }[] = [];
   const deps: LinkDeps = {
     sendEvent: vi.fn(async (event) => {
       events.push(event);
     }),
-    db: t.db,
+    db: over.break ? breaking(t.db, over.break) : t.db,
     env: { ENCRYPTION_KEY: KEY, NEXT_PUBLIC_APP_URL: APP },
     now: () => over.now ?? NOW,
     isEnabled: vi.fn(async () => over.ownNumber ?? true),
@@ -211,14 +253,32 @@ describe("the own-number button", () => {
 });
 
 describe("a link that does not work", () => {
-  it("used once is dead: the second tap, by the same person, gets a friendly page with a button to the inbox, and changes nothing", async () => {
+  it("used once is dead: the second tap, by the same person, is told they already took it, with a button to the inbox, and changes nothing", async () => {
     const w = world({ mode: "ai" });
     await w.open("inbox");
     const again = await w.open("inbox");
     expect(again.status).toBe(409);
     const html = await body(again);
-    expect(html).toMatch(/already been used/i);
+    expect(html).toMatch(/you already took over this chat/i);
+    expect(html).not.toMatch(/someone has already/i);
     expect(html).toContain(`href="${APP}/dashboard/inbox"`);
+    expect(w.tables.conversations[0]).toMatchObject({ mode: "human", assigned_user_id: PRIYA });
+  });
+
+  it("used by a teammate: the second person is told someone else has it, not that they did", async () => {
+    const w = world({ mode: "ai" });
+    w.tables.memberships.push({ tenant_id: A, user_id: RAVI, role: "admin", whatsapp_phone: "+919876500002", takeover_pref: "ask" });
+    await w.open("inbox");
+    const html = await body(await w.open("inbox", { tenantId: A, handoffId: HANDOFF, userId: RAVI }));
+    expect(html).toMatch(/already been used/i);
+    expect(html).not.toMatch(/you already took/i);
+  });
+
+  it("a handoff that was closed is 'already used' even for the person it was assigned to", async () => {
+    const w = world({ mode: "ai", handoff: { picked_at: iso(NOW.getTime() - 2000), resolved_at: iso(NOW.getTime() - 1000), assigned_user_id: PRIYA } });
+    const html = await body(await w.open("inbox"));
+    expect(html).toMatch(/already been used|no longer waiting/i);
+    expect(html).not.toMatch(/you already took/i);
   });
 
   it("the other button of the same alert is dead too, once one was used: one takeover per handoff", async () => {
@@ -360,5 +420,160 @@ describe("the event for Dev 2's outcome question", () => {
     (w.deps.sendEvent as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("down"));
     expect((await w.open("own")).status).toBe(302);
     expect(w.tables.conversations[0]).toMatchObject({ mode: "external" });
+  });
+});
+
+describe("when a database call fails after the link is claimed", () => {
+  const quiet = () => vi.spyOn(console, "error").mockImplementation(() => {});
+
+  it("the chat could not be switched (the database said no): the claim is given back, nothing is sent, and the staff member can tap again", async () => {
+    quiet();
+    const w = world({ mode: "ai", break: ({ table, op, count }) => (table === "conversations" && op === "update" && count === 1 ? "error" : undefined) });
+    const res = await w.open("own");
+    expect(res.status).toBe(503);
+    expect(await body(res)).toMatch(/nothing was changed/i);
+    expect(w.tables.handoffs[0]).toMatchObject({ picked_at: null, assigned_user_id: null, takeover_mode: null });
+    expect(w.tables.conversations[0]).toMatchObject({ mode: "ai", assigned_user_id: null });
+    expect(w.sent).toEqual([]);
+    expect(w.events).toEqual([]);
+    expect((await w.open("own")).status).toBe(302);
+    expect(w.tables.conversations[0]).toMatchObject({ mode: "external", assigned_user_id: PRIYA });
+  });
+
+  it("the same holds for the inbox button, when the connection drops before the switch ran", async () => {
+    quiet();
+    const w = world({ mode: "ai", break: ({ table, op, count }) => (table === "conversations" && op === "update" && count === 1 ? "throw" : undefined) });
+    expect((await w.open("inbox")).status).toBe(503);
+    expect(w.tables.handoffs[0].picked_at).toBeNull();
+    expect((await w.open("inbox")).status).toBe(302);
+  });
+
+  it("the connection dropped but the switch had gone through: the claim is kept, and the takeover carries on as a success", async () => {
+    quiet();
+    const w = world({ mode: "ai", break: ({ table, op, count }) => (table === "conversations" && op === "update" && count === 1 ? "throw-after" : undefined) });
+    const res = await w.open("own");
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("https://wa.me/919812345621");
+    expect(w.tables.handoffs[0]).toMatchObject({ picked_at: NOW.toISOString(), assigned_user_id: PRIYA, takeover_mode: "own_number" });
+    expect(w.tables.conversations[0]).toMatchObject({ mode: "external", assigned_user_id: PRIYA });
+    expect(w.events).toHaveLength(1);
+    expect(w.sent).toHaveLength(1);
+  });
+
+  it("it cannot be told whether the switch happened: the claim is NOT given back, and the page does not say that nothing was changed", async () => {
+    quiet();
+    const w = world({
+      mode: "ai",
+      break: ({ table, op, count }) => (table === "conversations" && ((op === "update" && count === 1) || (op === "select" && count === 2)) ? "throw" : undefined),
+    });
+    const res = await w.open("own");
+    expect(res.status).toBe(503);
+    const html = await body(res);
+    expect(html).not.toMatch(/nothing was changed/i);
+    expect(html).toMatch(/could not confirm/i);
+    expect(html).toContain(`href="${APP}/dashboard/inbox"`);
+    expect(w.tables.handoffs[0].picked_at).toBe(NOW.toISOString());
+  });
+
+  it("a claim that is not this person's is never given back", async () => {
+    quiet();
+    const w = world({
+      mode: "ai",
+      break: ({ table, op, count }) => {
+        if (table === "conversations" && op === "update" && count === 1) {
+          w.tables.handoffs[0].assigned_user_id = RAVI; // a teammate took the handoff while the switch failed
+          return "error";
+        }
+        return undefined;
+      },
+    });
+    await w.open("own");
+    expect(w.tables.handoffs[0].assigned_user_id).toBe(RAVI);
+  });
+});
+
+describe("when something after the switch fails", () => {
+  const quiet = () => vi.spyOn(console, "error").mockImplementation(() => {});
+
+  it("the business name cannot be read: the takeover stands, the staff member still goes to the customer, the event is sent and the customer is told", async () => {
+    quiet();
+    const w = world({ mode: "ai", break: ({ table }) => (table === "tenants" ? "error" : undefined) });
+    const res = await w.open("own");
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("https://wa.me/919812345621");
+    expect(w.tables.conversations[0].mode).toBe("external");
+    expect(w.events).toHaveLength(1);
+    expect(w.sent).toHaveLength(1);
+    expect(w.sent[0].payload.text).toContain("the business");
+  });
+
+  it.each(["error", "throw"] as const)("the note or an audit row cannot be saved (%s): the takeover stands, and the rest still happens", async (mode) => {
+    quiet();
+    const w = world({ mode: "ai", break: ({ table, op }) => ((table === "messages" || table === "audit_logs") && op === "insert" ? mode : undefined) });
+    const res = await w.open("own");
+    expect(res.status).toBe(302);
+    expect(w.tables.conversations[0].mode).toBe("external");
+    expect(w.events).toHaveLength(1);
+    expect(w.sent).toHaveLength(1);
+  });
+
+  it("the inbox button still opens the inbox when the note cannot be saved", async () => {
+    quiet();
+    const w = world({ mode: "ai", break: ({ table, op }) => (table === "messages" && op === "insert" ? "error" : undefined) });
+    const res = await w.open("inbox");
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(`${APP}/dashboard/inbox?chat=${CONV}`);
+  });
+
+  it("a failed save is logged with the database's code only: no number, name, note, token or row", async () => {
+    const err = quiet();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const w = world({ mode: "ai", break: ({ table, op }) => ((table === "messages" || table === "audit_logs") && op === "insert" ? "error" : undefined) });
+    const l = w.link("own");
+    await handleHandoffLink(l.request, l.params, w.deps);
+    const lines = [...err.mock.calls, ...log.mock.calls].map((call) => call.join(" "));
+    expect(lines.filter((line) => line.includes("XX001")).length).toBeGreaterThanOrEqual(2); // the note, and the audit rows
+    const all = lines.join("\n");
+    expect(all).not.toContain(l.token);
+    expect(all).not.toMatch(/9812345621|9876500001|Anand|Priya|handling this chat|Sunrise/);
+  });
+});
+
+describe("the notice to the customer", () => {
+  it("carries a key of its own, so a repeat can never send it twice", async () => {
+    const w = world({ mode: "ai" });
+    await w.open("own");
+    expect(w.sent[0].payload.idempotencyKey).toBe(`own_number_notice:${HANDOFF}`);
+  });
+});
+
+describe("a staff member whose name is not known", () => {
+  const nameless = (language: string | null) => {
+    const w = world({ mode: "ai", language });
+    (w.deps.userName as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    return w;
+  };
+
+  it("is never called 'A team member' in the words the customer reads: the notice and the greeting name the business instead", async () => {
+    const w = nameless("en");
+    const res = await w.open("own");
+    expect(w.sent[0].payload.text).toBe("Someone from Sunrise Homes will message you from +919876500001 shortly.");
+    expect(new URL(res.headers.get("location") ?? "").searchParams.get("text")).toBe("Hi Anand, this is the team at Sunrise Homes. How can I help you?");
+  });
+
+  it.each(["ta", "ta-en", "hi"])("in %s too: no English placeholder name, and the business and the number are there", async (language) => {
+    const w = nameless(language);
+    const res = await w.open("own");
+    const greeting = new URL(res.headers.get("location") ?? "").searchParams.get("text") ?? "";
+    for (const text of [w.sent[0].payload.text, greeting]) expect(text).not.toMatch(/team member|\{/i);
+    expect(w.sent[0].payload.text).toContain("Sunrise Homes");
+    expect(w.sent[0].payload.text).toContain("+919876500001");
+    expect(greeting).toContain("Sunrise Homes");
+  });
+
+  it("the note staff see in the chat still reads well", async () => {
+    const w = nameless("en");
+    await w.open("own");
+    expect(String(w.tables.messages[0].body)).toBe("A team member is handling this chat from their own WhatsApp number. The AI won’t reply.");
   });
 });

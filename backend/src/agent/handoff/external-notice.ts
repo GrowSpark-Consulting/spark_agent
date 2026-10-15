@@ -3,6 +3,7 @@ import { z } from "zod";
 import { inngest } from "../../inngest/client";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { send, type NotifyPayload, type SendOutcome } from "../../notify/send";
+import { lookupStaffName } from "./staff-name";
 import { externalNotice } from "./texts";
 
 // A customer writes again while a staff member handles the chat from their own WhatsApp number (conversation mode `external`; Raja, 11 Oct, question 4).
@@ -36,13 +37,7 @@ export interface ExternalNoticeDeps {
 const defaults = (): ExternalNoticeDeps => ({
   db: supabaseAdmin(),
   now: () => new Date(),
-  userName: async (userId) => {
-    const { data, error } = await supabaseAdmin().auth.admin.getUserById(userId);
-    if (error || !data.user) return null;
-    const meta = data.user.user_metadata as Record<string, unknown> | undefined;
-    const named = [meta?.full_name, meta?.name].find((v): v is string => typeof v === "string" && v.trim() !== "");
-    return (named ?? data.user.email?.split("@")[0] ?? "").trim() || null;
-  },
+  userName: lookupStaffName,
   send: (tenantId, kind, payload) => send(tenantId, kind, payload),
   sendEvent: (event) => inngest.send(event),
 });
@@ -73,7 +68,7 @@ export async function tellCustomerTeamIsHandling(rawIds: unknown, deps: External
   const recent = await db.from("audit_logs").select("id").eq("tenant_id", tenantId).eq("action", NOTICE_ACTION).eq("entity_id", conversationId).gt("created_at", since).limit(1);
   if (rows(z.object({ id: z.string() }), recent, "the last notice").length > 0) return { status: "skipped", reason: "told_recently" };
 
-  const name = (await deps.userName(chat.assigned_user_id).catch(() => null)) ?? "A team member";
+  const name = await deps.userName(chat.assigned_user_id).catch(() => null); // null: the notice says "Our team"
   const outcome = await deps.send(tenantId, "ai_reply", { conversationId, text: externalNotice(contact.language, name), idempotencyKey: `external_notice:${messageId}` }).catch(() => null);
   if (!outcome) return { status: "skipped", reason: "not_sent" }; // the send threw: nothing is marked, the customer's next message tries again
 

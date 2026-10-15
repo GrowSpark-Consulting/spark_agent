@@ -15,9 +15,11 @@ const SECTIONS = [
   // The calendar's heading is the day it shows (today, in the business's time zone).
   { link: "Calendar", path: "/dashboard/calendar", heading: /^(Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day \d{1,2} [A-Z][a-z]{2}$/ },
   { link: "Features", path: "/dashboard/features", heading: "Features" },
+  { link: "Agent settings", path: "/dashboard/agent", heading: "Agent settings" },
   { link: "Billing", path: "/dashboard/billing", heading: "Billing and credits" },
   { link: "Knowledge base", path: "/dashboard/knowledge", heading: "Knowledge base" },
   { link: "Booking setup", path: "/dashboard/settings/booking", heading: "Booking setup" },
+  { link: "Data & privacy", path: "/dashboard/settings/privacy", heading: "Data & privacy" },
   { link: "Team", path: "/dashboard/team", heading: "Team" },
   { link: "Send test message", path: "/dashboard/messages/test", heading: "Send a test message" },
   { link: "Create template", path: "/dashboard/templates/new", heading: "Create a message template" },

@@ -231,18 +231,36 @@ function baseMime(media: Record<string, unknown>): string | null {
 }
 
 /**
+ * Why the download job left a file out: it marks the row's media `skipped` or `unavailable` with one of these
+ * reasons (backend/src/media/download.ts). Unknown reasons still get a plain line; the path is never shown.
+ */
+const MEDIA_LEFT_OUT: Record<string, string> = {
+  too_big: "Too large to keep",
+  type_not_allowed: "This file type isn't kept",
+  media_gone: "WhatsApp no longer has this file",
+  rejected: "WhatsApp wouldn't hand this file over",
+  bad_answer: "WhatsApp wouldn't hand this file over",
+};
+
+function mediaLeftOut(record: Record<string, unknown>): string | null {
+  const reason = stringField(record, "skipped") ?? stringField(record, "unavailable");
+  return reason ? (MEDIA_LEFT_OUT[reason] ?? "Wasn't saved") : null;
+}
+
+/**
  * The placeholder for a photo, voice message or document (migration 0013's media `{ id, mime }`). The
  * file isn't downloaded, so nothing links to it. A file name is used when the row has one; #50 stores
  * none, so documents are named by type.
  */
 function mediaAttachment(kind: MediaKind, media: unknown): Attachment {
   const record = isRecord(media) ? media : {};
+  const leftOut = mediaLeftOut(record);
   const fileName = stringField(record, "name") ?? stringField(record, "filename");
   const ext = fileName ? /\.([a-z0-9]{2,4})$/i.exec(fileName)?.[1]?.toUpperCase() : undefined;
   const mime = baseMime(record);
-  if (kind === "image") return { label: "IMG", name: fileName ?? "Photo", note: "Can't be shown here yet" };
-  if (kind === "audio") return { label: "AUD", name: "Voice message", note: "Can't be played here yet" };
-  return { label: ext ?? (mime ? MIME_LABEL[mime] : undefined) ?? "DOC", name: fileName ?? "Document", note: "Can't be opened here yet" };
+  if (kind === "image") return { label: "IMG", name: fileName ?? "Photo", note: leftOut ?? "Can't be shown here yet" };
+  if (kind === "audio") return { label: "AUD", name: "Voice message", note: leftOut ?? "Can't be played here yet" };
+  return { label: ext ?? (mime ? MIME_LABEL[mime] : undefined) ?? "DOC", name: fileName ?? "Document", note: leftOut ?? "Can't be opened here yet" };
 }
 
 /**

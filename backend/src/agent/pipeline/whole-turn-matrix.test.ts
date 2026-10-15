@@ -139,6 +139,35 @@ describe("a send that fails in a way waiting can fix (retryable)", () => {
     expect(w.report().sendCalls).toBe(5);
   });
 
+  // The reply is kept on the message before it is sent (reply.ts, meta.agent.draft), so the retried step does not ask the reply model again: the model call is
+  // paid once however many times the send is retried, and the credit is spent once, by notify.send, on the attempt that goes out (reply-draft.test.ts has the unit cases).
+  it.each([1, 2, 3])("%i retryable failure(s) and then it works: the reply model is asked ONCE, the text that goes out is the first one written, and one credit is spent", async (failures) => {
+    const first = "A 2BHK starts at ₹78 lakh, ready to move in. Shall we plan a visit?";
+    const sends: SendScript[] = Array.from({ length: failures }, () => "retryable");
+    const { w, reports } = await oneMessage({ sends, model: { reply: [first, "A 2BHK starts at ₹78 lakh. Would you like to see it?", "A 2BHK is ₹78 lakh."] } });
+    expect(reports[0]).toMatchObject({ status: "completed" });
+    expect(reports[0].attempts.reply).toBe(failures + 1);
+    expect(w.model.calls.reply).toBe(1);
+    expectOneReply(w);
+    expect(w.report().replies[0].text).toBe(first);
+    expect(w.report().sendCalls).toBe(failures + 1);
+  });
+
+  it("on all four attempts: the reply model was still asked once, the safe line goes once, and one credit is spent", async () => {
+    const { w, reports } = await oneMessage({ sends: ["retryable", "retryable", "retryable", "retryable"] });
+    expect(reports[0]).toMatchObject({ status: "failed", giveUp: "sent" });
+    expect(w.model.calls.reply).toBe(1);
+    expectOneReply(w, SAFE);
+  });
+
+  it("a reply the post-check refuses is regenerated once as intended, and a retry of the send does not regenerate again: two reply-model calls in all, one credit", async () => {
+    const good = "A 2BHK starts at ₹78 lakh. Would you like to visit?";
+    const { w } = await oneMessage({ sends: ["retryable", "retryable"], model: { reply: ["A 2BHK starts at ₹99 lakh, shall we plan a visit?", good, "A 2BHK starts at ₹78 lakh, shall we visit?"] } });
+    expect(w.model.calls.reply).toBe(2);
+    expectOneReply(w);
+    expect(w.report().replies[0].text).toBe(good);
+  });
+
   it("PINNED, existing behaviour: when even the safe line cannot be sent the customer hears nothing and nothing is charged, and the message stays unanswered for the next run", async () => {
     const { w, reports } = await oneMessage({ sends: Array.from({ length: 5 }, () => "retryable" as const) });
     expect(reports[0]).toMatchObject({ status: "failed", giveUp: "not_sent" });

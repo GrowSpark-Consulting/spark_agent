@@ -1,6 +1,7 @@
 import type { StartTrialResult, TenantContext } from "@pakka/types";
 import { handleHandoffLink } from "../agent/handoff/takeover";
 import { getLeadCard } from "../agent/leadcard/route";
+import { getAgentSettings, updateAgentSettings } from "../agent/settings/agent-settings";
 import { suggestReply } from "../agent/leadcard/suggest";
 import { accountStatus } from "../billing/account-status";
 import { listConnections } from "../admin/connections";
@@ -190,6 +191,11 @@ const featureList = tenantRoute(({ context }) => listFeatures(context));
 // and every change is in the audit log.
 const featureUpdate: RouteHandler = (request, deps, params) =>
   tenantRoute(({ context, body, params: p }) => updateFeature(context, p.key, body))(request, deps.userClient, params);
+// → AgentSettings: persona, tone, privacy notice, booking service and the five handover rows, as the agent reads them. Any member.
+const agentSettingsGet = tenantRoute(({ context }) => getAgentSettings(context));
+// { persona?, tone?, privacyNotice?, bookingServiceId?, handoffTriggers? } → AgentSettings. Owner or admin; merges into the stored settings (other keys are kept),
+// every change is in the audit log.
+const agentSettingsPatch = tenantRoute(({ context, body }) => updateAgentSettings(context, body));
 // The calendar's buttons (booking/actions.ts). Owners and admins on any booking of the business, staff on their own
 // calendar's; each sends booking.changed so the jobs follow. Complete and no-show have no body, and cancel's is
 // optional, so those three authenticate themselves (like the gap routes) and let the app turn an error into the envelope.
@@ -376,6 +382,7 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/dashboard/summary", browser: true, methods: { GET: (request, deps) => homeSummary(request, deps.userClient) } },
   { path: "/api/features", browser: true, methods: { GET: (request, deps) => featureList(request, deps.userClient) } },
   { path: "/api/features/:key", browser: true, methods: { PATCH: featureUpdate } },
+  { path: "/api/agent/settings", browser: true, methods: { GET: (request, deps) => agentSettingsGet(request, deps.userClient), PATCH: (request, deps) => agentSettingsPatch(request, deps.userClient) } },
   {
     path: "/api/integrations/webhook",
     browser: true,

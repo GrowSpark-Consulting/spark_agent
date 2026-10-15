@@ -149,6 +149,12 @@ interface Loaded {
   lastAt: string;
 }
 
+/**
+ * The reply written for a turn, kept on the turn's last message (`meta.agent.draft`) BEFORE it is sent, so that a retry of the step (a send that failed in a way
+ * waiting can fix) sends the same text and does not ask the model again. The plan case it was written for, and the text. Cleared when the send ends for good.
+ */
+const Draft = z.object({ case: z.string(), text: z.string().min(1).max(4000) });
+
 /** What the understanding step kept about where the customer wants to be (understand.ts): not trusted, read here, and ignored when it is not in the shape it writes. */
 const CoverageReading = z.object({ served: z.boolean(), area: z.string().min(1), shown: z.string(), areas: z.array(z.string()), known: z.array(z.string()).default([]), named: z.boolean() });
 
@@ -405,6 +411,37 @@ export const replyKey = (lastMessageId: string): string => `reply:${lastMessageI
 /** What a plan leaves on the message for the next turn: the miss count, the case, and, when it changed, what was said about an unserved place. */
 const planMeta = (plan: Plan): Record<string, unknown> => ({ kbMisses: plan.kbMisses, planCase: plan.case, ...(plan.coverage !== undefined ? { coverage: plan.coverage } : {}) });
 
+/**
+ * The kept reply, when it still fits: written for the plan case of this turn, and still passing the post-check against the facts of this turn. Otherwise null,
+ * and the model is asked as usual. Only a model answer is ever kept (fixed words cost nothing to write again), so a draft is always the model's text.
+ */
+function reusableDraft(loaded: Loaded, planned: PlanSummary, plan: Plan): string | null {
+  if (plan.reply.mode !== "model" || !loaded.businessName) return null;
+  const draft = Draft.safeParse(loaded.agent?.draft);
+  if (!draft.success || draft.data.case !== planned.case) return null;
+  try {
+    const system = buildReplySystem({ businessName: loaded.businessName, persona: loaded.settings.persona, tone: loaded.settings.tone });
+    return checkReply(draft.data.text, plan.reply.facts, { rules: system[0]?.text }).ok ? draft.data.text : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Keeps the written reply (or, with null, clears it). Best effort and never thrown: a draft that cannot be kept only means a retry asks the model again, and one
+ * that cannot be cleared is harmless (nothing reads it once the message is answered or a later message is the turn's last). The kind of error only is logged,
+ * never the text (the store has already logged the database's code). Says whether the draft is now there to clear.
+ */
+async function keepDraft(deps: ReplyDeps, turn: TurnContext, draft: { case: string; text: string } | null): Promise<boolean> {
+  try {
+    await keep(deps, turn, { draft });
+    return true;
+  } catch (error) {
+    console.error(`${TAG} ${draft ? "the written reply could not be kept" : "the kept draft could not be cleared"} (${error instanceof Error ? error.name : "unknown"})`);
+    return false;
+  }
+}
+
 /** Keeps something on the newest message's meta; a message that is not found is a bug, not retried. */
 async function keep(deps: ReplyDeps, turn: TurnContext, agent: Record<string, unknown>): Promise<void> {
   const lastMessageId = turn.messageIds[turn.messageIds.length - 1];
@@ -555,16 +592,30 @@ async function sendReply(turn: TurnContext, understood: UnderstandResult, starte
     }
     return { status: "not_sent", reason: "opted_out" }; // the opt-out step handles it (replyTurn); nothing to send here
   }
-  const { text, source } = await compose(plan, loaded, turn, clock.exceeded, clock.signal, deps);
+  // A retry of this step (the send below failed in a way waiting can fix) finds the reply the first attempt wrote and sends it: no second model call, and the same text.
+  // It is used even when the turn's clock has run out (it needs no model). A fresh reply from the model is kept before the send; fixed words and the safe line are not.
+  const reused = reusableDraft(loaded, planned, plan);
+  const { text, source } = reused !== null ? { text: reused, source: "model" as const } : await compose(plan, loaded, turn, clock.exceeded, clock.signal, deps);
+  let draftKept = reused !== null;
+  if (reused === null && source === "model") draftKept = await keepDraft(deps, turn, { case: planned.case, text });
+  const dropDraft = async () => {
+    if (draftKept) await keepDraft(deps, turn, null);
+  };
 
   // Staff may have taken over, or the customer sent STOP, since the gate looked.
   const [conversation, contact] = await Promise.all([store.getConversation(turn.tenantId, turn.conversationId), store.getContact(turn.tenantId, turn.contactId)]);
-  if (!conversation) return { status: "not_sent", reason: "no_conversation" };
-  if (conversation.mode !== "ai") return { status: "not_sent", reason: "not_ai_mode" };
-  if (!contact || contact.optedOut) return { status: "not_sent", reason: "opted_out" };
+  if (!conversation || conversation.mode !== "ai" || !contact || contact.optedOut) {
+    await dropDraft();
+    if (!conversation) return { status: "not_sent", reason: "no_conversation" };
+    if (conversation.mode !== "ai") return { status: "not_sent", reason: "not_ai_mode" };
+    return { status: "not_sent", reason: "opted_out" };
+  }
 
   // The model can take seconds: look once more, right before the send, in case another run answered meanwhile.
-  if (await store.isAnswered(turn.tenantId, lastMessageId, loaded.lastAt)) return { status: "already_answered" };
+  if (await store.isAnswered(turn.tenantId, lastMessageId, loaded.lastAt)) {
+    await dropDraft();
+    return { status: "already_answered" };
+  }
 
   // The first AI reply to a contact carries the privacy notice (DPDP): who answers, how to stop, the policy link, only when
   // the business turned it on (agent_settings.privacyNotice; off by default per Raja, 9 Oct).
@@ -590,18 +641,19 @@ ${consentNotice(noticeLanguage, deps.privacyPolicyUrl)}` : exit.body, buttons: [
   switch (outcome.status) {
     case "sent":
       // The marker first (one cheap write), then the rows: if the rows cannot be written, a retry still sees the marker.
-      await keep(deps, turn, { reply: { case: planned.case, source } }).catch(() => undefined);
+      await keep(deps, turn, { reply: { case: planned.case, source }, ...(draftKept ? { draft: null } : {}) }).catch(() => undefined);
       if (carriesNotice) await noticeShown(turn, outcome.messageId, deps);
       await recordAnswered(turn, deps);
       return { status: "sent", source };
     case "skipped":
+      await dropDraft();
       if (outcome.reason === "insufficient_credits") return { status: "no_credits" };
       console.error(`${TAG} the reply was not sent (${outcome.reason})`);
       return { status: "not_sent", reason: outcome.reason };
     case "failed":
       // It may have gone out anyway: never resend, and count it as answered.
       if (outcome.error.outcomeUnknown) {
-        await keep(deps, turn, { reply: { case: planned.case, source: "unknown_outcome" } }).catch(() => undefined);
+        await keep(deps, turn, { reply: { case: planned.case, source: "unknown_outcome" }, ...(draftKept ? { draft: null } : {}) }).catch(() => undefined);
         await recordAnswered(turn, deps);
         return { status: "sent_unknown" };
       }
@@ -613,6 +665,7 @@ ${consentNotice(noticeLanguage, deps.privacyPolicyUrl)}` : exit.body, buttons: [
         console.log(`${TAG} reply send retried`);
         throw new Error(`the reply could not be sent (${outcome.error.code})`);
       }
+      await dropDraft();
       return { status: "not_sent", reason: "send_failed" };
   }
 }

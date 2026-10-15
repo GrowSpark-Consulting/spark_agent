@@ -17,6 +17,8 @@ export type Notice = { status: number; title: string; message: string };
 export const NOTICES = {
   expired: { status: 410, title: "This link has expired", message: "Links to take over a chat work for 24 hours. The chat is not lost: open your inbox to continue." },
   used: { status: 409, title: "This link has already been used", message: "Someone has already taken over this chat, or it is no longer waiting for a person. Open your inbox to see it." },
+  usedByYou: { status: 409, title: "You already took over this chat", message: "You opened this link before, and the chat is yours. Open your inbox to continue it." },
+  unsure: { status: 503, title: "We could not confirm this takeover", message: "The chat may or may not have moved to you. Open your inbox to see who has it before you reply." },
   teammate: { status: 409, title: "A teammate already has this chat", message: "Another team member took it over a moment ago. Open your inbox to see who is replying." },
   external: { status: 409, title: "This chat is handled from a team member using their own WhatsApp number", message: "It is already being handled from their own WhatsApp number, so it cannot be taken over here." },
   notMember: { status: 403, title: "This link is not for your account", message: "It was made for a team member of the business. Sign in to your inbox instead." },

@@ -59,6 +59,9 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
   { call: "GET /api/calendar/google/connect", file: "features/settings/google-calendar.ts" },
   { call: "POST /api/admin/whatsapp/manual", file: "lib/whatsapp/admin-connect.ts" },
   { call: "POST /api/admin/whatsapp/connect-link", file: "lib/whatsapp/admin-connect-link.ts" },
+  { call: "GET /api/agent/settings", file: "features/agent/agent-settings.ts" },
+  { call: "PATCH /api/agent/settings", file: "features/agent/agent-settings.ts" },
+  { call: "GET /api/admin/whatsapp/connections", file: "lib/admin/connections.ts" },
   { call: "GET /api/admin/tenants", file: "lib/admin/billing.ts" },
   { call: "POST /api/admin/tenants/:id/extend-trial", file: "lib/admin/billing.ts" },
   { call: "POST /api/admin/tenants/:id/credits", file: "lib/admin/billing.ts" },
@@ -116,13 +119,14 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   "POST /api/webhooks/payu": "PayU calls it: payment results (verified with PayU before anything changes)",
   "POST /api/billing/cancel": "the Billing screen's Cancel plan button is not built yet (Dhatri)",
   "POST /api/billing/resume": "the Billing screen's Keep my plan button is not built yet (Dhatri)",
-  "GET /api/admin/whatsapp/connections": "not called yet: the admin panel's connection list (Dhatri)",
   // Outbound webhooks (Pro, Dev 2, 0050): the Integrations settings screen is not built yet (Dhatri).
   "GET /api/integrations/webhook": "not called yet: Settings → Integrations (Dhatri)",
   "PUT /api/integrations/webhook": "not called yet: Settings → Integrations (Dhatri)",
   "DELETE /api/integrations/webhook": "not called yet: Settings → Integrations (Dhatri)",
   "POST /api/integrations/webhook/rotate-secret": "not called yet: Settings → Integrations (Dhatri)",
   "POST /api/integrations/webhook/test": "not called yet: Settings → Integrations (Dhatri)",
+  "GET /api/agent/settings": "the Agent settings screen calls it (features/agent/agent-settings.ts), but only against stand-ins and the e2e mock database: delete this line once a success round trip is seen against a real database",
+  "PATCH /api/agent/settings": "the Agent settings screen calls it (features/agent/agent-settings.ts), but only against stand-ins and the e2e mock database: delete this line once a success round trip is seen against a real database",
 };
 
 function sourceFiles(dir: string): string[] {
