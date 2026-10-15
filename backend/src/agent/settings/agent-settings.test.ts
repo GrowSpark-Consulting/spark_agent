@@ -1,4 +1,4 @@
-import type { TenantContext } from "@pakka/types";
+import { AGENT_PERSONA_MAX_LENGTH, AGENT_TRIGGER_KEYS, AgentSettings, UpdateAgentSettings, type TenantContext } from "@pakka/types";
 import { describe, expect, it, vi } from "vitest";
 import { AppError } from "../../lib/errors";
 import { fakeSettingsDb, type Row, type SettingsDbHooks } from "../../test-support/fake-settings-db";
@@ -95,6 +95,61 @@ describe("GET: the current settings, as the agent reads them", () => {
       expect(t.label.length).toBeGreaterThan(5);
       expect(t.example.length).toBeGreaterThan(5);
     }
+  });
+});
+
+describe("the shared contract (@pakka/types): the route and the screen cannot drift", () => {
+  it("answers the shape the screen is typed with, for a GET and for a PATCH", async () => {
+    const w = world({ persona: "Priya", handoffTriggers: [{ key: "gap", enabled: false }] });
+    expect(AgentSettings.safeParse(await getAgentSettings(context(), w.deps)).success).toBe(true);
+    expect(AgentSettings.safeParse(await updateAgentSettings(context(), { tone: "formal" }, w.deps)).success).toBe(true);
+  });
+
+  it("shows the five triggers in the order, and with the keys, of AGENT_TRIGGER_KEYS", () => {
+    expect(HANDOFF_TRIGGERS.map((t) => t.key)).toEqual([...AGENT_TRIGGER_KEYS]);
+  });
+
+  it("accepts and refuses the same bodies as the screen's own schema, apart from the persona's wording (which only the server judges)", async () => {
+    const bodies: unknown[] = [
+      {},
+      { tone: "friendly" },
+      { tone: "formal", privacyNotice: false },
+      { tone: "warm" },
+      { privacyNotice: "yes" },
+      { bookingServiceId: null },
+      { bookingServiceId: "nope" },
+      { persona: null },
+      { handoffTriggers: [{ key: "kb_gap", enabled: false }] },
+      { handoffTriggers: AGENT_TRIGGER_KEYS.map((key) => ({ key, enabled: true })) },
+      { handoffTriggers: [] },
+      { handoffTriggers: [{ key: "stuck", enabled: true }] },
+      { handoffTriggers: [{ key: "gap", enabled: true }] },
+      { handoffTriggers: [{ key: "kb_gap" }] },
+      { handoffTriggers: [{ key: "kb_gap", enabled: true, extra: 1 }] },
+      { handoffTriggers: [{ key: "kb_gap", enabled: true }, { key: "kb_gap", enabled: false }] },
+      { unknown: true },
+      { tone: "formal", tenantId: A },
+      null,
+      [],
+      "tone",
+    ];
+    for (const body of bodies) {
+      const shared = UpdateAgentSettings.safeParse(body).success;
+      const server = await updateAgentSettings(context(), body, world({}).deps).then(
+        () => true,
+        (e: unknown) => {
+          if (e instanceof AppError && e.code === "validation_failed") return false;
+          throw e;
+        },
+      );
+      expect(server, `the server and the shared schema disagree about ${JSON.stringify(body)}`).toBe(shared);
+    }
+  });
+
+  it("is stricter than the shared schema only about the persona: too long, or not a name", async () => {
+    expect(UpdateAgentSettings.safeParse({ persona: "x".repeat(AGENT_PERSONA_MAX_LENGTH + 1) }).success).toBe(true);
+    const error = await failure(updateAgentSettings(context(), { persona: "x".repeat(AGENT_PERSONA_MAX_LENGTH + 1) }, world({}).deps));
+    expect(error.fields?.persona).toContain(String(AGENT_PERSONA_MAX_LENGTH));
   });
 });
 

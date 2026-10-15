@@ -123,6 +123,8 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   "DELETE /api/integrations/webhook": "not called yet: Settings → Integrations (Dhatri)",
   "POST /api/integrations/webhook/rotate-secret": "not called yet: Settings → Integrations (Dhatri)",
   "POST /api/integrations/webhook/test": "not called yet: Settings → Integrations (Dhatri)",
+  "GET /api/agent/settings": "Agent settings screen not connected yet (Dev 3)",
+  "PATCH /api/agent/settings": "Agent settings screen not connected yet (Dev 3)",
 };
 
 function sourceFiles(dir: string): string[] {

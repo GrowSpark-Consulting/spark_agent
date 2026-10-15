@@ -1,4 +1,4 @@
-import type { TenantContext } from "@pakka/types";
+import { AGENT_PERSONA_MAX_LENGTH, AGENT_TRIGGER_KEYS, AgentBookingServiceId, AgentTone, AgentTriggerChanges, type AgentSettings, type AgentTriggerKey, type TenantContext, type UpdateAgentSettings } from "@pakka/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { AppError, zodFieldErrors } from "../../lib/errors";
@@ -28,7 +28,7 @@ const TAG = "[agent-settings]";
 const TRIES = 3;
 
 export interface HandoffTriggerInfo {
-  key: "kb_gap" | "asked_human" | "complaint" | "negotiation" | "hot_lead";
+  key: AgentTriggerKey;
   /** Other names the agent also reads for the same trigger (persona.ts); never written by this route. */
   aliases: readonly string[];
   label: string;
@@ -41,24 +41,16 @@ export interface HandoffTriggerInfo {
  * The five triggers a business can switch off, in the order the screen shows them, with the words for the screen. The agent reads exactly these
  * (persona.ts `TRIGGER_KEYS`; a test keeps the aliases in step). `stuck`, `credits_exhausted` and `opt_out` are handovers the business cannot switch off.
  */
-export const HANDOFF_TRIGGERS: readonly HandoffTriggerInfo[] = [
-  { key: "kb_gap", aliases: ["gap"], label: "Doesn't know the answer twice in a row", example: "Asks something that is not in your knowledge base, twice in the same chat", highPriority: false },
-  { key: "asked_human", aliases: ["human"], label: "Asks for a person", example: "“Can I talk to someone?”", highPriority: true },
-  { key: "complaint", aliases: [], label: "Complaint or an angry customer", example: "“This is the third time nobody called me back!”", highPriority: true },
-  { key: "negotiation", aliases: ["price_negotiation"], label: "Asks for a discount", example: "“Can you do it for 70?” (the assistant never agrees to a price)", highPriority: true },
-  { key: "hot_lead", aliases: ["hot"], label: "A lead turns hot", example: "Budget, timing and area all match: staff get one alert", highPriority: false },
-];
+const TRIGGER_TEXT: Record<AgentTriggerKey, Omit<HandoffTriggerInfo, "key">> = {
+  kb_gap: { aliases: ["gap"], label: "Doesn't know the answer twice in a row", example: "Asks something that is not in your knowledge base, twice in the same chat", highPriority: false },
+  asked_human: { aliases: ["human"], label: "Asks for a person", example: "“Can I talk to someone?”", highPriority: true },
+  complaint: { aliases: [], label: "Complaint or an angry customer", example: "“This is the third time nobody called me back!”", highPriority: true },
+  negotiation: { aliases: ["price_negotiation"], label: "Asks for a discount", example: "“Can you do it for 70?” (the assistant never agrees to a price)", highPriority: true },
+  hot_lead: { aliases: ["hot"], label: "A lead turns hot", example: "Budget, timing and area all match: staff get one alert", highPriority: false },
+};
 
-export interface AgentSettingsView {
-  /** The assistant's name, or null for the default. */
-  persona: string | null;
-  tone: "friendly" | "formal";
-  /** The first AI reply to a contact carries the privacy notice. */
-  privacyNotice: boolean;
-  /** The service the assistant books when the business has several, or null. */
-  bookingServiceId: string | null;
-  handoffTriggers: { key: HandoffTriggerInfo["key"]; label: string; example: string; highPriority: boolean; enabled: boolean }[];
-}
+/** The same five, in the order of the shared AGENT_TRIGGER_KEYS (a key missing from the table above is a compile error). */
+export const HANDOFF_TRIGGERS: readonly HandoffTriggerInfo[] = AGENT_TRIGGER_KEYS.map((key) => ({ key, ...TRIGGER_TEXT[key] }));
 
 export interface AgentSettingsDeps {
   db: SupabaseClient;
@@ -68,18 +60,19 @@ export interface AgentSettingsDeps {
 
 const defaults = (): AgentSettingsDeps => ({ db: supabaseAdmin(), audit: writeAudit });
 
-const TriggerKey = z.enum(HANDOFF_TRIGGERS.map((t) => t.key) as [HandoffTriggerInfo["key"], ...HandoffTriggerInfo["key"][]]);
-
+// The shapes are the shared contract (@pakka/types, agent-settings.ts): the field schemas below are its own, so a key, a tone or the trigger rules cannot differ
+// between the screen and this route. What is added here needs the agent's cleaning or the database: the persona's wording, and the booking service.
+// A body this accepts is an UpdateAgentSettings, and an answer is an AgentSettings: the compiler checks both.
 const Persona = z
   .union([z.string(), z.null()])
   .transform((value, ctx) => {
     const tidy = (value ?? "").replace(/\s+/g, " ").trim();
     if (tidy === "") return null; // clears it
-    if ([...tidy].length > 30) {
-      ctx.addIssue({ code: "custom", message: "Use 30 characters or fewer: a name, not a sentence." });
+    if ([...tidy].length > AGENT_PERSONA_MAX_LENGTH) {
+      ctx.addIssue({ code: "custom", message: `Use ${AGENT_PERSONA_MAX_LENGTH} characters or fewer: a name, not a sentence.` });
       return z.NEVER;
     }
-    if (nameForPrompt(tidy, 30) !== tidy) {
+    if (nameForPrompt(tidy, AGENT_PERSONA_MAX_LENGTH) !== tidy) {
       ctx.addIssue({ code: "custom", message: "Use a name only: letters, numbers, spaces and . ' & -" });
       return z.NEVER;
     }
@@ -89,13 +82,10 @@ const Persona = z
 const UpdateInput = z
   .strictObject({
     persona: Persona,
-    tone: z.enum(["friendly", "formal"]),
+    tone: AgentTone,
     privacyNotice: z.boolean(),
-    bookingServiceId: z.guid().nullable(),
-    handoffTriggers: z
-      .array(z.strictObject({ key: TriggerKey, enabled: z.boolean() }))
-      .min(1)
-      .refine((list) => new Set(list.map((t) => t.key)).size === list.length, "Send each trigger once."),
+    bookingServiceId: AgentBookingServiceId,
+    handoffTriggers: AgentTriggerChanges,
   })
   .partial()
   .refine((input) => Object.keys(input).length > 0, { message: "Send at least one setting to change." });
@@ -126,9 +116,9 @@ const canonical = (value: unknown): string => {
   return JSON.stringify(value) ?? "null";
 };
 
-function view(raw: unknown): AgentSettingsView {
+function view(raw: unknown): AgentSettings {
   const settings = parseReplySettings(raw);
-  const enabled: Record<HandoffTriggerInfo["key"], boolean> = {
+  const enabled: Record<AgentTriggerKey, boolean> = {
     kb_gap: settings.kbGapHandoffEnabled,
     asked_human: settings.askedHumanHandoffEnabled,
     complaint: settings.complaintHandoffEnabled,
@@ -154,11 +144,11 @@ async function readStored(db: SupabaseClient, tenantId: string): Promise<unknown
 }
 
 /** GET /api/agent/settings. Any member. */
-export async function getAgentSettings(context: TenantContext, deps: AgentSettingsDeps = defaults()): Promise<AgentSettingsView> {
+export async function getAgentSettings(context: TenantContext, deps: AgentSettingsDeps = defaults()): Promise<AgentSettings> {
   return view(await readStored(deps.db, context.tenant.id));
 }
 
-function merge(current: Stored, input: z.infer<typeof UpdateInput>): Stored {
+function merge(current: Stored, input: UpdateAgentSettings): Stored {
   const next: Stored = { ...current };
   if (input.persona !== undefined) {
     if (input.persona === null) delete next.persona;
@@ -215,11 +205,11 @@ function auditDiff(before: Stored, after: Stored): Record<string, unknown> {
 }
 
 /** PATCH /api/agent/settings. Owner or admin. Answers the settings as they now stand. */
-export async function updateAgentSettings(context: TenantContext, body: unknown, deps: AgentSettingsDeps = defaults()): Promise<AgentSettingsView> {
+export async function updateAgentSettings(context: TenantContext, body: unknown, deps: AgentSettingsDeps = defaults()): Promise<AgentSettings> {
   requireRole(context, ["owner", "admin"], "change the assistant's settings");
   const parsed = UpdateInput.safeParse(body);
   if (!parsed.success) throw new AppError("validation_failed", "Check the fields and try again.", fieldErrors(parsed.error));
-  const input = parsed.data;
+  const input: UpdateAgentSettings = parsed.data; // the shared contract: a compile error here means the route and the screen's body have drifted
   const tenantId = context.tenant.id;
   const { db } = deps;
 
