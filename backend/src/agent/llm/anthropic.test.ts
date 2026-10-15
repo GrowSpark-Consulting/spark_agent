@@ -139,7 +139,7 @@ describe("what comes back", () => {
       usage: { inputTokens: 800, outputTokens: 250, cacheReadTokens: 3000, cacheWriteTokens: 0 },
     });
     expect(result.latencyMs).toBe(1800);
-    expect(result.costUsd).toBeCloseTo((800 * 2 + 3000 * 0.2 + 250 * 10) / 1_000_000, 8);
+    expect(result.costUsd).toBeCloseTo((800 * 2 + 3000 * 0.1 + 250 * 10) / 1_000_000, 8); // Sonnet 5.5 cache reads are $0.10 per million
   });
 
   it("joins the text blocks and ignores thinking blocks", async () => {
