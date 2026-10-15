@@ -5,6 +5,7 @@
 // Ported from the "Pakka App First Round" design. Logic and mock data are kept as authored;
 // the markup is the original template expressed as JSX.
 
+import Link from "next/link";
 import React, { Fragment } from "react";
 import { DCLogic, createDC, I, L, css } from "@/components/dashboard/runtime";
 import { CRIT, TRIG, LANGS } from "@/fixtures/dashboard/agent";
@@ -17,6 +18,9 @@ export const PakkaAgentProps = {"industry":{"editor":"enum","options":["re","sal
 const IX=k=>(k&&k!=='re'&&PAKKA_IND&&PAKKA_IND[k])||null;
 const DAYS: any=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const sw=on=>({bd:on?'var(--color-accent)':'var(--color-neutral-500)',tbg:on?'var(--color-accent)':'transparent',kl:on?'20px':'2px',kb:on?'#fff':'var(--color-neutral-500)'});
+// Handover reasons that always apply (stuck, credits run out): the backend does not let a business switch them off, so they are not offered.
+const NOT_SWITCHABLE=['stuck','credits'];
+
 class PakkaAgentLogic extends DCLogic {
   state: any = {persona:'Maya',tone:'friendly',langs:{English:true,Tamil:true,Tanglish:true,Malayalam:false,Hindi:false,Telugu:false},open:{Mon:true,Tue:true,Wed:true,Thu:true,Fri:true,Sat:true,Sun:false},w:Object.fromEntries(CRIT.map(c=>[c[0],c[3]])),hot:70,warm:40,trig:Object.fromEntries(TRIG.map(t=>[t[0],t[4]])),mode:'shared',dirty:false,saved:false,wk:'re',openK:'re'};
   componentDidMount(){if(!PAKKA_IND){this._rd=()=>this.forceUpdate();window.addEventListener('pakka-ind-ready',this._rd);}}
@@ -42,10 +46,10 @@ class PakkaAgentLogic extends DCLogic {
       weightTotal:total,weightColor:total===100?'var(--color-neutral-700)':'var(--color-accent-700)',
       hot:s.hot,warm:s.warm,setHot:e=>this.set({hot:Math.max(+e.target.value,s.warm+5)}),setWarm:e=>this.set({warm:Math.min(+e.target.value,s.hot-5)}),
       coldPct:s.warm+'%',warmPct:(s.hot-s.warm)+'%',
-      triggers:TRIG.map(([k,name,ex,high])=>{const on=s.trig[k];return{name,ex:A&&k==='quote'?A.quoteEx:A&&k==='hot'?A.hotEx:ex,high,on,...sw(on),bd:on?'var(--color-accent)':'var(--color-neutral-500)',kl:on?'22px':'2px',flip:()=>this.set({trig:{...s.trig,[k]:!on}})};}),
+      triggers:TRIG.filter(t=>!NOT_SWITCHABLE.includes(t[0])).map(([k,name,ex,high])=>{const on=s.trig[k];return{name,ex:A&&k==='quote'?A.quoteEx:A&&k==='hot'?A.hotEx:ex,high,on,...sw(on),bd:on?'var(--color-accent)':'var(--color-neutral-500)',kl:on?'22px':'2px',flip:()=>this.set({trig:{...s.trig,[k]:!on}})};}),
       modes:[['shared','Shared inbox','Staff reply here in the dashboard. Every message is saved and Maya can pick up later.'],['own','Own number','Staff get a tap-to-chat link and continue from their personal WhatsApp.'],['ask','Ask each time','The staff alert shows both buttons so they choose.']].map(([k,name,desc])=>({name,desc,pick:()=>this.set({mode:k}),bd:s.mode===k?'var(--color-accent)':'var(--color-divider)',bg:s.mode===k?'var(--color-accent-100)':'transparent',dot:s.mode===k?'var(--color-accent)':'transparent'})),
-      save:()=>this.setState({dirty:false,saved:true}),
-      saveNote:s.saved?'Saved. Maya uses this from the next message.':s.dirty?'You have unsaved changes':'All changes saved',
+      // Nothing here is written anywhere yet (no write contract for agent_settings is confirmed), so it never says "Saved".
+      saveNote:'Preview only: these settings are not saved yet, and changing them does not change how your assistant replies.',
     };
   }
 }
@@ -120,20 +124,12 @@ function renderPakkaAgent($v: any) {
             {" "}
             <div className="field">
               <label>
-                Languages Maya replies in
+                Languages
               </label>
               {" "}
-              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                {" "}
-                {L($v.langs).map((l: any, $index: number) => (
-                  <Fragment key={$index}>
-                    <button onClick={l?.flip} style={{ border: `1px solid ${l?.bd ?? ""}`, background: `${l?.bg ?? ""}`, color: `${l?.fg ?? ""}`, font: "inherit", fontSize: "13px", fontWeight: "600", padding: "6px 12px", cursor: "pointer" } as React.CSSProperties}>
-                      {I(l?.name)}
-                    </button>
-                  </Fragment>
-                ))}
-                {" "}
-              </div>
+              <p data-testid="agent-languages" style={{ margin: "0", fontSize: "14px", color: "var(--color-neutral-700)" }}>
+                {I($v.persona)}{" detects each customer’s language and replies in it. There is nothing to switch on or off."}
+              </p>
               {" "}
             </div>
             {" "}
@@ -174,30 +170,15 @@ function renderPakkaAgent($v: any) {
             Business hours
           </h2>
           {" "}
-          {L($v.hours).map((h: any, $index: number) => (
-            <Fragment key={$index}>
-              {" "}
-              <div style={{ display: "grid", gridTemplateColumns: `${$v.hourCols ?? ""}`, gap: "12px", alignItems: "center", padding: "6px 0", borderBottom: "1px solid var(--color-divider)" } as React.CSSProperties}>
-                {" "}
-                <span style={{ fontWeight: "600", fontSize: "14px" }}>
-                  {I(h?.day)}
-                </span>
-                {" "}
-                <button onClick={h?.flip} role="switch" aria-checked={h?.open} aria-label={`${h?.day ?? ""} open`} style={{ width: "44px", height: "26px", border: `2px solid ${h?.bd ?? ""}`, background: `${h?.tbg ?? ""}`, position: "relative", padding: "0", cursor: "pointer" } as React.CSSProperties}>
-                  <span style={{ position: "absolute", top: "2px", left: `${h?.kl ?? ""}`, width: "18px", height: "18px", background: `${h?.kb ?? ""}`, transition: "left .15s" } as React.CSSProperties}></span>
-                </button>
-                {" "}
-                <span style={{ fontSize: "14px", color: `${h?.fg ?? ""}` } as React.CSSProperties}>
-                  {I(h?.text)}
-                </span>
-                {" "}
-              </div>
-              {" "}
-            </Fragment>
-          ))}
+          <span style={{ fontSize: "14px" }}>
+            Your hours are set in Booking setup, and that is the only place they are edited.{" "}
+            <Link href="/dashboard/settings/booking" data-testid="agent-hours-link" style={{ fontWeight: "600" }}>
+              Edit business hours
+            </Link>
+          </span>
           {" "}
           <span style={{ fontSize: "13px", color: "var(--color-neutral-700)" }}>
-            Outside these hours Maya still replies and books visits for the next open slot.
+            Outside these hours {I($v.persona)} still replies and books visits for the next open slot.
           </span>
           {" "}
         </section>
@@ -331,6 +312,9 @@ function renderPakkaAgent($v: any) {
             </Fragment>
           ))}
           {" "}
+          <span data-testid="agent-always-on" style={{ fontSize: "13px", color: "var(--color-neutral-700)", paddingTop: "10px" }}>
+            Some handovers always happen and can’t be switched off: when {I($v.persona)} is stuck, when credits run out, and when a customer opts out.
+          </span>
         </section>
         {" "}
         <section style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
@@ -374,7 +358,7 @@ function renderPakkaAgent($v: any) {
         {" "}
         <div style={{ position: "sticky", bottom: "0", display: "flex", gap: "10px", alignItems: "center", padding: "14px 0", background: "var(--color-bg)", borderTop: "2px solid var(--color-text)" }}>
           {" "}
-          <button className="btn btn-primary" onClick={$v.save}>
+          <button className="btn btn-primary" disabled aria-disabled="true" data-testid="agent-save">
             Save changes
           </button>
           {" "}
