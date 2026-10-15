@@ -1,0 +1,32 @@
+name: Interiors, KNOWN LIMIT, a hot customer in a served pincode is offered no measurement-visit times, because field_visit is not recognised
+description: "Day 7 PR D, KNOWN LIMIT pinned as it behaves today. packs/interiors.json books through bookingModes [field_visit], and the booking engine, BOOKING_KINDS and the migrations all support field_visit, but pipeline/understand.ts (the bookingKind line) reads only slot and site_visit. For interiors the booking kind is null, so plan-booking.ts returns no booking plan: a customer who scored hot (75: budget, scope, area, served pincode) is never offered a time and never booked, and a customer who asks to book gets the same ordinary reply. The mock reply below is what the model writes when no times are in its facts. When the fix lands (the fix PR), this chat should change to the offer and the booking (compare real-estate/51). See the task note of 15 Oct."
+pack: interiors
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { type: service, priceFrom: 1000000, attributes: { price_to: 3000000, areas: ["600042", "600020"] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+turns:
+  - customer: "I need a full home makeover for my 3 BHK apartment, about 1150 sq ft, pincode 600042, budget 12 to 15 lakh"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { property_type: apartment, area_sqft: 1150, scope: full_home, budget: 12-15L, pincode: "600042" }, question: null }
+      reply: "Thank you, I have noted your 3 BHK full home makeover in 600042."
+    expect:
+      reply: { sent: true, buttons: [], notContains: ["10:00 am", "3:00 pm", "5:30 pm"] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: nothing_to_look_up
+      leadTemperature: hot
+      leadScore: 75
+  - customer: "can I book a measurement visit?"
+    mock:
+      extraction: { language: en, intent: book, fields: {}, question: null }
+      reply: "Of course, the team will confirm a time for the measurement visit."
+    expect:
+      reply: { sent: true, buttons: [], notContains: ["10:00 am", "3:00 pm", "5:30 pm"] }
+      aiReplies: 1
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: nothing_to_look_up

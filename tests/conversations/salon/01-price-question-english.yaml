@@ -1,0 +1,26 @@
+name: Salon, English price question is answered from the knowledge base only
+description: "Day 7 PR D. The salon pack on the same pipeline: a price question is answered from the knowledge-base text, with no price the text does not have. A pack changes the wording and the fields, never the rules."
+pack: salon
+kb:
+  - "Haircut for women starts at ₹400. Facial starts at ₹900. Bridal packages are priced after a trial."
+turns:
+  - customer: "How much is a haircut?"
+    mock:
+      extraction:
+        language: en
+        intent: question
+        fields: { services: haircut }
+        question: "What is the price of a haircut?"
+      reply: "A haircut for women starts at ₹400. Would you like to book a time?"
+    expect:
+      extracted: { intent: question, language: en }
+      reply: { sent: true }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      extracted: { fields: { services: haircut } }
+      case: answered_from_kb
+      reply: { contains: ["₹400"], notice: false }
+      leadFields: { services: haircut }
+      leadStage: engaged
