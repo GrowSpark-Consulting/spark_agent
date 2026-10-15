@@ -8,6 +8,7 @@ export * from "./conversation";
 export * from "./dashboard";
 export * from "./errors";
 export * from "./features";
+export * from "./integrations";
 export * from "./onboarding";
 export * from "./pack";
 export * from "./privacy";

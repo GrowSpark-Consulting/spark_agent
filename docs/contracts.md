@@ -61,6 +61,7 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0045_notify_attempts` | A keyed send is claimed before WhatsApp is asked (closes the Day 6 reply-key note, section 3.1): `notify_attempts` (server only; `message_id` = the keyed message id, `status` `sending` or `released`), `claim_notify_attempt(tenant, message, kind)` (`claimed`, `sent` when the message is recorded, `in_doubt` when an earlier attempt neither recorded nor released it) and `release_notify_attempt(tenant, message)` (after a refusal for certain). Server only |
 | `0046_rls_tightening` | The Day 7 row-level-security review: `consent_logs` loses its browser INSERT (the server's functions write every entry); staff update only the leads assigned to them and cannot reassign them (owners and admins any lead); `anon` loses every write grant on every table and view, and on tables created later. (0045 is the notify claim, #201) |
 | `0047_message_media` | The private storage bucket `message-media` (50 MB a file, any type) for a customer's photos, voice notes and documents once downloaded from WhatsApp, at `<tenant_id>/<conversation_id>/<message_id>.<ext>` (`backend/src/lib/storage.ts` builds the path). A member reads the files of the business its first folder names (checked inline in the policy, then `is_member`); only the server writes (no insert, update or delete policy). (0045 is #201, 0046 is #203) |
+| `0050_outbound_webhooks` | Outbound webhooks (Pro): `webhook_endpoints` (one per business: https URL, wanted events, `secret_enc` with ENCRYPTION_KEY, `secret_hint`, last success and failure) and `webhook_deliveries` (an outbox: business, event, record id, status `pending`/`delivered`/`failed`/`dropped`, attempts, next attempt, the claiming run; no customer data). A trigger on `leads` (insert; stage reaching `qualified`), `bookings` (reaching `confirmed`; `confirmed` → `cancelled`) and `handoffs` (insert) queues `lead.created`, `lead.qualified`, `booking.confirmed`, `booking.cancelled`, `handoff.opened` in the same transaction, whoever wrote, only for an active endpoint that wants the event, once per record (unique business, event, record); a failure in it never fails the write. `save_webhook_endpoint`, `rotate_webhook_secret`, `delete_webhook_endpoint` (each audited: `webhook_endpoint.created`/`updated` with the host and events, never the path; `secret_rotated`; `deleted`); `claim_webhook_deliveries(run, limit)` (5-minute claim, skip locked; removes rows done over 30 days ago) and `record_webhook_attempt(id, run, outcome, status, error)` (only the claiming run, once; a failure retries after 1, 5, 15 min, 1, 3, 6, 12 h, then `failed`). Server only |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -864,7 +865,7 @@ other origins get no CORS headers.
   switch whatever the state), `requiredPlan` (the cheapest of starter, growth and pro that includes a locked one),
   `disabledReason`, `creditsPerMonth` (its `<kind>.sent` audit rows in the last 30 days times its credit cost; null with a
   `creditNote` for features that cost nothing extra), `settings` and `control`. Disabled, with the reason shown: features
-  with no code yet (`working_hours_mode`, `booking_confirmation`, `auto_topup`, `outbound_webhooks`, `quote_auto_send`,
+  with no code yet (`working_hours_mode`, `booking_confirmation`, `auto_topup`, `quote_auto_send`,
   `quote_followup`, `pretrip_info`: "Not available yet."), `review_request` without a review link, `staff_alerts` without an
   owner or admin alert number, `daily_agenda` without an owner alert number, `booking` without an active service.
 - `PATCH /api/features/:key` `{ enabled?, settings? }` → the `FeatureRow` as it now stands (owner or admin). `settings` is
@@ -955,6 +956,38 @@ Plain lists (leads, conversations, bookings, services) are read directly under R
   customer's last message while a handoff is open, `assignedTo` = the owner's user id); `todayBookings` (held and confirmed,
   a hold that ran out left out; `place` = `details.place` else the service). Staff get their own hot leads
   (`leads.owner_user_id`) and their own calendar's bookings (`resources.user_id`); the month's numbers are the business's.
+
+**Outbound webhooks (Pro; built Day 7; `backend/src/outbound-webhooks`, migration 0050, types `packages/types/src/integrations.ts`).**
+A business's CRM or sheet hears about its leads, bookings and handoffs. Owner or admin:
+
+- `GET /api/integrations/webhook` → `WebhookSettings` `{ inPlan, sending, endpoint }`. `sending` is true only while the plan
+  includes `outbound_webhooks`, its switch is on (Features), the business is live and the endpoint is active. The endpoint
+  shows its URL, events, `secretHint` (last 4 characters) and last success and failure, never the secret.
+- `PUT /api/integrations/webhook` `{ url, events }` → `WebhookEndpointSaved` `{ endpoint, secret }`. `secret` (`whsec_...`) is
+  returned once, when the endpoint is created; a change keeps the secret and answers `secret: null`. `url`: https, port 443
+  or 8443, no user name or password, not a private, loopback, link-local or reserved address or a local name
+  (`validation_failed` with `fields.url`). `events`: one or more of the five. Not in the plan: `plan_required` (403).
+- `POST /api/integrations/webhook/rotate-secret` → `WebhookSecret` `{ secret, secretHint }`; the old one stops working at
+  once. No endpoint: `not_found`.
+- `POST /api/integrations/webhook/test` → `WebhookTestResult` `{ delivered, status, error }`: a signed `ping` now; changes nothing.
+- `DELETE /api/integrations/webhook` → 204, with anything still queued.
+
+What the receiver gets: `POST` with `content-type: application/json`, `user-agent: PakkaAgent-Webhooks/1`,
+`X-Pakka-Event` (the type), `X-Pakka-Event-Id` (the same on every retry: dedupe on it) and
+`X-Pakka-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" with the secret>`. The receiver recomputes the
+HMAC over the raw body, compares in constant time and refuses a `t` more than 5 minutes away
+(`backend/src/outbound-webhooks/signing.ts` `verifySignature`). Body:
+`{ id, type, occurredAt, businessId, data }`, where `data` is the record as it is when sent:
+`lead.*` → `{ lead: { id, stage, score, temperature, fields, createdAt }, contact: { id, name, phone } }`;
+`booking.*` → `{ booking: { id, status, startAt, endAt, service, resource, leadId }, contact }`;
+`handoff.opened` → `{ handoff: { id, reason, priority, conversationId }, contact }`; `ping` → `{}`.
+
+Delivery: the `outbound-webhooks` job (every minute, one run at a time) claims up to 50 due events and sends them side by side,
+10 s each, never following a redirect, and connects only after checking every address the name resolves to (DNS rebinding).
+A 2xx is delivered; anything else is tried again (1, 5, 15 minutes, 1, 3, 6, 12 hours), then `failed`. At least once: a step
+retried after its POST sends the same event id again. An event is `dropped` (never sent later) when its record is gone (a
+customer's deletion request), the endpoint is off, or the business may not send webhooks (not Pro, switched off, paused).
+The URL and the receiver's answer are never logged; the audit has the host only.
 
 ## 7. Rules
 

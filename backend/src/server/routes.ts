@@ -32,6 +32,7 @@ import { answerGap, createFaq, deleteFaq, dismissGap, listGaps, updateFaq } from
 import { serverEnv } from "../lib/env";
 import { requireRole, resolveTenant } from "../lib/tenant";
 import { createTemplate } from "../notify/templates";
+import { deleteWebhookEndpoint, getWebhookSettings, rotateWebhookSecret, saveWebhookEndpoint, testWebhook } from "../outbound-webhooks/endpoint";
 import { adminRoute, authenticate, optionalJson, readJson, requireTenant, tenantRoute, type UserClientFactory } from "./auth";
 
 // Every HTTP endpoint of the API. A route only parses the request and calls a backend service;
@@ -129,6 +130,23 @@ const contactDeletionGet: RouteHandler = (request, deps, params) =>
 const contactDeletionPost: RouteHandler = async (request, deps, params) => {
   const { context } = await requireTenant(request, deps.userClient);
   return Response.json(await deleteContactData(context, params.id));
+};
+// Outbound webhooks (Pro; outbound-webhooks/endpoint.ts, 0050). Owner or admin.
+// → WebhookSettings.
+const webhookGet = tenantRoute(({ context }) => getWebhookSettings(context));
+// { url, events } → WebhookEndpointSaved; the secret only when the endpoint is new (shown once).
+const webhookPut = tenantRoute(({ context, body }) => saveWebhookEndpoint(context, body));
+// → 204: the endpoint and anything still queued for it.
+const webhookDelete = tenantRoute(({ context }) => deleteWebhookEndpoint(context));
+// no body → WebhookSecret; the old secret stops working at once. Body-less, so it authenticates itself.
+const webhookRotate: RouteHandler = async (request, deps) => {
+  const { context } = await requireTenant(request, deps.userClient);
+  return Response.json(await rotateWebhookSecret(context));
+};
+// no body → WebhookTestResult: a signed ping to the saved endpoint, now.
+const webhookTest: RouteHandler = async (request, deps) => {
+  const { context } = await requireTenant(request, deps.userClient);
+  return Response.json(await testWebhook(context));
 };
 // → AccountStatus: the balance, the meter's denominator, renewal and trial dates, and whether the assistant is paused. Any member.
 const billingBalance = tenantRoute(({ context }) => accountStatus(context));
@@ -322,6 +340,13 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/dashboard/summary", browser: true, methods: { GET: (request, deps) => homeSummary(request, deps.userClient) } },
   { path: "/api/features", browser: true, methods: { GET: (request, deps) => featureList(request, deps.userClient) } },
   { path: "/api/features/:key", browser: true, methods: { PATCH: featureUpdate } },
+  {
+    path: "/api/integrations/webhook",
+    browser: true,
+    methods: { GET: (request, deps) => webhookGet(request, deps.userClient), PUT: (request, deps) => webhookPut(request, deps.userClient), DELETE: (request, deps) => webhookDelete(request, deps.userClient) },
+  },
+  { path: "/api/integrations/webhook/rotate-secret", browser: true, methods: { POST: webhookRotate } },
+  { path: "/api/integrations/webhook/test", browser: true, methods: { POST: webhookTest } },
   { path: "/api/kb/documents", browser: true, maxBodyBytes: KB_UPLOAD_MAX_BODY_BYTES, methods: { POST: kbUpload } },
   { path: "/api/kb/documents/:id", browser: true, methods: { DELETE: kbDeleteDocument } },
   { path: "/api/kb/faqs", browser: true, methods: { POST: (request, deps) => kbCreateFaq(request, deps.userClient) } },

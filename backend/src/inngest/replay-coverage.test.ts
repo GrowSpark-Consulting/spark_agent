@@ -81,6 +81,13 @@ const PROOFS: Record<string, Proof[]> = {
     { file: "backend/src/media/download.test.ts", test: "replay: the same event twice, the second run finding the first one's record, saves one file at one path" },
     { file: "backend/src/media/download.test.ts", test: "a message that already has its file does nothing: no Graph call, no upload, no write" },
   ],
+  // Claims: each delivery is handed to one run and recorded once by it; a receiver dedupes a resend on the event id.
+  "outbound-webhooks": [
+    INNGEST("outbound-webhooks", "replay: the same run replayed claims nothing new and sends nothing again"),
+    { file: "supabase/tests/outbound_webhooks.test.sql", test: "and nothing is handed out twice" },
+    { file: "supabase/tests/outbound_webhooks.test.sql", test: "recording it again changes nothing" },
+    { file: "backend/src/outbound-webhooks/deliver.test.ts", test: "replay: a run that no longer holds the delivery records nothing (null)" },
+  ],
 };
 
 const WEBHOOKS: Record<string, Proof[]> = {
