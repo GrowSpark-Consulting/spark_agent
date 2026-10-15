@@ -30,6 +30,7 @@ import { sendStaffReply } from "../conversations/staff-reply";
 import { conversationTemplates } from "../conversations/templates";
 import { listFeatures, updateFeature } from "../features/toggles";
 import { deleteDocument, KB_UPLOAD_MAX_BODY_BYTES, uploadDocument } from "../kb/documents";
+import { importWebsite } from "../kb/website";
 import { auditQuietly } from "../lib/audit";
 import { answerGap, createFaq, deleteFaq, dismissGap, listGaps, updateFaq } from "../kb/faqs";
 import { serverEnv } from "../lib/env";
@@ -248,6 +249,10 @@ const kbDeleteDocument: RouteHandler = (request, deps, params) =>
     { status: 204 },
   )(request, deps.userClient, params);
 
+// { url } → 202 ImportedWebsite. Owner or admin. One web page, read on the server and stored as a `processing` document (the ingest job makes it searchable, like an upload);
+// importing the same address again replaces that page's content (`conflict` while the last import is still processing). Refusals are `validation_failed` with fields.url, a
+// site that cannot be reached is `upstream_failed`, more than 20 imports an hour is `rate_limited`. No credits.
+const kbImportSite = tenantRoute(({ context, body }) => importWebsite(context, body), { status: 202 });
 // { q, a } → 201 { id, q, a }. Owner or admin. A question the business already has is `conflict`; an embedding failure is `upstream_failed`.
 const kbCreateFaq = tenantRoute(
   async ({ context, body }) => {
@@ -393,6 +398,7 @@ export const ROUTES: readonly Route[] = [
   },
   { path: "/api/integrations/webhook/rotate-secret", browser: true, methods: { POST: webhookRotate } },
   { path: "/api/integrations/webhook/test", browser: true, methods: { POST: webhookTest } },
+  { path: "/api/onboarding/import-site", browser: true, methods: { POST: (request, deps) => kbImportSite(request, deps.userClient) } },
   { path: "/api/kb/documents", browser: true, maxBodyBytes: KB_UPLOAD_MAX_BODY_BYTES, methods: { POST: kbUpload } },
   { path: "/api/kb/documents/:id", browser: true, methods: { DELETE: kbDeleteDocument } },
   { path: "/api/kb/faqs", browser: true, methods: { POST: (request, deps) => kbCreateFaq(request, deps.userClient) } },

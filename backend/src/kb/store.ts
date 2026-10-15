@@ -44,6 +44,17 @@ export interface OpenGap {
 export interface KbStore {
   /** A new upload for the business, `processing`, with its text. */
   insertUpload(tenantId: string, input: { title: string; body: string }): Promise<{ id: string; createdAt: string }>;
+  /** A web page imported for the business (`website`, from `url`), `processing`, with its text. */
+  insertWebsite(tenantId: string, input: { url: string; title: string; body: string }): Promise<{ id: string; createdAt: string }>;
+  /** The business's imports of this address, oldest first. Normally one; more only if two imports ran at once. */
+  findWebsiteDocuments(tenantId: string, url: string): Promise<{ id: string; status: KbDocumentStatus; createdAt: string }[]>;
+  /**
+   * Puts a new import of the same address in the document: new title and text, `processing` again, no error. False when it is not the business's, not a web page, or
+   * still `processing` (then nothing changes: an import still running would otherwise mark the old text ready and the new text would never be read).
+   */
+  replaceWebsite(tenantId: string, id: string, input: { title: string; body: string }): Promise<boolean>;
+  /** How many web pages the business imported since this time (the audit log's `kb.website_imported` rows). */
+  countWebsiteImportsSince(tenantId: string, sinceIso: string): Promise<number>;
   /** How many uploaded or imported documents the business has (FAQs are not counted). */
   countDocuments(tenantId: string): Promise<number>;
   getDocument(tenantId: string, id: string): Promise<KbDocument | null>;
@@ -138,6 +149,50 @@ export function createKbStore(db: SupabaseClient = supabaseAdmin(), { timeoutMs 
       if (error) fail("insert document", error);
       const row = InsertedRow.parse(data);
       return { id: row.id, createdAt: new Date(row.created_at).toISOString() };
+    },
+
+    async insertWebsite(tenantId, { url, title, body }) {
+      const { data, error } = await run("insert web page", (signal) =>
+        db.from("kb_documents").insert({ tenant_id: tenantId, source_type: "website", source_url: url, title, body, status: "processing" }).select("id, created_at").abortSignal(signal).single(),
+      );
+      if (error) fail("insert web page", error);
+      const row = InsertedRow.parse(data);
+      return { id: row.id, createdAt: new Date(row.created_at).toISOString() };
+    },
+
+    async findWebsiteDocuments(tenantId, url) {
+      const { data, error } = await run("find web page", (signal) =>
+        db.from("kb_documents").select("id, status, created_at").eq("tenant_id", tenantId).eq("source_type", "website").eq("source_url", url).order("created_at", { ascending: true }).abortSignal(signal),
+      );
+      if (error) fail("find web page", error);
+      return z
+        .array(z.object({ id: z.string(), status: z.enum(["processing", "ready", "failed"]), created_at: z.string() }))
+        .parse(data ?? [])
+        .map((row) => ({ id: row.id, status: row.status, createdAt: new Date(row.created_at).toISOString() }));
+    },
+
+    async replaceWebsite(tenantId, id, { title, body }) {
+      const { data, error } = await run("replace web page", (signal) =>
+        db
+          .from("kb_documents")
+          .update({ title, body, status: "processing", error: null })
+          .eq("id", id)
+          .eq("tenant_id", tenantId)
+          .eq("source_type", "website")
+          .neq("status", "processing")
+          .select("id")
+          .abortSignal(signal),
+      );
+      if (error) fail("replace web page", error);
+      return Array.isArray(data) && data.length > 0;
+    },
+
+    async countWebsiteImportsSince(tenantId, sinceIso) {
+      const { count, error } = await run("count web page imports", (signal) =>
+        db.from("audit_logs").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("action", "kb.website_imported").gte("created_at", sinceIso).abortSignal(signal),
+      );
+      if (error) fail("count web page imports", error);
+      return count ?? 0;
     },
 
     async countDocuments(tenantId) {

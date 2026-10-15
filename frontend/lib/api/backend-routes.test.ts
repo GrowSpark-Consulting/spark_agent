@@ -128,6 +128,7 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   "POST /api/integrations/webhook/test": "not called yet: Settings → Integrations (Dhatri)",
   "GET /api/agent/settings": "the Agent settings screen calls it (features/agent/agent-settings.ts), but only against stand-ins and the e2e mock database: delete this line once a success round trip is seen against a real database",
   "PATCH /api/agent/settings": "the Agent settings screen calls it (features/agent/agent-settings.ts), but only against stand-ins and the e2e mock database: delete this line once a success round trip is seen against a real database",
+  "POST /api/onboarding/import-site": "Website import screen not connected yet (Dev 3)",
 };
 
 function sourceFiles(dir: string): string[] {

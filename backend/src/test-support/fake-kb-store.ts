@@ -13,6 +13,8 @@ export interface FakeDoc {
   status: KbDocumentStatus;
   error: string | null;
   createdAt: string;
+  /** The address a web page was imported from. */
+  sourceUrl: string | null;
 }
 export interface FakeGap {
   id: string;
@@ -33,7 +35,11 @@ export function fakeKbStore(seed: Partial<FakeDoc>[] = [], gapSeed: Partial<Fake
   const docs = new Map<string, FakeDoc>();
   const chunks = new Map<string, FakeChunk[]>();
   const calls: string[] = [];
-  const state = { failNext: new Set<keyof KbStore>(), counter: 0, gone: new Set<string>(), now: () => Date.now() };
+  const state = { failNext: new Set<keyof KbStore>(), counter: 0, gone: new Set<string>(), now: () => Date.now(), recentImports: 0 };
+  /** Every counting of a business's recent web page imports, with the business and the time it was asked from. */
+  const importCounts: { tenantId: string; since: string }[] = [];
+  /** Every business any call named, so a test can say 'this call was for this business only'. */
+  const seenTenants = new Set<string>();
 
   const add = (partial: Partial<FakeDoc>): FakeDoc => {
     const doc: FakeDoc = {
@@ -45,6 +51,7 @@ export function fakeKbStore(seed: Partial<FakeDoc>[] = [], gapSeed: Partial<Fake
       status: partial.status ?? "processing",
       error: partial.error ?? null,
       createdAt: partial.createdAt ?? new Date(1_700_000_000_000 + state.counter * 1000).toISOString(),
+      sourceUrl: partial.sourceUrl ?? null,
     };
     docs.set(doc.id, doc);
     return doc;
@@ -82,6 +89,34 @@ export function fakeKbStore(seed: Partial<FakeDoc>[] = [], gapSeed: Partial<Fake
       maybeFail("insertUpload");
       const doc = add({ tenantId, title, body, sourceType: "upload", status: "processing" });
       return { id: doc.id, createdAt: doc.createdAt };
+    },
+    async insertWebsite(tenantId, { url, title, body }) {
+      calls.push("insertWebsite");
+      maybeFail("insertWebsite");
+      const doc = add({ tenantId, title, body, sourceType: "website", sourceUrl: url, status: "processing" });
+      return { id: doc.id, createdAt: doc.createdAt };
+    },
+    async findWebsiteDocuments(tenantId, url) {
+      calls.push("findWebsiteDocuments");
+      maybeFail("findWebsiteDocuments");
+      return [...docs.values()]
+        .filter((d) => d.tenantId === tenantId && d.sourceType === "website" && d.sourceUrl === url)
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+        .map((d) => ({ id: d.id, status: d.status, createdAt: d.createdAt }));
+    },
+    async replaceWebsite(tenantId, id, { title, body }) {
+      calls.push("replaceWebsite");
+      maybeFail("replaceWebsite");
+      const doc = mine(tenantId, id);
+      if (!doc || doc.sourceType !== "website" || doc.status === "processing") return false;
+      Object.assign(doc, { title, body, status: "processing", error: null });
+      return true;
+    },
+    async countWebsiteImportsSince(tenantId, sinceIso) {
+      calls.push("countWebsiteImportsSince");
+      maybeFail("countWebsiteImportsSince");
+      importCounts.push({ tenantId, since: sinceIso });
+      return state.recentImports;
     },
     async countDocuments(tenantId) {
       calls.push("countDocuments");
@@ -203,5 +238,14 @@ export function fakeKbStore(seed: Partial<FakeDoc>[] = [], gapSeed: Partial<Fake
     },
   };
 
-  return { store, docs, chunks, gaps, calls, state, add };
+  // Every call that names a business records it.
+  for (const name of Object.keys(store) as (keyof KbStore)[]) {
+    const original = store[name] as (...args: unknown[]) => unknown;
+    (store as unknown as Record<string, unknown>)[name] = (...args: unknown[]) => {
+      if (typeof args[0] === "string") seenTenants.add(args[0]);
+      return original(...args);
+    };
+  }
+
+  return { store, docs, chunks, gaps, calls, state, add, importCounts, tenantsSeen: () => new Set(seenTenants) };
 }
