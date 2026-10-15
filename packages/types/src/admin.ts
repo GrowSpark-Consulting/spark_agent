@@ -10,6 +10,7 @@ import { ConnectionMethod, ConnectionStatus } from "./connection";
 //   PATCH /api/admin/features/:key                 AdminFeatureInput → AdminFeature
 //   GET   /api/admin/payments/refunds              → RefundCandidate[]
 //   GET   /api/admin/whatsapp/connections          → AdminConnection[] (Day 7)
+//   GET   /api/admin/metrics                       → AdminMetrics (Day 8)
 
 export const AdminTenant = z.object({
   id: z.string(),
@@ -79,6 +80,35 @@ export type AdminFeatureInput = z.infer<typeof AdminFeatureInput>;
 
 export const AdminFeature = z.object({ key: z.string(), name: z.string(), description: z.string(), defaultOn: z.boolean() });
 export type AdminFeature = z.infer<typeof AdminFeature>;
+
+/** One window of the admin view's business numbers. The demo and test businesses are not counted. */
+export const AdminMetricsWindow = z.object({
+  days: z.number().int(),
+  /** Credits spent on replies and templates (the gross draw). */
+  creditsSpent: z.number().int(),
+  /** The models' estimated cost over the window, in dollars and in rupees at `usdInr`; it includes calls that spend no credit. */
+  aiCostUsd: z.number(),
+  aiCostInr: z.number(),
+  aiCalls: z.number().int(),
+  /** aiCostInr / creditsSpent, to 3 places; null with no credits spent. */
+  costPerCreditInr: z.number().nullable(),
+  /** Businesses created in the window, and how many of those have paid for a plan. */
+  trialsStarted: z.number().int(),
+  trialsPaid: z.number().int(),
+  /** trialsPaid / trialsStarted as a percentage, to 1 place; null with no trials. */
+  trialToPaidPct: z.number().nullable(),
+});
+export type AdminMetricsWindow = z.infer<typeof AdminMetricsWindow>;
+
+export const AdminMetrics = z.object({
+  windows: z.array(AdminMetricsWindow),
+  /** What one credit may cost us (the blueprint's assumption), in rupees. */
+  targetCostPerCreditInr: z.number(),
+  /** Rupees to the dollar: a stated assumption, not a looked-up rate. */
+  usdInr: z.number(),
+  asOf: z.string(),
+});
+export type AdminMetrics = z.infer<typeof AdminMetrics>;
 
 /** A payment kept but flagged for a refund (paid twice, or for a plan no longer the business's). Refund it in PayU's dashboard. */
 export const RefundCandidate = z.object({
