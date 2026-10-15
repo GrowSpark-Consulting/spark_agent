@@ -254,6 +254,15 @@ staging can break the language model or WhatsApp for named test businesses only 
 Every other business behaves as usual. Both variables go together, an unknown failure or a business that is not an id
 fails the deploy, and so does injection alongside `PAYU_MODE=live`: a deployment that takes real money is production.
 
+### Webhook burst test (Day 8)
+
+Meta retries a webhook that answers slowly or with an error, and the 10-second reply target starts when it arrives, so the
+route must answer 200 quickly under a burst. `pnpm --filter @pakka/backend webhook:burst -- <API origin> [total=200] [concurrency=20]`
+sends signed webhooks for a phone number id no business owns (the server checks the signature and looks the number up,
+and stores and sends nothing). It prints status counts and p50, p95 and max in ms, and exits 1 unless every answer was 200 and
+p95 is at most 2000 ms. `META_APP_SECRET` must be in the environment: run it through `railway run` so the secret is not copied
+to a laptop.
+
 ## DNS for pakkaagent.in
 
 Add at the domain's DNS provider. Vercel and Railway show the exact target for each custom domain
