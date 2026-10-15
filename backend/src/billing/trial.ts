@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { inngest } from "../inngest/client";
+import { auditQuietly } from "../lib/audit";
 import { supabaseAdmin } from "../lib/supabase-admin";
 
 // Server-only. Call after verifying the signed-up user's session: userId comes from that session,
@@ -62,6 +63,11 @@ export async function createTrialTenant(input: z.input<typeof Input>): Promise<T
     trialEndsAt: row.trial_ends_at,
     created: row.created,
   };
+
+  // A new business is a business-traceable action (Day 7 audit coverage): the owner who signed up made it. A repeat signup made nothing.
+  if (signup.created) {
+    await auditQuietly({ tenantId: signup.tenantId, actor: userId, action: "tenant.created", entity: "tenant", entityId: signup.tenantId, diff: { plan: "trial", vertical } });
+  }
 
   // Starts the trial-lifecycle job. The fixed event id makes Inngest drop duplicates, so sending again
   // on a repeat signup is safe and recovers a lost first send. The business already exists and is

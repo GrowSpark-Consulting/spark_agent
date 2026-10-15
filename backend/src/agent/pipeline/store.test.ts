@@ -671,3 +671,32 @@ describe("recordedMessageIds", () => {
     await expect(store.recordedMessageIds(T, CONV, IDS)).rejects.toThrow();
   });
 });
+
+describe("claimedMessageIds (notify_attempts, Dev 2's table, read only)", () => {
+  const IDS = ["920a027e-6b11-50c5-847c-16d2b620a79e", "78e5eae4-3d34-557c-a246-fa8d874a460d"];
+
+  it("reads only this business's claims that are still 'sending', by message id", async () => {
+    const { db, calls } = fakeDb(() => ({ data: [] }));
+    await createPipelineStore(db).claimedMessageIds(T, IDS);
+    expect(calls[0].table).toBe("notify_attempts");
+    tenantFilter(calls[0]);
+    expect(filter(calls[0], "message_id")).toEqual(["message_id", "in", IDS]);
+    expect(filter(calls[0], "status")).toEqual(["status", "eq", "sending"]);
+  });
+
+  it("is the message ids that are claimed", async () => {
+    const store = createPipelineStore(fakeDb(() => ({ data: [{ message_id: IDS[0] }] })).db);
+    expect(await store.claimedMessageIds(T, IDS)).toEqual([IDS[0]]);
+  });
+
+  it("asks nothing for no ids", async () => {
+    const { db, calls } = fakeDb(() => ({ data: [] }));
+    expect(await createPipelineStore(db).claimedMessageIds(T, [])).toEqual([]);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("does not hide a database error, and does not trust a row of the wrong shape", async () => {
+    await expect(createPipelineStore(fakeDb(() => ({ error: { message: "boom", code: "XX000" } })).db).claimedMessageIds(T, IDS)).rejects.toThrow();
+    await expect(createPipelineStore(fakeDb(() => ({ data: [{ message_id: 5 }] })).db).claimedMessageIds(T, IDS)).rejects.toThrow();
+  });
+});

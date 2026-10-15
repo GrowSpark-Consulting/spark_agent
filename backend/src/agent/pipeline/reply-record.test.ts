@@ -51,19 +51,19 @@ describe("replyRecordIds", () => {
 describe("createSentReplyRecorded", () => {
   it("asks the store, for this business and this chat, which of those ids are recorded messages, and says WHICH customer messages a recorded reply belongs to", async () => {
     const recordedMessageIds = vi.fn(async () => [keyedMessageId(T, "ai_reply", replyKey(M2))]);
-    const recorded = createSentReplyRecorded({ recordedMessageIds });
+    const recorded = createSentReplyRecorded({ recordedMessageIds, claimedMessageIds: async () => [] });
     expect(await recorded(T, CONV, [M1, M2])).toEqual([M2]);
     expect(recordedMessageIds).toHaveBeenCalledWith(T, CONV, replyRecordIds(T, [M1, M2]));
   });
 
   it("a reply recorded under the template fallback key belongs to its message too", async () => {
-    const recorded = createSentReplyRecorded({ recordedMessageIds: async () => [keyedMessageId(T, "ai_reply", `${replyKey(M1)}#template`)] });
+    const recorded = createSentReplyRecorded({ recordedMessageIds: async () => [keyedMessageId(T, "ai_reply", `${replyKey(M1)}#template`)], claimedMessageIds: async () => [] });
     expect(await recorded(T, CONV, [M1, M2])).toEqual([M1]);
   });
 
   it("is nothing when none is there, and does not ask at all for no messages", async () => {
     const recordedMessageIds = vi.fn(async () => [] as string[]);
-    const recorded = createSentReplyRecorded({ recordedMessageIds });
+    const recorded = createSentReplyRecorded({ recordedMessageIds, claimedMessageIds: async () => [] });
     expect(await recorded(T, CONV, [M1])).toEqual([]);
     recordedMessageIds.mockClear();
     expect(await recorded(T, CONV, [])).toEqual([]);
@@ -71,7 +71,48 @@ describe("createSentReplyRecorded", () => {
   });
 
   it("does not hide a store that cannot be read: it throws, and the handler decides (it fails open)", async () => {
-    const recorded = createSentReplyRecorded({ recordedMessageIds: async () => Promise.reject(new Error("db down")) });
+    const recorded = createSentReplyRecorded({ recordedMessageIds: async () => Promise.reject(new Error("db down")), claimedMessageIds: async () => [] });
     await expect(recorded(T, CONV, [M1])).rejects.toThrow("db down");
+  });
+});
+
+describe("createSentReplyRecorded: a claim notify.send made before it asked WhatsApp (notify_attempts, 'sending') says the reply MAY have gone out", () => {
+  const none = async () => [] as string[];
+
+  it("a claim on the newest message's key belongs to that message, and the claims are asked for this business with the same ids", async () => {
+    const claimedMessageIds = vi.fn(async () => [keyedMessageId(T, "ai_reply", replyKey(M2))]);
+    const recorded = createSentReplyRecorded({ recordedMessageIds: none, claimedMessageIds });
+    expect(await recorded(T, CONV, [M1, M2])).toEqual([M2]);
+    expect(claimedMessageIds).toHaveBeenCalledWith(T, replyRecordIds(T, [M1, M2]));
+  });
+
+  it("a claim under the template fallback key counts too", async () => {
+    const recorded = createSentReplyRecorded({ recordedMessageIds: none, claimedMessageIds: async () => [keyedMessageId(T, "ai_reply", `${replyKey(M1)}#template`)] });
+    expect(await recorded(T, CONV, [M1, M2])).toEqual([M1]);
+  });
+
+  it("a recorded row and a claim for different messages are both reported, in the order of the messages", async () => {
+    const recorded = createSentReplyRecorded({
+      recordedMessageIds: async () => [keyedMessageId(T, "ai_reply", replyKey(M2))],
+      claimedMessageIds: async () => [keyedMessageId(T, "ai_reply", replyKey(M1))],
+    });
+    expect(await recorded(T, CONV, [M1, M2])).toEqual([M1, M2]);
+  });
+
+  it("a claim for a message that is not one of these is not reported", async () => {
+    const recorded = createSentReplyRecorded({ recordedMessageIds: none, claimedMessageIds: async () => [keyedMessageId(T, "ai_reply", replyKey("a0000000-0000-0000-0000-0000000000ff"))] });
+    expect(await recorded(T, CONV, [M1, M2])).toEqual([]);
+  });
+
+  it("a claim that cannot be read is not hidden: it throws, and the handler fails open", async () => {
+    const recorded = createSentReplyRecorded({ recordedMessageIds: none, claimedMessageIds: async () => Promise.reject(new Error("db down")) });
+    await expect(recorded(T, CONV, [M1])).rejects.toThrow("db down");
+  });
+
+  it("asks for neither for no messages", async () => {
+    const claimedMessageIds = vi.fn(none);
+    const recorded = createSentReplyRecorded({ recordedMessageIds: none, claimedMessageIds });
+    expect(await recorded(T, CONV, [])).toEqual([]);
+    expect(claimedMessageIds).not.toHaveBeenCalled();
   });
 });

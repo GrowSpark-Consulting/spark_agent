@@ -29,6 +29,8 @@ export interface CalendarOptions {
   takenWhenChosen: string[];
   /** A confirmed booking the customer already has (ISO UTC start). */
   existing?: string;
+  /** The pincodes the chat's technician works in (a resource's service area in Dev 2's findSlots). None: works everywhere. */
+  workPincodes?: string[];
   /** A booking was confirmed: the lead is now booked (Dev 2's confirm_booking does this in the database). */
   onConfirm: () => void;
 }
@@ -50,7 +52,9 @@ export function createCalendar(options: CalendarOptions) {
   const byId = (id: string) => [...bookings.values()].find((b) => b.id === id);
 
   const port: SchedulingPort = {
-    async findSlots(_tenantId, { serviceId, from, to }): Promise<FoundSlot[]> {
+    async findSlots(_tenantId, { serviceId, from, to, pincode }): Promise<FoundSlot[]> {
+      // As Dev 2's findSlots: a pincode asked for is a filter on the resource's service area; no pincode, no filter.
+      if (pincode && options.workPincodes && !options.workPincodes.includes(pincode)) return [];
       return options.slots
         .filter((start) => Date.parse(start) > now && Date.parse(start) >= from.getTime() && Date.parse(start) < to.getTime() && free(start))
         .sort((a, b) => Date.parse(a) - Date.parse(b))

@@ -94,3 +94,23 @@ describe("a booking the customer already has", () => {
     expect((await cal.port.findSlots(T, window("2026-10-11T00:00:00.000Z", "2026-10-13T00:00:00.000Z"))).map((s) => s.start)).toContain(SUN_15);
   });
 });
+
+describe("the pincodes the chat's technician works in (a field visit goes to the customer's address)", () => {
+  const all = window("2026-10-11T00:00:00.000Z", "2026-10-13T00:00:00.000Z");
+
+  it("with no list, the technician works everywhere: a pincode filters nothing (as a resource with no service area in Dev 2's findSlots)", async () => {
+    const { cal } = calendar();
+    expect(await cal.port.findSlots(T, { ...all, pincode: "641001" })).toHaveLength(3);
+  });
+
+  it("with a list, a pincode in it gets the times, and one outside it gets none", async () => {
+    const { cal } = calendar({ workPincodes: ["600042", "600020"] });
+    expect(await cal.port.findSlots(T, { ...all, pincode: "600042" })).toHaveLength(3);
+    expect(await cal.port.findSlots(T, { ...all, pincode: "641001" })).toEqual([]);
+  });
+
+  it("with a list and no pincode given, the times are offered (Dev 2's findSlots filters only when it is asked to)", async () => {
+    const { cal } = calendar({ workPincodes: ["600042"] });
+    expect(await cal.port.findSlots(T, all)).toHaveLength(3);
+  });
+});

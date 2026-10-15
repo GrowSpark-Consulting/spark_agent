@@ -87,7 +87,9 @@ export interface QualificationSummary {
   /** Set when the lead is certainly not a fit (a hard fail of the pack). */
   hardFail: Qualification["hardFail"];
   /** The kind of booking the pack's business takes that needs a time and someone's calendar, or null (no such booking, so no times are offered). */
-  bookingKind?: "slot" | "site_visit" | null;
+  bookingKind?: "slot" | "site_visit" | "field_visit" | null;
+  /** For a visit to the customer's address: the NAME of the lead's detail that holds where the customer is (the pack's area rule), so the reply step can read it. Never the answer itself. */
+  visitAreaField?: string | null;
 }
 
 export type UnderstandResult =
@@ -314,8 +316,9 @@ export async function understandTurn(step: StepRunner, turn: TurnContext, deps: 
             if (!kept) throw new NonRetriableError("The message was not found.");
           }
           await store.saveLeadScore(turn.tenantId, turn.leadId, { score: result.score, temperature: result.temperature });
-          const bookingKind = loaded.pack.bookingModes.find((mode): mode is "slot" | "site_visit" => mode === "slot" || mode === "site_visit") ?? null;
-          return { score: result.score, temperature: result.temperature, ask: result.ask, missingRequired: result.missingRequired, readyForSlots: result.readyForSlots, hardFail: result.hardFail, bookingKind };
+          const bookingKind = loaded.pack.bookingModes.find((mode): mode is NonNullable<QualificationSummary["bookingKind"]> => mode === "slot" || mode === "site_visit" || mode === "field_visit") ?? null;
+          const visitAreaField = bookingKind === "field_visit" ? (coverageRule(loaded.pack)?.field ?? null) : null;
+          return { score: result.score, temperature: result.temperature, ask: result.ask, missingRequired: result.missingRequired, readyForSlots: result.readyForSlots, hardFail: result.hardFail, bookingKind, visitAreaField };
         })
       : null;
 
