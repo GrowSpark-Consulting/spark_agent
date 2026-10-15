@@ -11,10 +11,10 @@ insert into public.tenants (id, name, vertical, created_at) values
   ('d0000000-0000-0000-0000-0000000000dd', 'Demo D', 'test-pack', now() - interval '1 day');
 
 insert into public.payments (tenant_id, kind, txnid, base_paise, gst_paise, amount_paise, status) values
-  ('0c100000-0000-0000-0000-00000000000a', 'subscribe', 'metrics-p-1', 100, 18, 118, 'success'),
-  ('0c100000-0000-0000-0000-00000000000b', 'subscribe', 'metrics-f-1', 100, 18, 118, 'failed'),
-  ('0c100000-0000-0000-0000-00000000000c', 'subscribe', 'metrics-o-1', 100, 18, 118, 'success'),
-  ('d0000000-0000-0000-0000-0000000000dd', 'subscribe', 'metrics-d-1', 100, 18, 118, 'success');
+  ('0c100000-0000-0000-0000-00000000000a', 'subscribe', 'metricsp1', 100, 18, 118, 'success'),
+  ('0c100000-0000-0000-0000-00000000000b', 'subscribe', 'metricsf1', 100, 18, 118, 'failed'),
+  ('0c100000-0000-0000-0000-00000000000c', 'subscribe', 'metricso1', 100, 18, 118, 'success'),
+  ('d0000000-0000-0000-0000-0000000000dd', 'subscribe', 'metricsd1', 100, 18, 118, 'success');
 
 -- Credits: 100 granted, then spends (ai_reply 40 two days ago, template 10 and an admin deduction 5 twenty days ago, 7 old, demo 50).
 insert into public.credit_ledger (tenant_id, delta, reason, created_at) values
