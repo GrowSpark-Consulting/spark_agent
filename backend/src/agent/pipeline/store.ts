@@ -160,6 +160,11 @@ export interface PipelineStore {
    */
   recordedMessageIds(tenantId: string, conversationId: string, ids: string[]): Promise<string[]>;
   /**
+   * Which of these message ids notify.send has CLAIMED and not released (`notify_attempts.status = 'sending'`, written before WhatsApp is asked, 0045). A
+   * claim with no message row means the send may have gone out. Read only: the table and its writes are notify.send's.
+   */
+  claimedMessageIds(tenantId: string, ids: string[]): Promise<string[]>;
+  /**
    * What this chat last said about a place the business has no sites in (`messages.meta.agent.coverage`): the newest earlier customer message that
    * says anything about it decides, and `null` (the customer moved on to a place the business has) or an unreadable value is nothing.
    */
@@ -484,6 +489,15 @@ export function createPipelineStore(db: SupabaseClient = supabaseAdmin(), { time
       );
       if (error) fail("read recorded messages", error);
       return parse(z.array(z.object({ id: z.string() })), data ?? [], "read recorded messages").map((row) => row.id);
+    },
+
+    async claimedMessageIds(tenantId, ids) {
+      if (ids.length === 0) return [];
+      const { data, error } = await run("read send claims", (signal) =>
+        db.from("notify_attempts").select("message_id").eq("tenant_id", tenantId).eq("status", "sending").in("message_id", ids).abortSignal(signal),
+      );
+      if (error) fail("read send claims", error);
+      return parse(z.array(z.object({ message_id: z.string() })), data ?? [], "read send claims").map((row) => row.message_id);
     },
 
     async getPreviousCoverage(tenantId, conversationId, before) {

@@ -36,7 +36,6 @@ export const NOT_AVAILABLE_YET: ReadonlySet<string> = new Set([
   "working_hours_mode",
   "booking_confirmation", // the assistant confirms a booking in its own reply (Dev 1's Day 3 note); a separate message is not sent
   "auto_topup",
-  "outbound_webhooks",
   "quote_auto_send",
   "quote_followup",
   "pretrip_info",

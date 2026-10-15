@@ -118,6 +118,8 @@ begin
     insert into public.trial_notices (tenant_id, day, claimed_by) values (t, 0, 'iso-fixture');
     insert into public.ai_spend_daily (tenant_id, day, cost_usd, calls) values (t, current_date, 0.5, 10);
     insert into public.notify_attempts (message_id, tenant_id, kind, status) values (gen_random_uuid(), t, 'ai_reply', 'sending');
+    insert into public.webhook_endpoints (tenant_id, url, events, secret_enc, secret_hint) values (t, 'https://crm.example/' || s, array['lead.created'], 'enc', 'abcd');
+    insert into public.webhook_deliveries (tenant_id, event, entity_id) values (t, 'lead.qualified', ld);
   end loop;
 end
 $$;

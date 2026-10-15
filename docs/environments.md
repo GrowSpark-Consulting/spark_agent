@@ -90,7 +90,8 @@ The CLI version is pinned in `package.json`, so everyone and CI run the same one
    `supabase/seed/demo_tenants.sql`. Never run `supabase db reset --linked`: it wipes the project.
 
 Free projects pause after a week with no traffic; resume from the dashboard. Production
-gets its own project on the Pro plan (daily backups, no pausing) before beta.
+gets its own project on the Pro plan (daily backups, no pausing) before beta. What must be true before
+go-live, and the backup and restore plan, are in [production-checklist.md](production-checklist.md).
 
 ### Platform admins
 

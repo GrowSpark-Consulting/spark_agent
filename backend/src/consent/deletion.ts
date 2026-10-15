@@ -6,6 +6,7 @@ import { AppError } from "../lib/errors";
 import { supabaseAdmin } from "../lib/supabase-admin";
 import { requireRole } from "../lib/tenant";
 import { errorTextForLog } from "../lib/redact";
+import { messageMediaNames, removeMessageMedia } from "../lib/storage";
 
 // A customer's request to delete their data (DPDP; migration 0043), from the dashboard's Data & privacy settings. Owner
 // or admin; the business is the caller's own (TenantContext), so another business's contact is just "not found".
@@ -13,15 +14,25 @@ import { errorTextForLog } from "../lib/redact";
 //   POST /api/contacts/:id/deletion → ContactDeletionResult
 // delete_contact_data removes the chats and leads, scrubs the contact and writes consent_logs (deletion_requested,
 // deleted) and the audit row in one transaction. Then the past bookings' Google Calendar events, which carry the
-// customer's name, are taken down here: one that can't be is logged and counted as left, never thrown, since the data
+// customer's name, are taken down here, and so are the photos, voice notes and documents of the deleted chats in message-media
+// (0048: delete_contact_data names the chats). One that can't be is logged and counted as left, never thrown, since the data
 // itself is already gone.
 
 export interface DeletionDeps {
   db: SupabaseClient;
   removeEvent: (tenantId: string, event: { resourceId: string; eventId: string }) => Promise<RemoveResult>;
+  /** The deleted chats' files: listed by their path, then removed through the Storage API (lib/storage.ts). */
+  removeMedia: (tenantId: string, conversationIds: readonly string[]) => Promise<{ removed: number; left: number }>;
 }
 
-const defaults = (): DeletionDeps => ({ db: supabaseAdmin(), removeEvent: (tenantId, event) => removeGoogleEvent(tenantId, event) });
+const defaults = (): DeletionDeps => {
+  const db = supabaseAdmin();
+  return {
+    db,
+    removeEvent: (tenantId, event) => removeGoogleEvent(tenantId, event),
+    removeMedia: async (tenantId, conversationIds) => removeMessageMedia(db, await messageMediaNames(db, tenantId, conversationIds)),
+  };
+};
 
 const ContactId = z.guid();
 const NOT_FOUND = "That contact was not found.";
@@ -68,6 +79,7 @@ const Deleted = z
       leads: z.number().int(),
       bookings: z.number().int(),
       calendar_events: z.array(z.object({ resource_id: z.string(), event_id: z.string() })),
+      conversation_ids: z.array(z.string()).default([]),
     }),
   )
   .length(1);
@@ -98,9 +110,19 @@ export async function deleteContactData(context: TenantContext, id: string, deps
       console.error(`[deletion] contact ${id}: a Google Calendar event was not taken down: ${errorTextForLog(e)}`);
     }
   }
+
+  let mediaFiles = { removed: 0, left: 0 };
+  try {
+    mediaFiles = await deps.removeMedia(context.tenant.id, row.conversation_ids);
+    if (mediaFiles.left > 0) console.error(`[deletion] contact ${id}: ${mediaFiles.left} media file(s) were not removed from storage`);
+  } catch (e) {
+    // The files could not even be listed: none is counted, and the log says so.
+    console.error(`[deletion] contact ${id}: the chats' media files could not be listed: ${errorTextForLog(e)}`);
+  }
   return {
     status: row.outcome,
     removed: { conversations: row.conversations, messages: row.messages, leads: row.leads, bookings: row.bookings },
     calendarEvents,
+    mediaFiles,
   };
 }

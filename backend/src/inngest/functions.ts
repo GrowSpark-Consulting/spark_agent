@@ -13,6 +13,7 @@ import { kbSweep } from "./kb-sweep";
 import { leadNudges } from "./lead-nudges";
 import { mediaDownload } from "./media-download";
 import { noShowRebooking } from "./noshow-rebooking";
+import { outboundWebhooks } from "./outbound-webhooks";
 import { ownNumberOutcome } from "./own-number-outcome";
 import { phoneReplyReturn } from "./phone-reply-return";
 import { ping } from "./ping";
@@ -21,6 +22,7 @@ import { processMessage } from "./process-message";
 import { releaseHolds } from "./release-holds";
 import { tokenExpiry } from "./token-expiry";
 import { trialLifecycle, trialLifecycleSweep } from "./trial-lifecycle";
+import { unpaidTrialCleanup } from "./unpaid-trial-cleanup";
 
 // Every Inngest function is registered here and served from the API's /api/inngest (see serve.ts).
 export const functions = [
@@ -49,4 +51,6 @@ export const functions = [
   trialLifecycleSweep,
   demoReply,
   mediaDownload,
+  unpaidTrialCleanup,
+  outboundWebhooks,
 ];

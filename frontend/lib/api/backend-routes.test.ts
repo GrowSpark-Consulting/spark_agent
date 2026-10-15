@@ -117,6 +117,12 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   "POST /api/billing/cancel": "the Billing screen's Cancel plan button is not built yet (Dhatri)",
   "POST /api/billing/resume": "the Billing screen's Keep my plan button is not built yet (Dhatri)",
   "GET /api/admin/whatsapp/connections": "not called yet: the admin panel's connection list (Dhatri)",
+  // Outbound webhooks (Pro, Dev 2, 0050): the Integrations settings screen is not built yet (Dhatri).
+  "GET /api/integrations/webhook": "not called yet: Settings → Integrations (Dhatri)",
+  "PUT /api/integrations/webhook": "not called yet: Settings → Integrations (Dhatri)",
+  "DELETE /api/integrations/webhook": "not called yet: Settings → Integrations (Dhatri)",
+  "POST /api/integrations/webhook/rotate-secret": "not called yet: Settings → Integrations (Dhatri)",
+  "POST /api/integrations/webhook/test": "not called yet: Settings → Integrations (Dhatri)",
 };
 
 function sourceFiles(dir: string): string[] {

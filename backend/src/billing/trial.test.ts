@@ -4,6 +4,8 @@ const rpc = vi.fn();
 const send = vi.fn();
 vi.mock("../lib/supabase-admin", () => ({ supabaseAdmin: () => ({ rpc }) }));
 vi.mock("../inngest/client", () => ({ inngest: { send } }));
+const auditQuietly = vi.fn();
+vi.mock("../lib/audit", () => ({ auditQuietly: (...args: unknown[]) => auditQuietly(...args) }));
 
 const { createTrialTenant } = await import("./trial");
 
@@ -15,6 +17,7 @@ const input = { userId: USER, name: "Sunrise Homes", vertical: "sample-pack" };
 beforeEach(() => {
   rpc.mockReset().mockResolvedValue({ data: [row], error: null });
   send.mockReset().mockResolvedValue({ ids: ["evt"] });
+  auditQuietly.mockReset();
 });
 
 describe("createTrialTenant", () => {
@@ -46,6 +49,17 @@ describe("createTrialTenant", () => {
     rpc.mockResolvedValue({ data: [{ ...row, created: false }], error: null });
     await expect(createTrialTenant(input)).resolves.toMatchObject({ tenantId: TENANT, created: false });
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ id: `trial_started:${TENANT}` }));
+  });
+
+  it("audits the new business, naming the owner who signed up", async () => {
+    await createTrialTenant(input);
+    expect(auditQuietly).toHaveBeenCalledWith({ tenantId: TENANT, actor: USER, action: "tenant.created", entity: "tenant", entityId: TENANT, diff: { plan: "trial", vertical: "sample-pack" } });
+  });
+
+  it("audits nothing for a repeat signup: the business already existed", async () => {
+    rpc.mockResolvedValue({ data: [{ ...row, created: false }], error: null });
+    await createTrialTenant(input);
+    expect(auditQuietly).not.toHaveBeenCalled();
   });
 
   it("still returns the funded business if the event cannot be sent", async () => {
