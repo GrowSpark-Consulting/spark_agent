@@ -53,6 +53,7 @@ const COVERAGE: Record<string, Coverage> = {
   "DELETE /api/integrations/webhook": sql("0050_outbound_webhooks.sql", "webhook_endpoint.deleted"),
   "POST /api/integrations/webhook/rotate-secret": sql("0050_outbound_webhooks.sql", "webhook_endpoint.secret_rotated"),
   "POST /api/integrations/webhook/test": { none: "sends a signed ping to the business's own endpoint now: nothing is saved or changed" },
+  "POST /api/onboarding/import-site": ts("kb/website.ts", "kb.website_imported"),
   "POST /api/kb/documents": ts("server/routes.ts", "kb.document_uploaded"),
   "DELETE /api/kb/documents/:id": ts("server/routes.ts", "kb.document_deleted"),
   "POST /api/kb/faqs": ts("server/routes.ts", "kb.faq_created"),

@@ -10,6 +10,7 @@ export * from "./dashboard";
 export * from "./errors";
 export * from "./features";
 export * from "./integrations";
+export * from "./kb-import";
 export * from "./onboarding";
 export * from "./pack";
 export * from "./privacy";

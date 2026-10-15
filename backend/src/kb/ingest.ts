@@ -92,7 +92,7 @@ export async function runIngest(step: StepRunner, rawEvent: unknown, deps: Inges
     loaded = await step.run<Loaded>("load", async () => {
       const doc = await store.getDocument(tenantId, documentId);
       if (!doc) return { skip: "not_found" };
-      if (doc.sourceType !== "upload") return { skip: "not_an_upload" };
+      if (doc.sourceType !== "upload" && doc.sourceType !== "website") return { skip: "not_an_upload" }; // an uploaded file or an imported web page; an FAQ is embedded by its own route
       if (doc.status === "ready") return { skip: "already_ready" };
       if (!doc.body?.trim()) return { fail: "no_text" };
       let chunks: string[];

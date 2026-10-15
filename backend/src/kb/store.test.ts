@@ -22,7 +22,7 @@ interface Call {
   limit?: number;
   payload?: unknown;
   returning?: string;
-  filters: [string, "eq" | "neq" | "lt" | "in" | "ilike", unknown][];
+  filters: [string, "eq" | "neq" | "lt" | "gte" | "in" | "ilike", unknown][];
   terminal?: string;
   /** The signal the query was given, if any: the store must pass one so a call that gave up can be cancelled. */
   signal?: AbortSignal;
@@ -57,6 +57,7 @@ function fakeDb(answer: (call: Call) => Answer | Promise<Answer>) {
         select: (columns?: string, options?: unknown) => ((call.returning = columns ?? "*"), (call.selectOptions = options), (opSet ||= (setOp("select"), true)), builder),
         abortSignal: (signal: AbortSignal) => ((call.signal = signal), builder),
         lt: (column: string, value: unknown) => (call.filters.push([column, "lt", value]), builder),
+        gte: (column: string, value: unknown) => (call.filters.push([column, "gte", value]), builder),
         insert: (payload: unknown) => (setOp("insert", payload), builder),
         update: (payload: unknown) => (setOp("update", payload), builder),
         delete: () => (setOp("delete"), builder),
@@ -114,6 +115,87 @@ describe("insertUpload", () => {
   it("refuses an answer that is not a row", async () => {
     const { db } = fakeDb(() => ({ data: { id: "nope" } }));
     await expect(createKbStore(db).insertUpload(A, { title: "t", body: "b" })).rejects.toThrow();
+  });
+});
+
+describe("web pages", () => {
+  const URL_A = "https://www.example.com/about";
+
+  it("insertWebsite makes a processing web page for the business, with its address, title and text, and gives back its id and time", async () => {
+    const { db, calls } = fakeDb(() => ({ data: { id: DOC, created_at: "2026-10-15T10:00:00+00:00" } }));
+    expect(await createKbStore(db).insertWebsite(A, { url: URL_A, title: "About us", body: "Some words" })).toEqual({ id: DOC, createdAt: "2026-10-15T10:00:00.000Z" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      table: "kb_documents",
+      op: "insert",
+      payload: { tenant_id: A, source_type: "website", source_url: URL_A, title: "About us", body: "Some words", status: "processing" },
+      terminal: "single",
+    });
+    expect(calls[0].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("findWebsiteDocuments reads the business's imports of one address, oldest first, and only web pages", async () => {
+    const { db, calls } = fakeDb(() => ({
+      data: [
+        { id: DOC, status: "ready", created_at: "2026-10-01T10:00:00+00:00" },
+        { id: FAQ_ID, status: "processing", created_at: "2026-10-02T10:00:00+00:00" },
+      ],
+    }));
+    expect(await createKbStore(db).findWebsiteDocuments(A, URL_A)).toEqual([
+      { id: DOC, status: "ready", createdAt: "2026-10-01T10:00:00.000Z" },
+      { id: FAQ_ID, status: "processing", createdAt: "2026-10-02T10:00:00.000Z" },
+    ]);
+    expect(calls[0]).toMatchObject({ table: "kb_documents", op: "select", order: [["created_at", true]] });
+    expectTenantFilter(calls[0]);
+    expect(filterOf(calls[0], "source_type")).toEqual(["source_type", "eq", "website"]);
+    expect(filterOf(calls[0], "source_url")).toEqual(["source_url", "eq", URL_A]);
+  });
+
+  it("findWebsiteDocuments is an empty list when there is none, and refuses an answer that is not rows", async () => {
+    expect(await createKbStore(fakeDb(() => ({ data: [] })).db).findWebsiteDocuments(A, URL_A)).toEqual([]);
+    expect(await createKbStore(fakeDb(() => ({})).db).findWebsiteDocuments(A, URL_A)).toEqual([]);
+    await expect(createKbStore(fakeDb(() => ({ data: [{ id: 5 }] })).db).findWebsiteDocuments(A, URL_A)).rejects.toThrow();
+  });
+
+  it("replaceWebsite puts the new title and text in the business's web page, processing again with no error, only if it is not processing now, and says so", async () => {
+    const { db, calls } = fakeDb(() => ({ data: [{ id: DOC }] }));
+    expect(await createKbStore(db).replaceWebsite(A, DOC, { title: "New", body: "New words" })).toBe(true);
+    expect(calls[0]).toMatchObject({ table: "kb_documents", op: "update", payload: { title: "New", body: "New words", status: "processing", error: null }, returning: "id" });
+    expect(filterOf(calls[0], "id")).toEqual(["id", "eq", DOC]);
+    expect(filterOf(calls[0], "source_type")).toEqual(["source_type", "eq", "website"]);
+    expect(filterOf(calls[0], "status")).toEqual(["status", "neq", "processing"]);
+    expectTenantFilter(calls[0]);
+  });
+
+  it("replaceWebsite says false when nothing matched (another business's, not a web page, or still processing)", async () => {
+    expect(await createKbStore(fakeDb(() => ({ data: [] })).db).replaceWebsite(A, DOC, { title: "t", body: "b" })).toBe(false);
+    expect(await createKbStore(fakeDb(() => ({})).db).replaceWebsite(A, DOC, { title: "t", body: "b" })).toBe(false);
+  });
+
+  it("countWebsiteImportsSince counts the business's kb.website_imported audit rows from a time, without reading them", async () => {
+    const { db, calls } = fakeDb(() => ({ count: 4 }));
+    expect(await createKbStore(db).countWebsiteImportsSince(A, "2026-10-15T09:00:00.000Z")).toBe(4);
+    expect(calls[0]).toMatchObject({ table: "audit_logs", op: "select", selectOptions: { count: "exact", head: true } });
+    expectTenantFilter(calls[0]);
+    expect(filterOf(calls[0], "action")).toEqual(["action", "eq", "kb.website_imported"]);
+    expect(filterOf(calls[0], "created_at")).toEqual(["created_at", "gte", "2026-10-15T09:00:00.000Z"]);
+    expect(await createKbStore(fakeDb(() => ({})).db).countWebsiteImportsSince(A, "x")).toBe(0);
+  });
+
+  it.each([
+    ["insertWebsite", (store: ReturnType<typeof createKbStore>) => store.insertWebsite(A, { url: URL_A, title: "t", body: "b" })],
+    ["findWebsiteDocuments", (store: ReturnType<typeof createKbStore>) => store.findWebsiteDocuments(A, URL_A)],
+    ["replaceWebsite", (store: ReturnType<typeof createKbStore>) => store.replaceWebsite(A, DOC, { title: "t", body: "b" })],
+    ["countWebsiteImportsSince", (store: ReturnType<typeof createKbStore>) => store.countWebsiteImportsSince(A, "2026-10-15T09:00:00.000Z")],
+  ])("%s fails in fixed words, logging the code only, when the database refuses", async (_name, call) => {
+    const { db } = fakeDb(() => ({ error: { code: "57014", message: "canceling statement for https://secret.example/page?token=abc" } }));
+    const error = (await call(createKbStore(db)).catch((e: unknown) => e)) as AppError;
+    expect(error).toBeInstanceOf(AppError);
+    expect(error.code).toBe("upstream_failed");
+    expect(error.message).not.toMatch(/canceling|secret|token/);
+    const logged = vi.mocked(console.error).mock.calls.map((c) => String(c[0])).join(" | ");
+    expect(logged).toContain("57014");
+    expect(logged).not.toMatch(/canceling|secret|token/);
   });
 });
 

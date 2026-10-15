@@ -28,6 +28,7 @@
     "@opentelemetry/sdk-trace-base": "2.12.0",
     "@pakka/types": "workspace:*",
     "@supabase/supabase-js": "^2.117.2",
+    "htmlparser2": "12.0.0",
     "inngest": "^4.21.1",
     "mammoth": "1.13.0",
     "tsx": "^4.23.15",
