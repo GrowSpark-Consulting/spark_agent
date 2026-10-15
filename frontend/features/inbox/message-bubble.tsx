@@ -1,5 +1,7 @@
 import type { CSSProperties } from "react";
 import { formatClock, type ChatMessage } from "./data";
+import { storedMediaPath } from "./media-url";
+import { StoredMedia } from "./stored-media";
 
 // One chat message, ported from the /dashboard/preview Inbox (components/dashboard/pakka-app.tsx):
 // customer messages on the left in --wa-in, everything we sent on the right in --wa-out with a
@@ -11,7 +13,8 @@ const WHO: Partial<Record<ChatMessage["sender"], { label: string; color: string 
   staff: { label: "Staff", color: "#c2410c" },
 };
 
-export function MessageBubble({ message, timeZone }: { message: ChatMessage; timeZone: string }) {
+/** `tenantId` and `conversationId` say which business and chat this bubble is in: only a stored file of that chat is ever signed. */
+export function MessageBubble({ message, timeZone, tenantId, conversationId }: { message: ChatMessage; timeZone: string; tenantId?: string; conversationId?: string }) {
   if (message.sender === "system") {
     return (
       <div style={{ alignSelf: "center", maxWidth: "90%", textAlign: "center", fontSize: "12px", background: "var(--wa-sys)", color: "var(--wa-ink)", padding: "5px 10px", margin: "4px 0" }}>
@@ -23,6 +26,9 @@ export function MessageBubble({ message, timeZone }: { message: ChatMessage; tim
   const outgoing = message.sender !== "customer";
   const who = WHO[message.sender];
   const { text, attachment } = message;
+  // A stored file is only shown when its path is a file of this business and chat (media-url.ts); anything else says so, and is never signed.
+  const stored = attachment?.file && tenantId && conversationId ? storedMediaPath(attachment.file.path, tenantId, conversationId) : null;
+  const attachmentNote = attachment?.note ?? (attachment?.file && !stored ? "Can't be shown here" : undefined);
 
   return (
     <div
@@ -48,7 +54,10 @@ export function MessageBubble({ message, timeZone }: { message: ChatMessage; tim
           </span>
           <span style={{ fontSize: "13px", lineHeight: "1.3", minWidth: "0" }}>
             <span style={{ fontWeight: "600", display: "block" }}>{attachment.name}</span>
-            {attachment.note ? <span style={{ display: "block", fontSize: "12px", opacity: ".7" }}>{attachment.note}</span> : null}
+            {attachmentNote ? <span style={{ display: "block", fontSize: "12px", opacity: ".7" }}>{attachmentNote}</span> : null}
+            {attachment.file && stored && tenantId && conversationId ? (
+              <StoredMedia path={stored} mime={attachment.file.mime} name={attachment.name} tenantId={tenantId} conversationId={conversationId} />
+            ) : null}
           </span>
         </div>
       ) : null}

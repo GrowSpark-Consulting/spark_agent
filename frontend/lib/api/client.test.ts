@@ -5,7 +5,7 @@ vi.mock("@/lib/supabase/browser", () => ({ getSupabaseBrowserClient: () => ({ au
 const fetchMock = vi.fn<typeof fetch>();
 vi.stubGlobal("fetch", fetchMock);
 
-const { getJson, patchJson, postForm, postJson, sendNoContent, TENANT_HEADER } = await import("./client");
+const { getJson, patchJson, putJson, postForm, postJson, sendNoContent, TENANT_HEADER } = await import("./client");
 const { ApiError } = await import("@/lib/errors");
 
 const TENANT = "10000000-0000-0000-0000-000000000001";
@@ -18,6 +18,23 @@ beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_API_URL", "https://api.pakkaagent.in");
   getSession.mockReset().mockResolvedValue({ data: { session: { access_token: "header.payload.sig" } } });
   fetchMock.mockReset().mockResolvedValue(Response.json({ providerMsgId: "wamid.1", status: "accepted" }));
+});
+
+describe("putJson", () => {
+  it("PUTs JSON with the user's token and the business", async () => {
+    await putJson("/api/integrations/webhook", { url: "https://example.com/hook", events: ["lead.created"] }, { tenantId: TENANT });
+    const { url, init, headers } = sentRequest();
+    expect(url).toBe("https://api.pakkaagent.in/api/integrations/webhook");
+    expect(init.method).toBe("PUT");
+    expect(init.body).toBe('{"url":"https://example.com/hook","events":["lead.created"]}');
+    expect(headers.get("authorization")).toBe("Bearer header.payload.sig");
+    expect(headers.get(TENANT_HEADER)).toBe(TENANT);
+  });
+
+  it("throws the API's error", async () => {
+    fetchMock.mockResolvedValue(Response.json({ error: { code: "plan_required", message: "Pro only." } }, { status: 403 }));
+    await expect(putJson("/api/integrations/webhook", {}, { tenantId: TENANT })).rejects.toMatchObject({ status: 403 });
+  });
 });
 
 describe("postJson", () => {

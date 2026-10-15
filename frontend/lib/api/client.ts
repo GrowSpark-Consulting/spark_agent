@@ -11,7 +11,7 @@ export const TENANT_HEADER = "x-pakka-tenant";
 export type ApiPath = `/api/${string}`;
 
 export interface ApiRequest {
-  method: "GET" | "POST" | "PATCH" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   /** Sent as JSON, except FormData, which the browser sends as multipart with its own boundary. */
   body?: unknown;
   /** The business from the dashboard's TenantContext. The API checks the user is a member. */
@@ -56,6 +56,13 @@ export async function getJson<T>(path: ApiPath, options: CallOptions = {}): Prom
 /** POSTs JSON to the API; throws ApiError on an error response. */
 export async function postJson<T>(path: ApiPath, body: unknown, options: CallOptions = {}): Promise<T> {
   const res = await apiFetch(path, { method: "POST", body, ...options });
+  if (!res.ok) throw await apiErrorFrom(res);
+  return (await res.json()) as T;
+}
+
+/** PUTs JSON to the API (the webhook endpoint's save replaces it); throws ApiError on an error response. */
+export async function putJson<T>(path: ApiPath, body: unknown, options: CallOptions = {}): Promise<T> {
+  const res = await apiFetch(path, { method: "PUT", body, ...options });
   if (!res.ok) throw await apiErrorFrom(res);
   return (await res.json()) as T;
 }

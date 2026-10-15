@@ -32,6 +32,7 @@ const TARGETS: Target[] = [
       "/dashboard/messages/test",
       "/dashboard/settings/booking",
       "/dashboard/settings/privacy",
+      "/dashboard/settings/integrations",
       "/dashboard/preview",
       "/onboarding",
     ],
