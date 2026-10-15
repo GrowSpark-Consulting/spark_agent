@@ -14,6 +14,14 @@ insert into public.tenants (id, name, vertical, status, plan_key) values
   ('d0000000-0000-0000-0000-0000000000b1', 'Isolation Test B',         'real-estate', 'trial',  'trial')
 on conflict (id) do nothing;
 
+-- The front desk: the business that owns the shared demo number's platform connection (pnpm seed:connection --tenant
+-- d0000000-0000-0000-0000-0000000000fd). A visitor who can't be routed (no code, a bad code, over the daily limit) is
+-- stored and answered here with the menu, never by the assistant, so it has no members, no route code and no credits
+-- (those answers are free system notices). Active on Pro like the demo businesses, so no trial job ever touches it.
+insert into public.tenants (id, name, vertical, status, plan_key) values
+  ('d0000000-0000-0000-0000-0000000000fd', 'Spark Agent front desk', 'real-estate', 'active', 'pro')
+on conflict (id) do nothing;
+
 -- Demo route codes: the first message on the demo number carries one of these.
 insert into public.route_codes (code, kind, tenant_id) values
   ('DEMO-REALESTATE', 'demo', 'd0000000-0000-0000-0000-000000000001'),
