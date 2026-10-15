@@ -78,6 +78,8 @@ export interface Options {
   enabled?: boolean;
   /** What the extraction kept on the message before the reply step ran (a retry finds the act's result already there). */
   agent?: Record<string, unknown>;
+  /** What the lead already holds (leads.fields): the details the customer gave in earlier turns. */
+  leadFields?: Record<string, unknown>;
 }
 
 export function world(over: Options = {}) {
@@ -93,7 +95,7 @@ export function world(over: Options = {}) {
     messages,
     conversations: [{ id: CONV, tenantId: A, contactId: CONTACT, mode: "ai" }],
     contacts: [{ id: CONTACT, tenantId: A, language: null, optedOut: false, consentAt: "2026-10-01T00:00:00Z" }],
-    leads: [{ id: LEAD, tenantId: A, contactId: CONTACT, stage: "engaged", createdAt: 1, fields: {} }],
+    leads: [{ id: LEAD, tenantId: A, contactId: CONTACT, stage: "engaged", createdAt: 1, fields: over.leadFields ?? {} }],
     tenantInfo: { [A]: { name: "Skyline Homes", agentSettings: over.agentSettings ?? {} } },
     answered: [],
   });

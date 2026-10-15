@@ -134,6 +134,8 @@ export interface PlanInput {
     now: Date;
     /** What the calendar step found or did for this turn, once it has run. */
     act?: ActResult;
+    /** A visit to the customer's address: the six-digit pincode the lead holds, for the calendar step to look only at someone who works there. Not read by the planner; never kept. */
+    pincode?: string;
   };
 }
 

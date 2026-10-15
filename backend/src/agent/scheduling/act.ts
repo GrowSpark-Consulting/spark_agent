@@ -17,7 +17,8 @@ export interface FoundSlot extends OfferedSlot {
 
 /** What act needs from the booking engine (booking/bookings.ts, Dev 2) and the calendar. */
 export interface SchedulingPort {
-  findSlots(tenantId: string, input: { serviceId: string; from: Date; to: Date }): Promise<FoundSlot[]>;
+  /** `pincode`: for a visit to the customer's address, only times of someone who works there (Dev 2's findSlots filters; a resource with no area serves all). */
+  findSlots(tenantId: string, input: { serviceId: string; from: Date; to: Date; pincode?: string }): Promise<FoundSlot[]>;
   holdSlot(tenantId: string, slot: OfferedSlot, leadId: string, kind: BookingKind): Promise<{ id: string }>;
   confirmBooking(tenantId: string, bookingId: string): Promise<{ id: string }>;
   /** Moves a confirmed booking to another time. */
@@ -29,7 +30,7 @@ export interface SchedulingPort {
 }
 
 /** The booking kinds that need a time and someone's calendar (booking/bookings.ts BOOKING_KINDS). */
-export type BookingKind = "slot" | "site_visit";
+export type BookingKind = "slot" | "site_visit" | "field_visit";
 
 export type ActRequest =
   | {
@@ -107,6 +108,8 @@ export interface ActContext {
   timeZone: string;
   now: Date;
   port: SchedulingPort;
+  /** Where a visit to the customer's address would be: the six digits. Looked up by the caller from the lead; never kept in a result. */
+  pincode?: string;
 }
 
 async function offer(
@@ -120,7 +123,7 @@ async function offer(
   const preferred = preferredText ? parsePreferredTime(preferredText, { timeZone: ctx.timeZone, now: ctx.now }) : null;
   const turnedDown = new Set(exclude.map((start) => Date.parse(start)));
   for (const window of searchWindows(preferred, ctx.now, ctx.timeZone)) {
-    const slots = (await ctx.port.findSlots(ctx.tenantId, { serviceId, from: window.from, to: window.to })).filter((s) => !turnedDown.has(Date.parse(s.start)));
+    const slots = (await ctx.port.findSlots(ctx.tenantId, { serviceId, from: window.from, to: window.to, ...(ctx.pincode ? { pincode: ctx.pincode } : {}) })).filter((s) => !turnedDown.has(Date.parse(s.start)));
     if (slots.length > 0) {
       return {
         kind: "offered",
