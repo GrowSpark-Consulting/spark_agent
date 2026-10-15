@@ -86,6 +86,8 @@ const PROOFS: Record<string, Proof[]> = {
     { file: "backend/src/media/download.test.ts", test: "replay: the same event twice, the second run finding the first one's record, saves one file at one path" },
     { file: "backend/src/media/download.test.ts", test: "a message that already has its file does nothing: no Graph call, no upload, no write" },
   ],
+  // Reports only: the event key is the run id, so Sentry keeps one event however often the event is replayed.
+  "report-failed-jobs": [{ file: "backend/src/inngest/report-failed-jobs.ts", test: "eventKey: `job_failed:${run}`" }],
   // Claims: each delivery is handed to one run and recorded once by it; a receiver dedupes a resend on the event id.
   "outbound-webhooks": [
     INNGEST("outbound-webhooks", "replay: the same run replayed claims nothing new and sends nothing again"),

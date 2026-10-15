@@ -1,5 +1,6 @@
 import { handleInngest } from "../inngest/serve";
 import { toErrorResponse } from "../lib/errors";
+import { inRequestScope, reportError, reportProblem, type RequestScope } from "../lib/report";
 import { userClient } from "./auth";
 import { allowedOrigins, originAllowed, preflight, withCors } from "./cors";
 import { MAX_BODY_BYTES, type FetchHandler } from "./node";
@@ -130,12 +131,24 @@ export function createApp(overrides: Partial<AppDeps> = {}, routes: readonly Rou
       return Response.json({ error: { code: "forbidden", message: "This site isn't allowed to call the API." } }, { status: 403, headers: { vary: "Origin" } });
     }
 
+    // A 500 is sent to Sentry with the route's pattern (never the path a client typed): the error itself when there is one
+    // (thrown here, or caught by tenantRoute), else the fact that the route answered 500 (the WhatsApp webhook answers 500
+    // itself so Meta retries). Not /api/inngest: a failing step answers 500 there by design, and a job that fails for good
+    // is reported once by report-failed-jobs.
+    const scope: RequestScope = { route: route.path, method: request.method, reported: false };
     let response: Response;
     try {
-      response = await handler(request, deps, params);
+      response = await inRequestScope(scope, () => handler(request, deps, params));
     } catch (err) {
       const { status, body } = toErrorResponse(err);
+      if (status >= 500) {
+        scope.reported = true;
+        void inRequestScope(scope, () => reportError(err, { kind: "api_error" }));
+      }
       response = Response.json(body, { status });
+    }
+    if (response.status >= 500 && !scope.reported && route.path !== "/api/inngest") {
+      void inRequestScope(scope, () => reportProblem(`${request.method} ${route.path} answered ${response.status}`, { kind: "api_error" }));
     }
     return route.browser ? withCors(response, request, deps.allowedOrigins) : response;
   };

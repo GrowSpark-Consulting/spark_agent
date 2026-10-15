@@ -2,6 +2,7 @@ import { z } from "zod";
 import { checkConnectionHealth, dueConnections, healthDefaults, type DueConnection, type FailureAlert, type HealthResult } from "../channels/whatsapp/connect/health";
 import { failureMessage, sendToAdmins, type AlertCounts } from "../channels/whatsapp/connect/health-alert";
 import { serverEnv } from "../lib/env";
+import { reportProblem } from "../lib/report";
 import { send } from "../notify/send";
 import { staffAlertRecipients } from "../notify/staff-alerts";
 import { inngest } from "./client";
@@ -20,6 +21,8 @@ export interface HealthJobDeps {
   due: () => Promise<DueConnection[]>;
   check: (ids: DueConnection) => Promise<HealthResult>;
   alert: (tenantId: string, alert: FailureAlert) => Promise<AlertCounts>;
+  /** Sends the failure to Sentry (lib/report.ts): ids and the reason only. */
+  report: (ids: { tenantId: string; connectionId: string }, reason: FailureAlert["reason"]) => Promise<boolean>;
   now: () => Date;
 }
 
@@ -30,6 +33,14 @@ const defaults = (): HealthJobDeps => ({
     sendToAdmins(tenantId, failureMessage({ phoneMasked: alert.phoneMasked, detail: alert.detail }, serverEnv().NEXT_PUBLIC_APP_URL), alert.key, {
       recipients: (id) => staffAlertRecipients(id),
       send: (id, kind, payload) => send(id, kind, payload),
+    }),
+  report: (ids, reason) =>
+    reportProblem(`A WhatsApp number failed its health check (${reason})`, {
+      kind: "connection_health",
+      level: "warning",
+      tags: { tenant: ids.tenantId, connection: ids.connectionId, reason },
+      fingerprint: ["connection_health", reason],
+      eventKey: `connection_health:${ids.connectionId}:${indiaDay(new Date())}`,
     }),
   now: () => new Date(),
 });
@@ -59,6 +70,7 @@ export async function handleHealthCheck({ event, step }: { event: { data: unknow
   if (result.status === "skipped") return { status: "skipped" as const, reason: result.reason };
   if (!result.failed) return { status: "checked" as const, overall: result.overall, failed: false as const };
   const alerts = await step.run("alert", () => deps.alert(ids.tenantId, result.alert));
+  await step.run("report", () => deps.report(ids, result.alert.reason));
   return { status: "checked" as const, overall: result.overall, failed: true as const, alerts };
 }
 

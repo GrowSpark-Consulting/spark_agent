@@ -19,6 +19,7 @@ import { phoneReplyReturn } from "./phone-reply-return";
 import { ping } from "./ping";
 import { postVisit } from "./post-visit";
 import { processMessage } from "./process-message";
+import { reportFailedJobs } from "./report-failed-jobs";
 import { releaseHolds } from "./release-holds";
 import { tokenExpiry } from "./token-expiry";
 import { trialLifecycle, trialLifecycleSweep } from "./trial-lifecycle";
@@ -53,4 +54,5 @@ export const functions = [
   mediaDownload,
   unpaidTrialCleanup,
   outboundWebhooks,
+  reportFailedJobs,
 ];
