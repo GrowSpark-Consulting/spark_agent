@@ -28,6 +28,7 @@ const deps = (over: Partial<HealthJobDeps> = {}): HealthJobDeps => ({
   due: vi.fn(async () => [{ tenantId: A, connectionId: C1 }, { tenantId: A, connectionId: C2 }]),
   check: vi.fn(async () => ({ status: "checked" as const, overall: "pass" as const, failed: false as const })),
   alert: vi.fn(async () => ({ recipients: 1, sent: 1, skipped: 0, failed: 0 })),
+  report: vi.fn(async () => true),
   now: () => NOW,
   ...over,
 });
@@ -91,7 +92,8 @@ describe("one check", () => {
     const d = deps({ check: vi.fn(async () => ({ status: "checked" as const, overall: "fail" as const, failed: true as const, alert })) });
     const result = await handleHealthCheck({ event, step: s.step }, d);
     expect(d.alert).toHaveBeenCalledWith(A, alert);
-    expect(s.ran).toEqual(["check", "alert"]);
+    expect(s.ran).toEqual(["check", "alert", "report"]);
+    expect(d.report).toHaveBeenCalledWith({ tenantId: A, connectionId: C1 }, "token");
     expect(result).toEqual({ status: "checked", overall: "fail", failed: true, alerts: { recipients: 1, sent: 1, skipped: 0, failed: 0 } });
     expect(JSON.stringify(result)).not.toContain("919876543210");
   });

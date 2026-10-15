@@ -14,8 +14,8 @@ import type { Retrieval, UnderstandResult } from "./understand";
 // target and the 25-second hard stop (docs/task-notes/2026-10-13-day6-dev1-step8-audit.md has the reading and the findings). reply.test.ts covers the send and the
 // record case by case; this file pins what it does not, and marks the gaps the audit found.
 //
-// (The first gap, the missing idempotency key, is closed: that test is an ordinary test below.) `it.fails` is a KNOWN GAP: the test describes what should hold, and it passes only while the code does not do it. When a fix lands it starts failing, which is the
-// reminder to turn it into an ordinary `it`. Nothing here changes the code, a prompt or the agent's behaviour.
+// (Both gaps the audit found are closed, so every test below is an ordinary test: the missing idempotency key, and a retry that asked the reply model again, which now reuses the
+// reply kept on the message: reply-draft.test.ts has the cases.) Nothing here changes the code, a prompt or the agent's behaviour.
 
 const A = "e0000000-0000-0000-0000-00000000000a";
 const CONV = "c0000000-0000-0000-0000-00000000000c";
@@ -154,13 +154,16 @@ describe("the reply's idempotency key (was the audit's first gap; reply.test.ts 
   });
 });
 
-describe("KNOWN GAPS (the audit's findings; each passes only while the gap exists)", () => {
-  it.fails("a retry of the reply step after a send that waiting can fix does not ask the reply model again (the text is written and sent in one step, so every retry writes it again: another model call, more latency, a different text)", async () => {
+describe("a retry of the reply step reuses the reply already written (was the audit's second gap; reply-draft.test.ts has the cases)", () => {
+  it("a retry of the reply step after a send that waiting can fix does not ask the reply model again: it sends the text the first attempt wrote, under the same key", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const w = world({ script: ["Yes, we do site visits.", "Yes, we do site visits, shall we plan one?"], send: (n) => (n === 1 ? RETRYABLE : SENT) });
     const step = runner(); // the same memo: what Inngest remembers between the attempts
     await expect(replyTurn(step, w.turn, understood, Date.now(), w.deps)).rejects.toThrow(/could not be sent/);
     await replyTurn(step, w.turn, understood, Date.now(), w.deps);
     expect(w.complete).toHaveBeenCalledTimes(1);
+    expect(w.send).toHaveBeenCalledTimes(2);
+    expect(w.send.mock.calls[1][2]).toMatchObject({ text: "Yes, we do site visits.", idempotencyKey: `reply:${M1}` });
+    expect(w.send.mock.calls[0][2]).toMatchObject({ text: "Yes, we do site visits." });
   });
 });
