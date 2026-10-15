@@ -103,6 +103,7 @@ const AWAITING_BACKEND: { call: string; file: string; where: string }[] = [
 
 /** Backend routes the browser never calls, and why. Anything not here and not in FRONTEND_CALLS fails the test. */
 const NO_BROWSER_CALLER: Record<string, string> = {
+  "GET /api/admin/metrics": "not called yet: the admin panel's cost-per-credit and trial-to-paid cards (Dhatri)",
   // The admin panel's billing routes (Dev 2, 0041). The ones the panel calls are in FRONTEND_CALLS.
   "PATCH /api/admin/plans/:key": "not called: no admin route reads the current plans, so an editor would be filling blind (needs a contract)",
   "PATCH /api/admin/features/:key": "not called: no admin route reads the current features, so an editor would be filling blind (needs a contract)",
