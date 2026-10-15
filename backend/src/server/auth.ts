@@ -2,6 +2,7 @@ import type { TenantContext } from "@pakka/types";
 import { createClient, isAuthRetryableFetchError, type SupabaseClient, type User } from "@supabase/supabase-js";
 import { serverEnv } from "../lib/env";
 import { AppError, toErrorResponse } from "../lib/errors";
+import { reportError } from "../lib/report";
 import { supabaseAdmin } from "../lib/supabase-admin";
 import { resolveTenant } from "../lib/tenant";
 import type { RouteParams } from "./routes";
@@ -138,6 +139,7 @@ function jsonRoute<A, T>(
       return result === undefined ? new Response(null, { status: 204 }) : Response.json(result, { status: successStatus });
     } catch (err) {
       const { status, body } = toErrorResponse(err);
+      if (status >= 500) void reportError(err, { kind: "api_error" });
       return Response.json(body, { status });
     }
   };

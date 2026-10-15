@@ -107,6 +107,33 @@ select id, 'Raja (founder)' from auth.users where email = '<their sign-in email>
 
 The table is server only: nobody can read or change it from the browser.
 
+## Sentry (errors and alert rules)
+
+The API reports problems to Sentry when `SENTRY_DSN` is set on Railway (the project's DSN, https; unset, nothing is sent).
+It posts to Sentry directly (`backend/src/lib/report.ts`), not through Sentry's SDK, so nothing is captured on its own:
+only an error's kind, its message after the log redaction (keys and phone numbers masked), code locations, the route
+pattern and ids. Never a request body, a header, a user or a customer's words. It never fails a request or a job and gives
+up after 3 seconds. `environment` is the Railway environment and `release` the deployed commit.
+
+What is sent, and its tags:
+
+| Event | `kind` tag | Other tags | Grouped by |
+|---|---|---|---|
+| A route throws an unexpected error, or answers 500 (the WhatsApp webhook answers 500 itself so Meta retries) | `api_error` | `route` (the pattern, e.g. `/api/webhooks/whatsapp`), `method` | Sentry's own |
+| A job failed for good, all retries used (the `report-failed-jobs` function, from Inngest's `inngest/function.failed`) | `job_failed` | `function`, `run` | one issue per function |
+| A WhatsApp number failed its daily health check | `connection_health` (level warning) | `tenant`, `connection`, `reason` | per reason |
+
+Not sent: a refusal (4xx), `/api/inngest` answering 500 (a failing step; the job's final failure is reported instead).
+
+Alert rules to create in Sentry (Alerts → Create alert → Issues), one each, sending to Raja and Dev 2:
+
+1. **Failed jobs:** when an issue is first seen or regresses, filter `kind:job_failed`. Add one for `function:pakka-agent-media-download` and one for `function:pakka-agent-process-message` with "more than 3 events in 10 minutes" if you want a louder alarm for the media job and the reply pipeline. The limit notice runs as a step of process-message, so its failure shows under that function.
+2. **Webhook errors:** `kind:api_error` and `route:/api/webhooks/whatsapp` (and `/api/webhooks/payu`), more than 5 events in 5 minutes.
+3. **API errors:** `kind:api_error`, a new issue, or more than 20 events in 10 minutes.
+4. **Connection-health failures:** `kind:connection_health`, any event.
+
+To test: `SENTRY_DSN` set, then an event appears after any 500. Alert rules are set in the Sentry dashboard, not in code.
+
 ## Inngest
 
 There is exactly one Inngest endpoint: the API's `/api/inngest` on Railway (`inngest/edge` adapter,

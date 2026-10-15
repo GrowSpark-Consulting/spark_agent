@@ -144,6 +144,7 @@ describe("the Inngest handlers of connection-health", () => {
     due: async () => [{ tenantId: A, connectionId: CONN }],
     check: async () => ({ status: "checked" as const, overall: "pass" as const, failed: false as const }),
     alert: async () => ({ recipients: 1, sent: 1, skipped: 0, failed: 0 }),
+    report: async () => true,
     now: () => NOW,
     ...over,
   });
