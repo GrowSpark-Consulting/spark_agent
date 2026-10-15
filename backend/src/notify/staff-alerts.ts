@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { createHandoffLinks, type HandoffLinkClaims } from "../agent/handoff/token";
 import { buildLeadCard } from "../agent/leadcard/build";
+import { cleanDisplayText } from "../agent/scoring/area-text";
 import type { LeadCard } from "../agent/leadcard/card";
 import { maskPhone } from "../channels/whatsapp/phone";
 import { isEnabled } from "../features/is-enabled";
@@ -113,7 +114,8 @@ async function customerLabel(tenantId: string, conversationId: string | undefine
   if (error) throw new Error(`staff alert: conversation read failed: ${error.message}`);
   const contact = (data as { contacts?: { name: string | null; phone: string } | null } | null)?.contacts;
   if (!contact) return "A customer";
-  return contact.name?.trim() ? oneLine(contact.name, 40) : maskPhone(contact.phone);
+  // A profile name saved before names were cleaned can carry a link, an @ or a number: the masked number is shown instead.
+  return (contact.name ? cleanDisplayText(contact.name, 40, 7) : null) ?? maskPhone(contact.phone);
 }
 
 /** What the alert says: one line, and the dashboard link. */

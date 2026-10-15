@@ -2,6 +2,7 @@ import type { DashboardSummary, TenantContext } from "@pakka/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { triggerText } from "../agent/leadcard/card";
+import { cleanDisplayText } from "../agent/scoring/area-text";
 import { WeeklyHours } from "../booking/slots";
 import { addDays, localParts, zonedTime } from "../booking/time";
 import { maskPhone } from "../channels/whatsapp/phone";
@@ -48,7 +49,8 @@ function needOf(fields: unknown): string {
   return oneLine(values.join(", "), 80);
 }
 
-const nameOf = (contact: z.infer<typeof Contact>) => (contact?.name?.trim() ? oneLine(contact.name, 40) : contact ? maskPhone(contact.phone) : "A customer");
+// A saved profile name with a link, an @ or a number is not shown: the masked number is.
+const nameOf = (contact: z.infer<typeof Contact>) => (contact ? ((contact.name ? cleanDisplayText(contact.name, 40, 7) : null) ?? maskPhone(contact.phone)) : "A customer");
 
 /** Whether an instant falls outside the business's hours. No hours set: nothing is after hours. */
 function afterHours(instant: Date, hours: WeeklyHours, timeZone: string): boolean {

@@ -122,9 +122,10 @@ describe("the request logger, through a real server", () => {
     expect(capture.leaks(FX), describeLeaks(capture.leaks(FX))).toEqual([]);
   });
 
-  it("KNOWN LIMIT: the logger prints whatever path a client asks for, so a phone number in an address no route of ours takes is logged (no route takes one; recorded, not a leak of ours)", async () => {
+  it("a phone number in an address no route of ours takes is masked in the access log too", async () => {
     await logged(`/api/whatsapp/${encodeURIComponent(PHONE)}/x`);
-    expect(capture.lines().join("\n")).toContain(encodeURIComponent(PHONE));
+    expect(capture.lines().join("\n")).not.toContain(encodeURIComponent(PHONE));
+    expect(capture.leaks(FX), describeLeaks(capture.leaks(FX))).toEqual([]);
   });
 });
 

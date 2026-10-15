@@ -44,7 +44,7 @@ function deps(over: { hours?: unknown; lastMonth?: number } = {}) {
         data: [
           { id: "b-1", start_at: "2026-10-12T05:30:00+00:00", status: "confirmed", hold_expires_at: null, details: {}, services: { name: "Site visit" }, resources: { name: "Asha (sales)", user_id: STAFF }, leads: { contacts: { name: "Priya", phone: "+919800000001" } } },
           { id: "b-2", start_at: "2026-10-12T07:00:00+00:00", status: "held", hold_expires_at: "2026-10-12T04:50:00+00:00", details: {}, services: { name: "Site visit" }, resources: { name: "Ravi", user_id: OTHER }, leads: { contacts: { name: "Old hold", phone: "+919800000002" } } },
-          { id: "b-3", start_at: "2026-10-12T09:00:00+00:00", status: "held", hold_expires_at: "2026-10-12T05:05:00+00:00", details: { place: "Skyline Towers" }, services: { name: "Site visit" }, resources: { name: "Ravi", user_id: OTHER }, leads: { contacts: { name: null, phone: "+919800000003" } } },
+          { id: "b-3", start_at: "2026-10-12T09:00:00+00:00", status: "held", hold_expires_at: "2026-10-12T05:05:00+00:00", details: { place: "Skyline Towers" }, services: { name: "Site visit" }, resources: { name: "Ravi", user_id: OTHER }, leads: { contacts: { name: "Call 98000 00003 now", phone: "+919800000003" } } },
         ],
         error: null,
       },
@@ -104,7 +104,7 @@ describe("GET /api/dashboard/summary", () => {
     ]);
   });
 
-  it("lists today's bookings that stand, leaving out a hold that ran out", async () => {
+  it("lists today's bookings that stand, leaving out a hold that ran out; a saved name with a number shows the masked number", async () => {
     const { todayBookings } = await dashboardSummary(context(), deps().d);
     expect(todayBookings).toEqual([
       { bookingId: "b-1", startAt: "2026-10-12T05:30:00.000Z", name: "Priya", place: "Site visit", staff: "Asha (sales)", status: "confirmed" },

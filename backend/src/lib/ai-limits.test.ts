@@ -125,7 +125,8 @@ describe("telling the owners", () => {
   it("once a day (India's) for the cap, once an hour for the business's pace or one chat", () => {
     expect(limitNoticeKey("ai_spend_cap", TENANT, CONV, AT)).toBe(`ai_limit:spend:${TENANT}:2026-10-15`);
     expect(limitNoticeKey("tenant_rate_limit", TENANT, CONV, AT)).toBe(`ai_limit:pace:${TENANT}:2026-10-14T20`);
-    expect(limitNoticeKey("contact_rate_limit", TENANT, CONV, AT)).toBe(`ai_limit:chat:${TENANT}:${CONV}:2026-10-14T20`);
+    expect(limitNoticeKey("contact_rate_limit", TENANT, CONV, AT)).toBe(`ai_limit:chat:${TENANT}:2026-10-14T20`);
+    expect(limitNoticeKey("contact_rate_limit", TENANT, "another-chat", AT)).toBe(limitNoticeKey("contact_rate_limit", TENANT, CONV, AT));
   });
 
   it("sends the notice under its key", async () => {
