@@ -47,6 +47,7 @@ const COVERAGE: Record<string, Coverage> = {
   "POST /api/billing/resume": sql("0042_billing_cancel.sql", "subscription.resumed"),
   "POST /api/billing/payu/return": SETTLED,
   "POST /api/webhooks/payu": SETTLED,
+  "PATCH /api/agent/settings": ts("agent/settings/agent-settings.ts", "agent_settings.updated"),
   "PATCH /api/features/:key": sql("0025_set_tenant_feature.sql", "feature.toggled", "feature.settings_changed"),
   "PUT /api/integrations/webhook": sql("0050_outbound_webhooks.sql", "webhook_endpoint.created", "webhook_endpoint.updated"),
   "DELETE /api/integrations/webhook": sql("0050_outbound_webhooks.sql", "webhook_endpoint.deleted"),
