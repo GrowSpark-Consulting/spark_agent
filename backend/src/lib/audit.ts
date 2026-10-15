@@ -56,3 +56,15 @@ export async function writeAudit(entry: AuditEntry): Promise<void> {
     });
   if (error) throw new Error(`audit_logs insert failed: ${error.message}`);
 }
+
+/**
+ * For a route whose change has already been made (Day 7 audit coverage): the row is written, and a failure is logged, never
+ * thrown, so the member is not told the change failed and does not make it twice.
+ */
+export async function auditQuietly(entry: AuditEntry, write: (entry: AuditEntry) => Promise<void> = writeAudit): Promise<void> {
+  try {
+    await write(entry);
+  } catch (e) {
+    console.error(`[audit] ${entry.action} was not recorded: ${e instanceof Error ? e.name : "a thrown value"}`);
+  }
+}
