@@ -8,7 +8,7 @@ import { inngest } from "./client";
 // handoff.own_number → after 4 hours (the business's `outcome_after_minutes`), the staff member who took the chat to
 // their own number is asked how it went: Booked, Follow-up or Lost buttons inside their 24-hour window, the staff_alert
 // template (the question and the chat's link) outside it. A handoff that already has an answer is not asked about.
-// Dev 1 sends handoff.own_number when the own-number takeover lands; until then this job waits for it.
+// The event comes from the own-number takeover (agent/handoff/takeover.ts), once per handoff (id handoff_own_number:<handoff>).
 
 const OwnNumber = z.object({ tenantId: z.guid(), handoffId: z.guid() });
 

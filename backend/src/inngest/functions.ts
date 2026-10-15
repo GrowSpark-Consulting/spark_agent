@@ -13,6 +13,7 @@ import { kbSweep } from "./kb-sweep";
 import { leadNudges } from "./lead-nudges";
 import { mediaDownload } from "./media-download";
 import { noShowRebooking } from "./noshow-rebooking";
+import { outboundWebhooks } from "./outbound-webhooks";
 import { ownNumberOutcome } from "./own-number-outcome";
 import { phoneReplyReturn } from "./phone-reply-return";
 import { ping } from "./ping";
@@ -51,4 +52,5 @@ export const functions = [
   demoReply,
   mediaDownload,
   unpaidTrialCleanup,
+  outboundWebhooks,
 ];

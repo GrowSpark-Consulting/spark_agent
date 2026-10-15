@@ -63,6 +63,7 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0047_message_media` | The private storage bucket `message-media` (50 MB a file, any type) for a customer's photos, voice notes and documents once downloaded from WhatsApp, at `<tenant_id>/<conversation_id>/<message_id>.<ext>` (`backend/src/lib/storage.ts` builds the path). A member reads the files of the business its first folder names (checked inline in the policy, then `is_member`); only the server writes (no insert, update or delete policy). (0045 is #201, 0046 is #203) |
 | `0048_unpaid_trial_deletion` | A business's data is deleted 30 days after its trial ended unpaid: `unpaid_trials_for_cleanup(now)` (still on the trial plan, never paid, no live, past-due or pending subscription, trial ended 23+ days ago; `due` from day 30), `delete_unpaid_trial(tenant, now)` (rechecks under the business's lock; audit `tenant.deleted` with counts only, then the business is deleted and every table that names it goes with it, except `trial_phones`, set to null so the number still cannot take a second free trial; `deleted`, `gone` or `not_eligible`), `media_object_names(tenant, conversations?)` (a business's or some chats' file paths in `message-media`, for the server to remove through the Storage API). `delete_contact_data` (0043) also returns `conversation_ids`. Server only |
 | `0049_browser_write_audit` | Every change a member makes straight from the dashboard (row-level security, no server route) is audited: a trigger, `audit_browser_write()`, on `tenants` (update), `services`, `resources`, `catalog_items`, `quotes` (insert, update, delete), `leads` and `memberships` (update) writes `<entity>.created`, `.updated` or `.deleted` with the member as the actor and `diff` = `{ changed: [column names], <safe column>: { from, to } }`. Only the columns listed as safe for the table carry values (a name, time zone, stage, status, price, owner, takeover preference); a customer's fields, a phone number and the agent settings' text are only named. An update that changes nothing (other than `updated_at`) and a write by the server (no member) are not audited here: the server audits its own. Security definer; nobody can call it directly |
+| `0050_outbound_webhooks` | Outbound webhooks (Pro): `webhook_endpoints` (one per business: https URL, wanted events, `secret_enc` with ENCRYPTION_KEY, `secret_hint`, last success and failure) and `webhook_deliveries` (an outbox: business, event, record id, status `pending`/`delivered`/`failed`/`dropped`, attempts, next attempt, the claiming run; no customer data). A trigger on `leads` (insert; stage reaching `qualified`), `bookings` (reaching `confirmed`; `confirmed` → `cancelled`) and `handoffs` (insert) queues `lead.created`, `lead.qualified`, `booking.confirmed`, `booking.cancelled`, `handoff.opened` in the same transaction, whoever wrote, only for an active endpoint that wants the event, once per record (unique business, event, record); a failure in it never fails the write. `save_webhook_endpoint`, `rotate_webhook_secret`, `delete_webhook_endpoint` (each audited: `webhook_endpoint.created`/`updated` with the host and events, never the path; `secret_rotated`; `deleted`); `claim_webhook_deliveries(run, limit)` (5-minute claim, skip locked; removes rows done over 30 days ago) and `record_webhook_attempt(id, run, outcome, status, error)` (only the claiming run, once; a failure retries after 1, 5, 15 min, 1, 3, 6, 12 h, then `failed`). Server only |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -758,7 +759,8 @@ chat gets at most 20 AI replies an hour, one business at most 300, and one busin
 `tenant_rate_limit` or `contact_rate_limit`, before any model call. Its messages wait in the inbox for staff (as for a chat a person
 has), STOP still works, and the owners and admins get one `account_notice` ("Spark Agent has paused AI replies for today: your business
 reached its daily AI limit." / "...for a while: your business sent more than 300 in the last hour." / "...stopped replying to one
-customer for now...", with the inbox link), keyed once a day for the cap and once an hour for a pace limit. The model client also refuses
+customer for now...", with the inbox link), keyed once a day for the cap and once an hour per business for a pace limit and for chats reaching theirs (50 flooded chats
+in an hour make one alert, with the first chat's link; a chat that stays flooded alerts again each hour). The model client also refuses
 calls past the cap (`LlmError` `over_budget`, read at most once a minute per business), so the lead card and suggested replies stop too
 (the lead card is then written without the model), and records every call's estimated cost (`record_ai_spend`, not awaited). Replies
 resume by themselves: the hour slides, the day turns. A failed read of the limits fails the gate step (retried); a failed cap read in the
@@ -885,7 +887,7 @@ other origins get no CORS headers.
   switch whatever the state), `requiredPlan` (the cheapest of starter, growth and pro that includes a locked one),
   `disabledReason`, `creditsPerMonth` (its `<kind>.sent` audit rows in the last 30 days times its credit cost; null with a
   `creditNote` for features that cost nothing extra), `settings` and `control`. Disabled, with the reason shown: features
-  with no code yet (`working_hours_mode`, `booking_confirmation`, `auto_topup`, `outbound_webhooks`, `quote_auto_send`,
+  with no code yet (`working_hours_mode`, `booking_confirmation`, `auto_topup`, `quote_auto_send`,
   `quote_followup`, `pretrip_info`: "Not available yet."), `review_request` without a review link, `staff_alerts` without an
   owner or admin alert number, `daily_agenda` without an owner alert number, `booking` without an active service.
 - `PATCH /api/features/:key` `{ enabled?, settings? }` → the `FeatureRow` as it now stands (owner or admin). `settings` is
@@ -976,6 +978,38 @@ Plain lists (leads, conversations, bookings, services) are read directly under R
   customer's last message while a handoff is open, `assignedTo` = the owner's user id); `todayBookings` (held and confirmed,
   a hold that ran out left out; `place` = `details.place` else the service). Staff get their own hot leads
   (`leads.owner_user_id`) and their own calendar's bookings (`resources.user_id`); the month's numbers are the business's.
+
+**Outbound webhooks (Pro; built Day 7; `backend/src/outbound-webhooks`, migration 0050, types `packages/types/src/integrations.ts`).**
+A business's CRM or sheet hears about its leads, bookings and handoffs. Owner or admin:
+
+- `GET /api/integrations/webhook` → `WebhookSettings` `{ inPlan, sending, endpoint }`. `sending` is true only while the plan
+  includes `outbound_webhooks`, its switch is on (Features), the business is live and the endpoint is active. The endpoint
+  shows its URL, events, `secretHint` (last 4 characters) and last success and failure, never the secret.
+- `PUT /api/integrations/webhook` `{ url, events }` → `WebhookEndpointSaved` `{ endpoint, secret }`. `secret` (`whsec_...`) is
+  returned once, when the endpoint is created; a change keeps the secret and answers `secret: null`. `url`: https, port 443
+  or 8443, no user name or password, not a private, loopback, link-local or reserved address or a local name
+  (`validation_failed` with `fields.url`). `events`: one or more of the five. Not in the plan: `plan_required` (403).
+- `POST /api/integrations/webhook/rotate-secret` → `WebhookSecret` `{ secret, secretHint }`; the old one stops working at
+  once. No endpoint: `not_found`.
+- `POST /api/integrations/webhook/test` → `WebhookTestResult` `{ delivered, status, error }`: a signed `ping` now; changes nothing.
+- `DELETE /api/integrations/webhook` → 204, with anything still queued.
+
+What the receiver gets: `POST` with `content-type: application/json`, `user-agent: PakkaAgent-Webhooks/1`,
+`X-Pakka-Event` (the type), `X-Pakka-Event-Id` (the same on every retry: dedupe on it) and
+`X-Pakka-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" with the secret>`. The receiver recomputes the
+HMAC over the raw body, compares in constant time and refuses a `t` more than 5 minutes away
+(`backend/src/outbound-webhooks/signing.ts` `verifySignature`). Body:
+`{ id, type, occurredAt, businessId, data }`, where `data` is the record as it is when sent:
+`lead.*` → `{ lead: { id, stage, score, temperature, fields, createdAt }, contact: { id, name, phone } }`;
+`booking.*` → `{ booking: { id, status, startAt, endAt, service, resource, leadId }, contact }`;
+`handoff.opened` → `{ handoff: { id, reason, priority, conversationId }, contact }`; `ping` → `{}`.
+
+Delivery: the `outbound-webhooks` job (every minute, one run at a time) claims up to 50 due events and sends them side by side,
+10 s each, never following a redirect, and connects only after checking every address the name resolves to (DNS rebinding).
+A 2xx is delivered; anything else is tried again (1, 5, 15 minutes, 1, 3, 6, 12 hours), then `failed`. At least once: a step
+retried after its POST sends the same event id again. An event is `dropped` (never sent later) when its record is gone (a
+customer's deletion request), the endpoint is off, or the business may not send webhooks (not Pro, switched off, paused).
+The URL and the receiver's answer are never logged; the audit has the host only.
 
 ## 7. Rules
 

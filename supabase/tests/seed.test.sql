@@ -88,9 +88,10 @@ select is(
   'every seeded service has an active resource of its type, so it can be booked');
 
 select is(
-  (select count(*) from public.tenants where id::text like 'd0000000-%' and business_hours = '{}'),
+  -- The front desk (…fd) books nothing and answers the demo menu at any hour.
+  (select count(*) from public.tenants where id::text like 'd0000000-%' and id <> 'd0000000-0000-0000-0000-0000000000fd' and business_hours = '{}'),
   0::bigint,
-  'every seeded business has business hours');
+  'every seeded business that books has business hours');
 
 select is(
   (select count(*)
