@@ -58,3 +58,6 @@ next-env.d.ts
 
 # Playwright signed-in sessions (written by frontend/tests/e2e/auth.setup.ts)
 frontend/tests/e2e/.auth/
+
+# vitest cache
+backend/.vitest/
