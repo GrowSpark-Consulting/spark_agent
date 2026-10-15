@@ -44,7 +44,13 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
   { call: "POST /api/conversations/:id/mode", file: "features/inbox/conversation-mode.ts" },
   { call: "GET /api/conversations/:id/lead-card", file: "features/inbox/lead-card-api.ts" },
   { call: "POST /api/conversations/:id/suggest", file: "features/inbox/suggest-reply.ts" },
+  { call: "GET /api/integrations/webhook", file: "features/settings/integrations/webhook-api.ts" },
+  { call: "PUT /api/integrations/webhook", file: "features/settings/integrations/webhook-api.ts" },
+  { call: "DELETE /api/integrations/webhook", file: "features/settings/integrations/webhook-api.ts" },
+  { call: "POST /api/integrations/webhook/rotate-secret", file: "features/settings/integrations/webhook-api.ts" },
+  { call: "POST /api/integrations/webhook/test", file: "features/settings/integrations/webhook-api.ts" },
   { call: "POST /api/kb/documents", file: "features/knowledge/kb-content.ts" },
+  { call: "POST /api/onboarding/import-site", file: "features/knowledge/website-import.ts" },
   { call: "DELETE /api/kb/documents/:id", file: "features/knowledge/kb-content.ts" },
   { call: "POST /api/kb/faqs", file: "features/knowledge/kb-content.ts" },
   { call: "PATCH /api/kb/faqs/:id", file: "features/knowledge/kb-content.ts" },
@@ -126,15 +132,8 @@ const NO_BROWSER_CALLER: Record<string, string> = {
   "POST /api/webhooks/payu": "PayU calls it: payment results (verified with PayU before anything changes)",
   "POST /api/billing/cancel": "the Billing screen's Cancel plan button is not built yet (Dhatri)",
   "POST /api/billing/resume": "the Billing screen's Keep my plan button is not built yet (Dhatri)",
-  // Outbound webhooks (Pro, Dev 2, 0050): the Integrations settings screen is not built yet (Dhatri).
-  "GET /api/integrations/webhook": "not called yet: Settings → Integrations (Dhatri)",
-  "PUT /api/integrations/webhook": "not called yet: Settings → Integrations (Dhatri)",
-  "DELETE /api/integrations/webhook": "not called yet: Settings → Integrations (Dhatri)",
-  "POST /api/integrations/webhook/rotate-secret": "not called yet: Settings → Integrations (Dhatri)",
-  "POST /api/integrations/webhook/test": "not called yet: Settings → Integrations (Dhatri)",
   "GET /api/agent/settings": "the Agent settings screen calls it (features/agent/agent-settings.ts), but only against stand-ins and the e2e mock database: delete this line once a success round trip is seen against a real database",
   "PATCH /api/agent/settings": "the Agent settings screen calls it (features/agent/agent-settings.ts), but only against stand-ins and the e2e mock database: delete this line once a success round trip is seen against a real database",
-  "POST /api/onboarding/import-site": "Website import screen not connected yet (Dev 3)",
 };
 
 function sourceFiles(dir: string): string[] {

@@ -25,6 +25,8 @@ import {
   type KbDocument,
 } from "./kb-content";
 import { UploadDialog } from "./upload-dialog";
+import { type ImportResult } from "./website-import";
+import { WebsiteImportForm } from "./website-import-form";
 import { useDocumentWatch } from "./use-document-watch";
 
 // "Documents", ported from the /dashboard/preview Knowledge base (features/knowledge/pakka-knowledge.tsx):
@@ -114,6 +116,13 @@ export function Documents({ tenantId, timeZone, canWrite }: { tenantId: string; 
     flash(doc.status === "processing" ? `${doc.name} is processing` : `${doc.name}: ${DOCUMENT_STATUS_TEXT[doc.status]}`);
   }
 
+  /** A web page the API accepted: put in the list at once (an earlier import of the same address has the same id, so it is replaced, not doubled). */
+  function pageImported({ document, replaced }: ImportResult) {
+    changes.current += 1;
+    setList((prev) => (prev.status === "ready" ? { ...prev, documents: upsertDocument(prev.documents, document) } : prev));
+    flash(`${document.name} is processing${replaced ? " (replaces the earlier import)" : ""}`);
+  }
+
   async function remove(doc: KbDocument) {
     await deleteDocument(tenantId, doc.id).catch((err: unknown) => writeFailed(err, doc.id));
     changes.current += 1;
@@ -148,6 +157,8 @@ export function Documents({ tenantId, timeZone, canWrite }: { tenantId: string; 
             ? `You have ${DOCUMENT_LIMIT} documents, the most a business can keep. Delete one to upload another.`
             : "PDF, Word (.docx), text or Markdown, up to 5 MB. The AI uses a document once it’s ready."}
       </p>
+
+      <WebsiteImportForm tenantId={tenantId} canWrite={canWrite && !writesUnavailable && list.status === "ready"} documents={documents} onImported={pageImported} />
 
       {canWrite && writesUnavailable ? (
         <div id="documents-unavailable">

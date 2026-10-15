@@ -41,7 +41,7 @@ import { ServicesEditor } from "./services-editor";
 // routes aren't deployed, a section says so (kb-content.ts, "Not deployed yet") instead of failing.
 // A FAQ the AI can't use yet (its embedding failed) is retried by saving it again, and an answer that
 // was stored but not embedded is found by reading both lists again (faq-recovery.ts).
-// Website sync (POST /api/onboarding/import-site, Dev 1) is not built and has no button here.
+// Website import (POST /api/onboarding/import-site, Dev 1) is the "Import a web page" form in Documents (website-import-form.tsx), one page at a time.
 
 /** A section's state; Try again is attached when rendering. */
 type Loaded<T> = Exclude<SectionSource<T>, { status: "error" }> | { status: "error"; message: string };

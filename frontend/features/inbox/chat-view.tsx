@@ -227,7 +227,7 @@ export function ChatView({
                   {day.label}
                 </div>
                 {day.messages.map((m) => (
-                  <MessageBubble key={m.id} message={m} timeZone={timeZone} />
+                  <MessageBubble key={m.id} message={m} timeZone={timeZone} tenantId={tenantId} conversationId={conversation.id} />
                 ))}
               </Fragment>
             ))
