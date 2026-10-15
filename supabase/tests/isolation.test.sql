@@ -110,6 +110,8 @@ begin
     insert into public.whatsapp_connections (id, tenant_id, channel_id, method, waba_id, phone_number_id, token_enc, token_type, connected_by)
       values (wc, t, ch, 'manual_byo', 'waba-iso-' || s, 'pn-iso-' || s, 'enc', 'business', u::text);
     insert into public.connect_links (token_hash, tenant_id, created_by, expires_at) values (repeat(n::text, 64), t, u, now() + interval '1 day');
+    insert into public.team_invites (tenant_id, email, name, role, token_hash, invited_by, expires_at)
+      values (t, 'invitee-' || s || '@test.local', 'Invitee ' || s, 'staff', repeat((n + 6)::text, 64), u, now() + interval '7 days');
     insert into public.consent_logs (tenant_id, contact_id, event, source) values (t, ct, 'notice_shown', 'first_message');
     insert into public.google_calendar_connections (tenant_id, resource_id, refresh_token_enc, scope) values (t, rs, 'enc', 'calendar');
     insert into public.whatsapp_templates (tenant_id, connection_id, name, language, category, components) values (t, wc, 'iso_' || s || '_v1', 'en', 'utility', '{}');

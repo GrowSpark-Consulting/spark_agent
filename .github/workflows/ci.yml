@@ -62,3 +62,4 @@ jobs:
       - run: bash scripts/db/hold-slot-concurrency.sh
       # 10 parallel members and 10 parallel numbers: never past the plan's seats (2) or numbers (1).
       - run: bash scripts/db/plan-limit-concurrency.sh
+      - run: bash scripts/db/team-invite-concurrency.sh

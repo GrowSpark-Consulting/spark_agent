@@ -4,7 +4,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { destinationForUser } from "@/lib/auth/destination";
-import { RESET_PASSWORD_PATH, safeNext } from "@/lib/auth/redirect";
+import { inviteNext, RESET_PASSWORD_PATH, safeNext } from "@/lib/auth/redirect";
 import { getAuth, getSessionState, TENANT_COOKIE } from "@/lib/auth/session";
 import { formatError } from "@/lib/errors";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -90,11 +90,13 @@ export async function signup(_prev: SignupState, form: FormData): Promise<Signup
     return { fields, email };
   }
 
+  // Someone who followed an invitation continues to it, not to onboarding: accepting it gives them their business.
+  const after = inviteNext(form.get("next")) ?? "/onboarding";
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase.auth.signUp({
     email: parsed.data.email,
     password: parsed.data.password,
-    options: { emailRedirectTo: await callbackUrl("/onboarding") },
+    options: { emailRedirectTo: await callbackUrl(after) },
   });
   if (error) {
     // Same screen as a fresh signup, so the form can't be used to find out who has an account.
@@ -102,7 +104,7 @@ export async function signup(_prev: SignupState, form: FormData): Promise<Signup
     return { error: formatError(error).message, email };
   }
   // A session means email confirmation is off: the new account goes straight to onboarding.
-  if (data.session) redirect("/onboarding");
+  if (data.session) redirect(after);
   return { sent: true, email };
 }
 

@@ -14,5 +14,6 @@ export * from "./kb-import";
 export * from "./onboarding";
 export * from "./pack";
 export * from "./privacy";
+export * from "./team";
 export * from "./tenancy";
 export * from "./whatsapp";
