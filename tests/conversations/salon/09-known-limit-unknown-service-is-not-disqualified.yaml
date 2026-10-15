@@ -1,0 +1,21 @@
+name: Salon, KNOWN LIMIT, a request for a service the salon does not offer is not disqualified, because the pack's matcher cannot be judged
+description: "Day 7 PR D, KNOWN LIMIT pinned as it behaves today. packs/salon.json has the hard fail { field: services, match: none_in_service_catalog } and the rule { field: services, match: in_service_catalog, points: 40 }, but scoring/score.ts judge() reads only within_<x>_band and in_<x>_area(s). A matcher it does not know judges nothing: the rule earns no points and the hard fail never fires. So the lead stays cold with score 0 (not disqualified), and the assistant carries on as for any lead. When judge() learns these matchers, this chat should change to the disqualified outcome (compare real-estate/59). See the task note of 15 Oct."
+pack: salon
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { type: service, priceFrom: 40000, attributes: {} }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+turns:
+  - customer: "Do you do hair transplants? I want one tomorrow"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { services: hair transplant, preferred_date: tomorrow }, question: null }
+      reply: "Thank you for asking. Which time of day would suit you, morning, afternoon or evening?"
+    expect:
+      reply: { sent: true, buttons: [] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      leadTemperature: cold
+      leadScore: 0

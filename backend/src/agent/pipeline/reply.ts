@@ -307,6 +307,7 @@ async function loadScheduling(
   const aboutBooking = intent === "book" || intent === "reschedule" || intent === "cancel" || q.readyForSlots;
   if (!stored.success && !waiting && !aboutBooking) return undefined;
 
+  const pincode = q.bookingKind === "field_visit" && q.visitAreaField ? visitPincode((await deps.store.getLead(turn.tenantId, turn.leadId))?.fields[q.visitAreaField]) : undefined;
   const [services, timeZone, active] = await Promise.all([sd.services(turn.tenantId), sd.timeZone(turn.tenantId), sd.port.activeBooking(turn.tenantId, turn.leadId)]);
   const preferred = (agent?.extraction as { preferredTime?: unknown } | undefined)?.preferredTime;
   const times = waiting && "slots" in waiting ? waiting : null;
@@ -324,7 +325,15 @@ async function loadScheduling(
     timeZone,
     now,
     ...(stored.success ? { act: stored.data as ActResult } : {}),
+    ...(pincode ? { pincode } : {}),
   };
+}
+
+/** The six digits of a pincode the lead holds (typed with a space or a dash it is the same pincode), or undefined: a place name, a short number or nothing is not one. */
+function visitPincode(value: unknown): string | undefined {
+  const text = typeof value === "string" ? value : typeof value === "number" && Number.isInteger(value) ? String(value) : "";
+  const digits = normaliseArea(text);
+  return /^\d{6}$/.test(digits) ? digits : undefined;
 }
 
 /** The service to book: the one the business named, if it is active; else the only one; never a guess among several. */
@@ -364,7 +373,7 @@ async function performAct(turn: TurnContext, understood: UnderstandResult, deps:
   if (s.act) return { kind: s.act.kind };
   const request = planReply(loaded.input).act;
   if (!request) return keepAct(turn, { kind: "error" }, s.now, deps);
-  const result = await runAct(request, { tenantId: turn.tenantId, leadId: turn.leadId, timeZone: s.timeZone, now: s.now, port: sd.port });
+  const result = await runAct(request, { tenantId: turn.tenantId, leadId: turn.leadId, timeZone: s.timeZone, now: s.now, port: sd.port, ...(s.pincode ? { pincode: s.pincode } : {}) });
   return keepAct(turn, result, s.now, deps);
 }
 

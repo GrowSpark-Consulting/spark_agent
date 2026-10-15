@@ -225,3 +225,38 @@ describe("cancelling a booking asks first", () => {
     await expect(runAct({ kind: "cancel", bookingId: OLD, label: "x" }, ctx(p))).rejects.toThrow("database down");
   });
 });
+
+describe("a visit to the customer's address: only times of someone who works in their pincode", () => {
+  const withPincode = (p: SchedulingPort, pincode: string | undefined) => ({ ...ctx(p), ...(pincode === undefined ? {} : { pincode }) });
+
+  it("asks the booking engine for that pincode on every look, and sends no pincode when the customer has not given one", async () => {
+    const p = port({ findSlots: vi.fn<SchedulingPort["findSlots"]>(async (_t, input) => (input.to.getTime() - input.from.getTime() > 24 * 3_600_000 ? [SUN_15] : [])) });
+    await runAct({ kind: "offer", serviceId: SERVICE, preferredText: "tomorrow evening" }, withPincode(p, "600042"));
+    expect(p.findSlots.mock.calls.length).toBeGreaterThan(1);
+    for (const [, input] of p.findSlots.mock.calls) expect(input.pincode).toBe("600042");
+
+    const q = port();
+    await runAct({ kind: "offer", serviceId: SERVICE, preferredText: null }, withPincode(q, undefined));
+    expect(Object.keys(q.findSlots.mock.calls[0][1])).not.toContain("pincode");
+  });
+
+  it("looks for the same pincode again when the chosen time was just taken", async () => {
+    const taken = new AppError("slot_taken", "That time was just taken.");
+    const p = port({ holdSlot: vi.fn<SchedulingPort["holdSlot"]>(async () => Promise.reject(taken)) });
+    const result = await runAct({ kind: "book", serviceId: SERVICE, bookingKind: "field_visit", slot: offered(SUN_15) }, withPincode(p, "600042"));
+    expect(result.kind).toBe("offered");
+    expect(p.holdSlot).toHaveBeenCalledWith(T, offered(SUN_15), LEAD, "field_visit");
+    expect(p.findSlots.mock.calls[0][1].pincode).toBe("600042");
+  });
+
+  it("looks for the same pincode when a booking is moved", async () => {
+    const p = port();
+    await runAct({ kind: "offer", serviceId: SERVICE, preferredText: "monday evening", rescheduleBookingId: BOOKING }, withPincode(p, "600020"));
+    expect(p.findSlots.mock.calls[0][1].pincode).toBe("600020");
+  });
+
+  it("nothing for the pincode in a place the business has no one in: no times, and the caller says so", async () => {
+    const p = port({ findSlots: vi.fn<SchedulingPort["findSlots"]>(async () => []) });
+    expect(await runAct({ kind: "offer", serviceId: SERVICE, preferredText: null }, withPincode(p, "641001"))).toEqual({ kind: "no_slots" });
+  });
+});

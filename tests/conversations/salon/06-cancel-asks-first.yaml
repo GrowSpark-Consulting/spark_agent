@@ -1,0 +1,30 @@
+name: Salon, a cancellation is asked about first, and only a clear yes cancels the appointment
+description: "Day 7 PR D. A first message that mentions cancelling changes nothing; the customer is asked, and the appointment is cancelled only after yes."
+pack: salon
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { type: service, priceFrom: 40000, attributes: {} }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+  existing: "2026-10-11T09:30:00.000Z"
+turns:
+  - customer: "I want to cancel my appointment"
+    mock:
+      extraction: { language: en, intent: cancel, fields: {}, question: null, confidence: 0.95 }
+      reply: "Sure. Do you want me to cancel your appointment on Sunday at 3:00 pm? Please reply yes or no."
+    expect:
+      reply: { sent: true, contains: ["3:00 pm"] }
+      aiReplies: 1
+      calendar: { confirmed: ["2026-10-11T09:30:00.000Z"], cancelled: 0 }
+    mockOnly:
+      case: cancel_ask
+  - customer: "yes please"
+    mock:
+      extraction: { language: en, intent: give_details, fields: {}, question: null }
+      reply: "Done, your appointment is cancelled. You are welcome to book again anytime."
+    expect:
+      reply: { sent: true }
+      aiReplies: 1
+      calendar: { confirmed: [], cancelled: 1 }
+    mockOnly:
+      case: cancelled
