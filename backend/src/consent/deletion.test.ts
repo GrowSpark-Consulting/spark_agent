@@ -14,14 +14,19 @@ const context = (role: TenantContext["role"] = "owner"): TenantContext => ({
   tenant: { id: TENANT, name: "Skyline Homes", vertical: "real-estate", timezone: "Asia/Kolkata", status: "active", planKey: "starter", trialEndsAt: null },
 });
 
-function deps(tables: Record<string, FakeDbResponse>, removeEvent: DeletionDeps["removeEvent"] = vi.fn(async () => "removed" as const)) {
+function deps(
+  tables: Record<string, FakeDbResponse>,
+  removeEvent: DeletionDeps["removeEvent"] = vi.fn(async () => "removed" as const),
+  removeMedia: DeletionDeps["removeMedia"] = vi.fn(async () => ({ removed: 0, left: 0 })),
+) {
   const db = fakeDb(tables);
-  return { d: { db: db.client, removeEvent } satisfies DeletionDeps, calls: db.calls, removeEvent };
+  return { d: { db: db.client, removeEvent, removeMedia } satisfies DeletionDeps, calls: db.calls, removeEvent, removeMedia };
 }
 const rpcArgs = (calls: ReturnType<typeof deps>["calls"], name: string) => calls.find((c) => c.table === `rpc:${name}`)?.args[0];
 
-const deleted = (events: { resource_id: string; event_id: string }[] = [], outcome = "deleted"): FakeDbResponse => ({
-  data: [{ outcome, conversations: 1, messages: 12, leads: 1, bookings: 2, calendar_events: events }],
+const CHAT = "0f830000-0000-4000-8000-000000000001";
+const deleted = (events: { resource_id: string; event_id: string }[] = [], outcome = "deleted", conversationIds: string[] = [CHAT]): FakeDbResponse => ({
+  data: [{ outcome, conversations: conversationIds.length, messages: 12, leads: 1, bookings: 2, calendar_events: events, conversation_ids: conversationIds }],
   error: null,
 });
 
@@ -48,9 +53,32 @@ describe("POST /api/contacts/:id/deletion", () => {
       status: "deleted",
       removed: { conversations: 1, messages: 12, leads: 1, bookings: 2 },
       calendarEvents: { removed: 1, left: 0 },
+      mediaFiles: { removed: 0, left: 0 },
     });
     expect(rpcArgs(calls, "delete_contact_data")).toEqual({ p_tenant_id: TENANT, p_contact_id: CONTACT, p_actor: USER });
     expect(removeEvent).toHaveBeenCalledWith(TENANT, { resourceId: RESOURCE, eventId: "pkevent1" });
+  });
+
+  // 0048: delete_contact_data names the chats it deleted, and their photos, voice notes and documents are removed from storage.
+  it("removes the deleted chats' media files, and counts any it could not as left, never failing the deletion", async () => {
+    const removeMedia = vi.fn<DeletionDeps["removeMedia"]>(async () => ({ removed: 3, left: 0 }));
+    const one = deps({ "rpc:delete_contact_data": deleted() }, undefined, removeMedia);
+    expect((await deleteContactData(context(), CONTACT, one.d)).mediaFiles).toEqual({ removed: 3, left: 0 });
+    expect(removeMedia).toHaveBeenCalledWith(TENANT, [CHAT]);
+
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const partly = deps({ "rpc:delete_contact_data": deleted() }, undefined, vi.fn(async () => ({ removed: 1, left: 2 })));
+    expect((await deleteContactData(context(), CONTACT, partly.d)).mediaFiles).toEqual({ removed: 1, left: 2 });
+    const unlisted = deps({ "rpc:delete_contact_data": deleted() }, undefined, vi.fn(async () => Promise.reject(new Error("message media: listing the files failed"))));
+    expect(await deleteContactData(context(), CONTACT, unlisted.d)).toMatchObject({ status: "deleted", mediaFiles: { removed: 0, left: 0 } });
+    expect(error).toHaveBeenCalledTimes(2);
+    error.mockRestore();
+  });
+
+  it("asks storage for nothing when no chat was deleted (asked again, or a contact who never wrote)", async () => {
+    const { d, removeMedia } = deps({ "rpc:delete_contact_data": deleted([], "already_deleted", []) });
+    await deleteContactData(context(), CONTACT, d);
+    expect(removeMedia).toHaveBeenCalledWith(TENANT, []);
   });
 
   it("counts an event it could not take down as left, and never fails the deletion for it", async () => {

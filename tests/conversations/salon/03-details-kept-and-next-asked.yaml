@@ -1,0 +1,19 @@
+name: Salon, the services a customer names are kept and the next detail is asked, with no invented answer
+description: "Day 7 PR D. The pack's own fields (services, preferred_stylist, preferred_date, preferred_time, party_size) are what is kept from the extraction. Answers to questions the pack does not ask are dropped (budget here)."
+pack: salon
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { type: service, priceFrom: 40000, attributes: {} }
+turns:
+  - customer: "I want a haircut and a facial, my budget is 5 lakh"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { services: "haircut, facial", budget: 5L }, question: null }
+      reply: "Lovely, a haircut and a facial. Which day would you like to come?"
+    expect:
+      reply: { sent: true, contains: ["Which day"] }
+      aiReplies: 1
+      handoff: null
+      leadStage: engaged
+    mockOnly:
+      leadFields: { services: "haircut, facial" }

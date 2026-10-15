@@ -61,6 +61,7 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0045_notify_attempts` | A keyed send is claimed before WhatsApp is asked (closes the Day 6 reply-key note, section 3.1): `notify_attempts` (server only; `message_id` = the keyed message id, `status` `sending` or `released`), `claim_notify_attempt(tenant, message, kind)` (`claimed`, `sent` when the message is recorded, `in_doubt` when an earlier attempt neither recorded nor released it) and `release_notify_attempt(tenant, message)` (after a refusal for certain). Server only |
 | `0046_rls_tightening` | The Day 7 row-level-security review: `consent_logs` loses its browser INSERT (the server's functions write every entry); staff update only the leads assigned to them and cannot reassign them (owners and admins any lead); `anon` loses every write grant on every table and view, and on tables created later. (0045 is the notify claim, #201) |
 | `0047_message_media` | The private storage bucket `message-media` (50 MB a file, any type) for a customer's photos, voice notes and documents once downloaded from WhatsApp, at `<tenant_id>/<conversation_id>/<message_id>.<ext>` (`backend/src/lib/storage.ts` builds the path). A member reads the files of the business its first folder names (checked inline in the policy, then `is_member`); only the server writes (no insert, update or delete policy). (0045 is #201, 0046 is #203) |
+| `0048_unpaid_trial_deletion` | A business's data is deleted 30 days after its trial ended unpaid: `unpaid_trials_for_cleanup(now)` (still on the trial plan, never paid, no live, past-due or pending subscription, trial ended 23+ days ago; `due` from day 30), `delete_unpaid_trial(tenant, now)` (rechecks under the business's lock; audit `tenant.deleted` with counts only, then the business is deleted and every table that names it goes with it, except `trial_phones`, set to null so the number still cannot take a second free trial; `deleted`, `gone` or `not_eligible`), `media_object_names(tenant, conversations?)` (a business's or some chats' file paths in `message-media`, for the server to remove through the Storage API). `delete_contact_data` (0043) also returns `conversation_ids`. Server only |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -622,6 +623,16 @@ keys `trial_notice:<business>:<day>:<owner>`. Placeholder wording until Raja's.
 - **Never a paid business:** the claim and the pause recheck under the business's row lock (the lock `settle_payment` takes),
   so a business that pays during or after its trial gets no "trial ending" notice and is not paused.
 - `GET /api/billing/balance` reads a trial paused at its end as `aiPausedReason: trial_ended`.
+- **Deletion 30 days after an unpaid trial (`unpaid-trial-cleanup`, Day 7; `backend/src/billing/unpaid-trials.ts`, 0048).** Once a day
+  at 03:30 in India, one run at a time, up to 100 businesses: a business still on the trial plan that never paid (no successful
+  payment; no live, past-due or pending subscription) is warned 7 days before (from day 23 after its trial ended: an
+  `account_notice` to its owners, "Your Spark Agent trial ended on 20 Sept 2026. Your chats, leads and settings will be deleted on
+  20 Oct 2026." / "Choose a plan in Billing to keep them." with the billing link; key `unpaid_trial_warning:<business>:<date>:<owner>`,
+  so once, and again only if the date moves) and deleted from day 30: `delete_unpaid_trial` rechecks under the business's lock (a plan
+  bought or a trial extended since it was listed wins), writes `tenant.deleted` (counts only), and deletes the business and
+  everything that names it; then its files in `message-media` are removed through the Storage API (a step that throws while any
+  file is left, so Inngest retries it). Kept: the trial number (`trial_phones`, tenant set to null), the audit rows, the members'
+  own logins, and events on the business's own Google Calendar. Each business is a step of its own; a replay finds it `gone`.
 - KNOWN LIMIT: a notice reaches an owner only through their alert number (the Team screen; onboarding does not ask for it
   yet) and, outside their 24-hour window, only once the `staff_alert` template is approved. The pause does not depend on it.
 
@@ -780,18 +791,19 @@ invalid `phone` is `invalid` with `fields.phone`.
 - `GET /api/admin/whatsapp/connections` → `AdminConnection[]` (`backend/src/admin/connections.ts`, Day 7): every business's connections, newest first (up to 500): business, `method`, `status`, the number as Meta displays it, verified name, coexistence, quality, messaging limit, a manual token's expiry, and `lastCheck` `{ ranAt, overall, checks: [{ key, status, message }] }` read from `last_check` in the shape of `docs/whatsapp-connection-contract.md` (null when never checked or in an older shape). No token or secret is ever selected.
 Not built: opening a business's dashboard as an admin (logged) needs its own design.
 
-**Message media (`backend/src/lib/storage.ts`, 0047; agreed with Dev 1, 14 Oct).** Downloaded WhatsApp media goes to the private bucket `message-media` at `<tenant_id>/<conversation_id>/<message_id>.<ext>`: build it with `messageMediaPath` (refuses anything that is not an id) and `mediaExtension(mimeType)` (`.bin` for an unknown type). Written by the server only; a member of the business reads with their own session, or the server hands out a signed URL. **To do once files are stored:** a contact's data deletion and a business's deletion must also remove its folders through the Storage API (deleting rows does not touch storage).
+**Message media (`backend/src/lib/storage.ts`, 0047; agreed with Dev 1, 14 Oct).** Downloaded WhatsApp media goes to the private bucket `message-media` at `<tenant_id>/<conversation_id>/<message_id>.<ext>`: build it with `messageMediaPath` (refuses anything that is not an id) and `mediaExtension(mimeType)` (`.bin` for an unknown type). Written by the server only; a member of the business reads with their own session, or the server hands out a signed URL. Both deletions remove the files too, through the Storage API (deleting rows does not touch storage; 0048 `media_object_names` lists them by path): a contact's data deletion removes its deleted chats' files, and an unpaid trial's deletion removes all of the business's.
 
 **A customer's data deletion (`backend/src/consent/deletion.ts`, 0043; types in `@pakka/types` `privacy.ts`; Settings → Data & privacy).**
 Owner or admin; a contact of another business is `not_found`.
 - `GET /api/contacts/:id/deletion` → `ContactDeletionPreview` `{ contactId, deletedAt, conversations, messages, leads, bookings,
   upcomingBookings }`: what a deletion would remove, for the confirmation.
 - `POST /api/contacts/:id/deletion` (no body) → `ContactDeletionResult` `{ status: deleted | already_deleted, removed { conversations,
-  messages, leads, bookings }, calendarEvents { removed, left } }`. The chats (messages, handoffs) and leads (bookings, quotes) are
+  messages, leads, bookings }, calendarEvents { removed, left }, mediaFiles { removed, left } }`. The chats (messages, handoffs) and leads (bookings, quotes) are
   deleted, the contact is scrubbed, `consent_logs` gets `deletion_requested` and `deleted`, and the audit names the member. Past bookings'
   Google Calendar events carry the customer's name and are taken down after; `left` counts any that couldn't be (Google unreachable,
-  calendar disconnected): the business removes those by hand. `conflict` while a booking is coming up (cancel it first). If the same
-  number writes again later, it is a new contact.
+  calendar disconnected): the business removes those by hand. The deleted chats' photos, voice notes and documents are removed from
+  `message-media` too (0048); `mediaFiles.left` counts any that couldn't be, logged for the team. `conflict` while a booking is coming
+  up (cancel it first). If the same number writes again later, it is a new contact.
 
 **Who may call a route (`backend/src/server/auth.ts`, built):**
 

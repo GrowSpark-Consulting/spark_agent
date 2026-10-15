@@ -161,6 +161,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
         slots: setup.slots,
         takenWhenChosen: setup.takenWhenChosen,
         existing: setup.existing,
+        workPincodes: setup.workPincodes,
         onConfirm: () => {
           const lead = fake.leads.get(LEAD);
           if (lead) lead.stage = "booked";

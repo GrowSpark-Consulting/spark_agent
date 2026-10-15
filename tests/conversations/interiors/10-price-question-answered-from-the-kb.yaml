@@ -1,0 +1,27 @@
+name: Interiors, a price question is answered from the knowledge base only, and a price the text does not have is never made up
+description: "Day 7 PR D. The same rule as every pack: the reply may use only the knowledge-base text. The second question asks for a price the text does not hold; the reply must not name one."
+pack: interiors
+kb:
+  - "Modular kitchens start at ₹1.2 lakh for a straight layout. Wardrobes start at ₹45,000 per unit."
+turns:
+  - customer: "What does a modular kitchen cost?"
+    mock:
+      extraction: { language: en, intent: question, fields: { scope: modular_kitchen }, question: "What does a modular kitchen cost?" }
+      reply: "A modular kitchen starts at ₹1.2 lakh for a straight layout. Would you like a measurement visit?"
+    expect:
+      extracted: { intent: question, language: en }
+      reply: { sent: true }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: answered_from_kb
+      reply: { contains: ["₹1.2 lakh"] }
+  - customer: "And a false ceiling for the living room?"
+    mock:
+      extraction: { language: en, intent: question, fields: { scope: living_room }, question: "What does a false ceiling cost?" }
+      reply: "A false ceiling would cost about ₹90,000."
+    expect:
+      reply: { sent: true }
+      noInventedPrice: true
+      aiReplies: 1
