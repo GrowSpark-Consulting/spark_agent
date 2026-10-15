@@ -152,6 +152,18 @@ describe("mapping rows to the inbox view model", () => {
     expect(attachmentOf({ id: "m4" })).toBeNull();
   });
 
+  it("says why a file was left out when the download job marked it skipped or unavailable, and never shows its path", () => {
+    expect(attachmentOf({ id: "m1", mime: "image/jpeg", skipped: "too_big" })).toEqual({ label: "IMG", name: "Photo", note: "Too large to keep" });
+    expect(attachmentOf({ id: "m3", mime: "application/pdf", skipped: "type_not_allowed" })).toEqual({ label: "PDF", name: "Document", note: "This file type isn't kept" });
+    expect(attachmentOf({ id: "m1", mime: "image/jpeg", unavailable: "media_gone" })).toEqual({ label: "IMG", name: "Photo", note: "WhatsApp no longer has this file" });
+    expect(attachmentOf({ id: "m1", mime: "image/jpeg", unavailable: "bad_answer" })?.note).toBe("WhatsApp wouldn't hand this file over");
+    expect(attachmentOf({ id: "m1", mime: "image/jpeg", skipped: "token_rejected" })?.note).toBe("Wasn't saved");
+    // a stored file keeps the "yet" line (no signed-URL route exists) and its path is not in the result
+    const stored = attachmentOf({ id: "m1", mime: "image/jpeg", path: "t/c/m.jpg", size: 10 });
+    expect(stored).toEqual({ label: "IMG", name: "Photo", note: "Can't be shown here yet" });
+    expect(JSON.stringify(stored)).not.toContain("t/c/m.jpg");
+  });
+
   it("makes initials from the first two words", () => {
     expect(initialsOf("Lakshmi")).toBe("L");
     expect(initialsOf("mohammed abdul rahim")).toBe("MA");

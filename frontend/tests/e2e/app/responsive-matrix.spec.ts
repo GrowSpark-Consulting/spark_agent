@@ -37,7 +37,7 @@ const TARGETS: Target[] = [
     ],
   },
   { email: "inbox@test.local", paths: ["/dashboard/inbox", "/dashboard/inbox?chat=40000000-0000-0000-0000-000000000002"] },
-  { email: "wa-platform@test.local", paths: ["/dashboard/admin/whatsapp", "/dashboard/admin/billing"] },
+  { email: "wa-platform@test.local", paths: ["/dashboard/admin/whatsapp", "/dashboard/admin/billing", "/dashboard/admin/connections"] },
 ];
 
 async function audit(page: Page, touch: boolean) {
