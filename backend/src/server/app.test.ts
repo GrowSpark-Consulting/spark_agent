@@ -440,8 +440,18 @@ describe("logPathFor", () => {
     expect(logPathFor(path)).toContain("***");
   });
 
-  it("keeps ids readable: a UUID is not a token", () => {
+  it("keeps ids readable: a UUID is not a token, nor a phone number, even when its last part is all digits", () => {
     expect(logPathFor("/api/conversations/3f2a1b4c-5d6e-4f70-8a91-b2c3d4e5f601/lead-card")).toBe("/api/conversations/3f2a1b4c-5d6e-4f70-8a91-b2c3d4e5f601/lead-card");
+    expect(logPathFor("/api/kb/faqs/10000000-0000-0000-0000-000000000001")).toBe("/api/kb/faqs/10000000-0000-0000-0000-000000000001");
+  });
+
+  it.each([
+    ["with a +", "/api/whatsapp/+919812345621/x"],
+    ["encoded", "/api/whatsapp/%2B919812345621/x"],
+    ["without a country code", "/api/contacts/9812345621"],
+  ])("masks a phone number typed into a path: %s", (_name, path) => {
+    expect(logPathFor(path)).not.toMatch(/9812345621/);
+    expect(logPathFor(path)).toContain("***");
   });
 });
 

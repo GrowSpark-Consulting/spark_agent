@@ -414,7 +414,7 @@ describe("the daily AI cap, with the real spend guard around the model", () => {
 // ---------------------------------------------------------------------------------------------------------------------
 // C. KNOWN LIMIT: how many alerts a flood of chats makes
 
-describe("KNOWN LIMIT (reported, not changed): the chat limit alerts the owners once per chat per hour", () => {
+describe("how many alerts a flood of chats makes: the chat limit alerts the owners once per business per hour", () => {
   /** The real tellOwnersAboutLimit and sendAccountNotice with a send that keeps one alert per key, as notify.send does. */
   function alerting() {
     const seen = new Map<string, number>();
@@ -436,11 +436,11 @@ describe("KNOWN LIMIT (reported, not changed): the chat limit alerts the owners 
   }
   const chat = (n: number) => `c0000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
-  it("50 chats that each reach the limit in one hour make 50 alerts for each owner and admin (the business-wide limits make one)", async () => {
+  it("50 chats that each reach the limit in one hour make one alert for each owner and admin, like the business-wide limits", async () => {
     const { tell, perPerson } = alerting();
     for (let n = 1; n <= 50; n++) await tell("contact_rate_limit", chat(n), NOW);
-    expect(perPerson.get(OWNER)).toBe(50);
-    expect(perPerson.get(ADMIN)).toBe(50);
+    expect(perPerson.get(OWNER)).toBe(1);
+    expect(perPerson.get(ADMIN)).toBe(1);
 
     const business = alerting();
     for (let n = 1; n <= 50; n++) {
@@ -450,7 +450,7 @@ describe("KNOWN LIMIT (reported, not changed): the chat limit alerts the owners 
     expect(business.perPerson.get(OWNER)).toBe(2);
   });
 
-  it("one flooded chat alerts again every hour: 24 a day for each owner and admin", async () => {
+  it("KNOWN LIMIT: a chat that stays flooded alerts again every hour, 24 a day for each owner and admin", async () => {
     const { tell, perPerson } = alerting();
     for (let h = 0; h < 24; h++) await tell("contact_rate_limit", CONV, hoursLater(h));
     expect(perPerson.get(OWNER)).toBe(24);

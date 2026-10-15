@@ -55,13 +55,17 @@ export function bodyLimitFor(pathname: string, routes: readonly Route[] = ROUTES
 /** A run of 32 or more key characters (a connect-link or hand-over token, a key): masked in a logged path wherever it sits, unless it is a UUID. */
 const KEY_RUN = /[A-Za-z0-9_-]{32,}/g;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** 10 to 15 digits standing alone, with an optional + (or %2B): a phone number typed into a path. A UUID's digits never stand alone. */
+const PHONE_RUN = /(?<![0-9A-Za-z-])(?:\+|%2B)?\d{10,15}(?![0-9A-Za-z-])/gi;
 
 /**
  * The path as the request log shows it: a route's secret segments masked, and, whatever the route matching made of the path (a double slash, another
  * letter case, an encoded slash or a ;parameter in front of a token), any token-like run as well.
  */
 export function logPathFor(pathname: string, routes: readonly Route[] = ROUTES): string {
-  return maskedSegments(pathname, routes).replace(KEY_RUN, (run) => (UUID.test(run) ? run : "***"));
+  return maskedSegments(pathname, routes)
+    .replace(KEY_RUN, (run) => (UUID.test(run) ? run : "***"))
+    .replace(PHONE_RUN, "***");
 }
 
 function maskedSegments(pathname: string, routes: readonly Route[]): string {

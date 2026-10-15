@@ -77,6 +77,17 @@ describe("staffAlertContent", () => {
     expect(long.headline.length).toBeLessThan(90);
   });
 
+  it.each([
+    ["a link", "Best offers www.cheapflats.in"],
+    ["an @", "ravi@example.com"],
+    ["a phone number", "Call 98400 12345"],
+  ])("shows the masked number instead of a saved name with %s", async (_what, name) => {
+    tables.conversations = { data: { contacts: { name, phone: "+919840012345" } }, error: null };
+    const alert = await staffAlertContent(TENANT, { kind: "handoff_opened", conversationId: CONVERSATION }, deps());
+    expect(alert.headline).toContain("+9198xxxxxx45");
+    expect(alert.headline).not.toContain(name);
+  });
+
   it("says how long the customer has waited when no one picked the chat up", async () => {
     await expect(staffAlertContent(TENANT, { kind: "handoff_waiting", conversationId: CONVERSATION, waitedMinutes: 15 }, deps())).resolves.toEqual({
       headline: "Asha Raman has waited 15 minutes and no one has picked up the chat yet.",

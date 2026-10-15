@@ -131,11 +131,14 @@ export function limitNotice(limit: AiLimit, appUrl: string, conversationId: stri
   return { text: `${headline}\n${next}\n${link}`, templateParams: [headline, link] };
 }
 
-/** One notice per business per day for the cap, per business per hour for its pace, per chat per hour for a chat. */
+/**
+ * One notice per business per day for the cap, and per business per hour for its pace and for a chat reaching its limit: a bot
+ * flooding 50 chats in an hour sends the owners one alert (with the first chat's link), not 50.
+ */
 export function limitNoticeKey(limit: AiLimit, tenantId: string, conversationId: string | null, at: Date): string {
   if (limit === "ai_spend_cap") return `ai_limit:spend:${tenantId}:${dayInIndia(at)}`;
   if (limit === "tenant_rate_limit") return `ai_limit:pace:${tenantId}:${hourOf(at)}`;
-  return `ai_limit:chat:${tenantId}:${conversationId ?? "none"}:${hourOf(at)}`;
+  return `ai_limit:chat:${tenantId}:${hourOf(at)}`;
 }
 
 export interface LimitNoticeDeps {

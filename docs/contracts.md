@@ -759,7 +759,8 @@ chat gets at most 20 AI replies an hour, one business at most 300, and one busin
 `tenant_rate_limit` or `contact_rate_limit`, before any model call. Its messages wait in the inbox for staff (as for a chat a person
 has), STOP still works, and the owners and admins get one `account_notice` ("Spark Agent has paused AI replies for today: your business
 reached its daily AI limit." / "...for a while: your business sent more than 300 in the last hour." / "...stopped replying to one
-customer for now...", with the inbox link), keyed once a day for the cap and once an hour for a pace limit. The model client also refuses
+customer for now...", with the inbox link), keyed once a day for the cap and once an hour per business for a pace limit and for chats reaching theirs (50 flooded chats
+in an hour make one alert, with the first chat's link; a chat that stays flooded alerts again each hour). The model client also refuses
 calls past the cap (`LlmError` `over_budget`, read at most once a minute per business), so the lead card and suggested replies stop too
 (the lead card is then written without the model), and records every call's estimated cost (`record_ai_spend`, not awaited). Replies
 resume by themselves: the hour slides, the day turns. A failed read of the limits fails the gate step (retried); a failed cap read in the
