@@ -59,16 +59,17 @@ describe("estimateCostUsd", () => {
     expect(estimateCostUsd(MODELS.reply, usage({ inputTokens: 1_000_000, outputTokens: 1_000_000 }))).toBeCloseTo(2 + 10, 6);
   });
 
-  it("charges a tenth for tokens read from the cache and a quarter more for tokens written to it", () => {
+  it("charges a tenth (Haiku 4.5) or a twentieth (Sonnet 5.5) for tokens read from the cache, and a quarter more for tokens written to it", () => {
     expect(estimateCostUsd(MODELS.extraction, usage({ cacheReadTokens: 1_000_000 }))).toBeCloseTo(0.1, 6);
     expect(estimateCostUsd(MODELS.extraction, usage({ cacheWriteTokens: 1_000_000 }))).toBeCloseTo(1.25, 6);
-    expect(estimateCostUsd(MODELS.reply, usage({ cacheReadTokens: 1_000_000 }))).toBeCloseTo(0.2, 6);
+    expect(estimateCostUsd(MODELS.reply, usage({ cacheReadTokens: 1_000_000 }))).toBeCloseTo(0.1, 6); // 0.05 x $2: the pricing page lists Sonnet 5.5 cache hits at $0.10, not the usual 0.1x
+    expect(estimateCostUsd(MODELS.reply, usage({ cacheWriteTokens: 1_000_000 }))).toBeCloseTo(2.5, 6);
   });
 
   it("adds up a typical reply", () => {
     // 800 uncached + 3000 cached-read input tokens, 250 output tokens on Sonnet 5.5
     const cost = estimateCostUsd(MODELS.reply, usage({ inputTokens: 800, cacheReadTokens: 3000, outputTokens: 250 }));
-    expect(cost).toBeCloseTo((800 * 2 + 3000 * 0.2 + 250 * 10) / 1_000_000, 8);
+    expect(cost).toBeCloseTo((800 * 2 + 3000 * 0.1 + 250 * 10) / 1_000_000, 8);
   });
 
   it("is null for names that only exist on every object, not for a real price", () => {

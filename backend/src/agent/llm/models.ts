@@ -44,12 +44,12 @@ export interface TokenUsage {
   cacheWriteTokens: number;
 }
 
-// US dollars per million tokens (https://docs.anthropic.com/en/docs/about-claude/pricing). Cache reads are a
-// tenth of the input price; writes (5 minute cache) a quarter more. An ESTIMATE for tracing and budgeting:
+// US dollars per million tokens (https://platform.claude.com/docs/en/about-claude/pricing). Cache reads are a
+// tenth of the input price (a twentieth on Sonnet 5.5: $0.10, not $0.20); writes (5 minute cache) a quarter more. An ESTIMATE for tracing and budgeting:
 // the invoice is the truth.
 const PRICES: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }> = {
   [MODELS.extraction]: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
-  [MODELS.reply]: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+  [MODELS.reply]: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
 };
 
 /** The estimated cost of one call in US dollars, or null for a model with no price here. */
