@@ -159,12 +159,15 @@ select throws_ok($$select * from public.resend_team_invite('a5100000-0000-0000-0
 select throws_ok($$select * from public.resend_team_invite('a5100000-0000-0000-0000-000000000003', (select id from public.team_invites where token_hash = pg_temp.h('B2')),
                     'a5000000-0000-0000-0000-000000000021', pg_temp.h('B4'))$$,
   'PA404', null, 'another business''s owner cannot resend this business''s invitation');
-select lives_ok($$do $b$ begin
-    for i in 1..4 loop
-      perform * from public.resend_team_invite('a5100000-0000-0000-0000-000000000002', (select id from public.team_invites where email = 'staff1@ti.test'),
-        'a5000000-0000-0000-0000-000000000011', pg_temp.h('R' || i));
-    end loop;
-  end $b$$, 'the owner resends it four more times: five in all');
+create function pg_temp.resend_four_times() returns void language plpgsql as $f$
+begin
+  for i in 1..4 loop
+    perform * from public.resend_team_invite('a5100000-0000-0000-0000-000000000002', (select id from public.team_invites where email = 'staff1@ti.test'),
+      'a5000000-0000-0000-0000-000000000011', pg_temp.h('R' || i));
+  end loop;
+end
+$f$;
+select lives_ok($$select pg_temp.resend_four_times()$$, 'the owner resends it four more times: five in all');
 select throws_ok($$select * from public.resend_team_invite('a5100000-0000-0000-0000-000000000002', (select id from public.team_invites where email = 'staff1@ti.test'),
                     'a5000000-0000-0000-0000-000000000011', pg_temp.h('R5'))$$,
   'PA429', null, 'a sixth within the day is refused');
