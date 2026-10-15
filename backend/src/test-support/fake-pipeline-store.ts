@@ -84,7 +84,7 @@ export function fakePipelineStore(
   const consentLogs: FakeConsentLog[] = [];
   /** record_kb_gap's rows: one per business and normalised question, with the business-wide count. */
   const gaps = new Map<string, { tenantId: string; norm: string; question: string; contactId: string; askedCount: number }>();
-  const state = { /** Appended to the message of every simulated failure (a test puts things in it that must never be logged). */ failMessage: "", failNext: new Set<keyof PipelineStore>(), /** Fails on EVERY call, until removed. */ failAlways: new Set<keyof PipelineStore>(), leadCounter: 0, handoffCounter: 0 };
+  const state = { /** Appended to the message of every simulated failure (a test puts things in it that must never be logged). */ failMessage: "", failNext: new Set<keyof PipelineStore>(), /** Fails on EVERY call, until removed. */ failAlways: new Set<keyof PipelineStore>(), leadCounter: 0, handoffCounter: 0, /** Which of these message ids notify.send holds a 'sending' claim for (notify_attempts): the world that owns the send fake points this at it. */ claimsFrom: ((): string[] => []) as (tenantId: string, ids: string[]) => string[] };
   const maybeFail = (op: keyof PipelineStore) => {
     if (state.failAlways.has(op)) throw new Error(`${op} failed (simulated, always)${state.failMessage}`);
     if (state.failNext.delete(op)) throw new Error(`${op} failed (simulated)${state.failMessage}`);
@@ -246,6 +246,11 @@ export function fakePipelineStore(
       calls.push("recordedMessageIds");
       maybeFail("recordedMessageIds");
       return [...messages.values()].filter((m) => m.tenantId === tenantId && m.conversationId === conversationId && ids.includes(m.id)).map((m) => m.id);
+    },
+    async claimedMessageIds(tenantId, ids) {
+      calls.push("claimedMessageIds");
+      maybeFail("claimedMessageIds");
+      return state.claimsFrom(tenantId, ids);
     },
     async getPreviousCoverage(tenantId, conversationId, before) {
       calls.push("getPreviousCoverage");
