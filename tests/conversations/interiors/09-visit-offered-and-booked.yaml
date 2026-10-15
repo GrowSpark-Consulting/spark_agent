@@ -1,0 +1,34 @@
+name: Interiors, a ready customer in a served pincode is offered real measurement-visit times and booked as a field visit
+description: "Day 7 PR E (fixes the KNOWN LIMIT this chat pinned in PR D). The interiors pack books through bookingModes [field_visit], which understand.ts now recognises. The score comes from code (budget inside the service's price band, scope, area, served pincode: 75, the possession-date rule is not judged, see the task note of 15 Oct), the times from the calendar in one plain message (no list, no buttons), and the pick is booked through the booking engine. The customer's pincode is passed to the engine, so only times of someone who works there are offered (see 11)."
+pack: interiors
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { type: service, priceFrom: 1000000, attributes: { price_to: 3000000, areas: ["600042", "600020"] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+turns:
+  - customer: "I need a full home makeover for my 3 BHK apartment, about 1150 sq ft, pincode 600042, budget 12 to 15 lakh"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { property_type: apartment, area_sqft: 1150, scope: full_home, budget: 12-15L, pincode: "600042" }, question: null }
+      reply: "That sounds like a great project. I can do Sunday at 10:00 am, Sunday at 3:00 pm or Monday at 5:30 pm for a measurement visit. Which suits you?"
+    expect:
+      reply: { sent: true, buttons: [], matches: ['\b10(:00)?\s?am\b', '\b3(:00)?\s?pm\b', '\b5:30\s?pm\b'] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: offer_slots
+      leadTemperature: hot
+      leadScore: 75
+  - customer: "the second one please"
+    mock:
+      extraction: { language: en, intent: give_details, fields: {}, question: null }
+      reply: "Done! Your measurement visit is booked for Sunday at 3:00 pm. See you then!"
+    expect:
+      reply: { sent: true, buttons: [], matches: ['\b3(:00)?\s?pm\b'] }
+      aiReplies: 1
+      handoff: null
+      leadStage: booked
+      calendar: { confirmed: ["2026-10-11T09:30:00.000Z"] }
+    mockOnly:
+      case: booked

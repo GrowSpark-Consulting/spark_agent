@@ -1,0 +1,45 @@
+name: Salon, a customer who asks to book is offered real times in one plain message, picks one, and is booked
+description: "Day 7 PR D. The times come from the calendar, in one plain message (no list, no buttons); the pick is read from the customer's words and booked through the booking engine, and the lead moves to booked. KNOWN LIMIT (turn 1, pinned): the salon pack's scoring cannot judge most of its own rules (see 09), so a customer who gives every detail never scores warm and is NOT offered times until they ask to book (turn 2). Real estate and interiors reach warm and are offered times on their own."
+pack: salon
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { type: service, priceFrom: 40000, attributes: {} }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+turns:
+  - customer: "I want a haircut and facial tomorrow evening, 2 of us"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { services: "haircut, facial", preferred_date: tomorrow, preferred_time: evening, party_size: 2 }, question: null }
+      reply: "Thank you, I have noted a haircut and a facial for two tomorrow evening."
+    expect:
+      reply: { sent: true, buttons: [], notContains: ["10:00 am", "3:00 pm", "5:30 pm"] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: nothing_to_look_up
+      leadTemperature: cold
+      leadScore: 10
+  - customer: "can I book it?"
+    mock:
+      extraction: { language: en, intent: book, fields: {}, question: null }
+      reply: "Of course. I can do Sunday at 10:00 am, Sunday at 3:00 pm or Monday at 5:30 pm. Which suits you?"
+    expect:
+      reply: { sent: true, buttons: [], matches: ['\b10(:00)?\s?am\b', '\b3(:00)?\s?pm\b', '\b5:30\s?pm\b'] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: offer_slots
+  - customer: "the second one please"
+    mock:
+      extraction: { language: en, intent: give_details, fields: {}, question: null }
+      reply: "Done! You are booked for Sunday at 3:00 pm. See you then!"
+    expect:
+      reply: { sent: true, buttons: [], matches: ['\b3(:00)?\s?pm\b'] }
+      aiReplies: 1
+      handoff: null
+      leadStage: booked
+      calendar: { confirmed: ["2026-10-11T09:30:00.000Z"] }
+    mockOnly:
+      case: booked
