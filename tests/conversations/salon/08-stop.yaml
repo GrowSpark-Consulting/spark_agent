@@ -1,0 +1,27 @@
+name: Salon, STOP opts out, gets one confirmation and no reply, and staff are told
+description: "Day 7 PR D. STOP is decided by code in every pack, with the opt-out logged and the staff told; later messages get nothing."
+pack: salon
+kb:
+  - "Haircut for women starts at ₹400. Facial starts at ₹900."
+turns:
+  - customer: "Hi, haircut price?"
+    mock:
+      extraction: { language: en, intent: question, fields: { services: haircut }, question: "What is the price of a haircut?" }
+      reply: "A haircut for women starts at ₹400. Would you like to book a time?"
+    expect:
+      reply: { sent: true }
+      optedOut: false
+      aiReplies: 1
+  - customer: "STOP"
+    expect:
+      stop: true
+      optedOut: true
+      consent: [{ event: opted_out, source: stop_keyword }]
+      handoff: { trigger: opt_out, priority: high }
+      aiReplies: 0
+      confirmations: 1
+  - customer: "hello? are you there"
+    expect:
+      aiReplies: 0
+      confirmations: 0
+      optedOut: true

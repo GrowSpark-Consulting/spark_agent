@@ -74,6 +74,11 @@ const PROOFS: Record<string, Proof[]> = {
   ],
   "trial-lifecycle": [INNGEST("trial-lifecycle", "replay: the same event in another run finds day 0 claimed and sends nothing")],
   "trial-lifecycle-sweep": [INNGEST("trial-lifecycle", "a repeat run sends nothing another run already claimed")],
+  "unpaid-trial-cleanup": [
+    INNGEST("unpaid-trial-cleanup", "replay: the same tick twice warns under the same keys and finds the deleted business gone, deleting nothing twice"),
+    { file: "supabase/tests/unpaid_trial_deletion.test.sql", test: "a retry after it went changes nothing" },
+    SINK,
+  ],
   "demo-reply": [INNGEST("demo-reply", "replay: the same event twice answers under the same key"), SINK],
   // Sends nothing: a message that already has its file is left alone, and the upload is an overwrite of a fixed path.
   "media-download": [
@@ -106,11 +111,10 @@ const WEBHOOKS: Record<string, Proof[]> = {
 
 /**
  * Where a replay is NOT yet safe, pinned by a test that passes while the gap exists; remove the entry when the gap is closed. The crash
- * after WhatsApp accepted a reply and before notify.send recorded it was closed on Day 7 by claiming the send first (0045, below). What
- * remains: a reply delivered with nothing of ours recording it, whose step then fails for good, still gets the failure handler's safe
- * line on top, because the handler cannot see the claim yet (Dev 1's reply-record.ts).
+ * after WhatsApp accepted a reply and before notify.send recorded it was closed on Day 7 by claiming the send first (0045, below), and
+ * the failure handler now reads that claim too (notify_attempts), so it adds no safe line after a reply that went. None remain.
  */
-const KNOWN_GAPS: Proof[] = [{ file: "backend/src/agent/pipeline/whole-turn-protections.test.ts", test: "but the handler, which cannot see the claim yet, adds one safe line" }];
+const KNOWN_GAPS: Proof[] = [];
 
 /** The claim that makes a keyed send go at most once, even when its process dies after WhatsApp accepted it (0045). */
 const CLAIM: Proof[] = [

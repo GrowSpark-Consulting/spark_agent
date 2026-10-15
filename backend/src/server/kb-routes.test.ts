@@ -16,6 +16,11 @@ vi.mock("../kb/documents", async (importOriginal) => ({
   uploadDocument: (...args: unknown[]) => uploadDocument(...args),
   deleteDocument: (...args: unknown[]) => deleteDocument(...args),
 }));
+const auditQuietly = vi.fn();
+vi.mock("../lib/audit", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/audit")>()),
+  auditQuietly: (...args: unknown[]) => auditQuietly(...args),
+}));
 
 const { bodyLimitFor, createApp } = await import("./app");
 const { createHttpServer } = await import("./node");
@@ -57,6 +62,7 @@ function upload(headers: Record<string, string>) {
 beforeEach(() => {
   uploadDocument.mockReset();
   deleteDocument.mockReset();
+  auditQuietly.mockReset();
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -212,5 +218,28 @@ describe("the real server with the real route table", () => {
       server.closeAllConnections();
       server.close();
     }
+  });
+});
+
+describe("audit: an uploaded or removed document names the member", () => {
+  const DOC = "d0000000-0000-0000-0000-0000000000d1";
+
+  it("records the upload and the removal, after they happen", async () => {
+    uploadDocument.mockResolvedValue({ id: DOC, title: "Price list", sourceType: "upload", status: "processing", createdAt: "2026-10-08T10:00:00.000Z" });
+    deleteDocument.mockResolvedValue(undefined);
+    await upload(as("owner.token.sig"));
+    await app(new Request(`http://localhost:4000/api/kb/documents/${DOC}`, { method: "DELETE", headers: as("owner.token.sig") }));
+    expect(auditQuietly.mock.calls.map(([entry]) => entry)).toEqual([
+      { tenantId: REALTY, actor: "user-owner@test.local", action: "kb.document_uploaded", entity: "kb_document", entityId: DOC },
+      { tenantId: REALTY, actor: "user-owner@test.local", action: "kb.document_deleted", entity: "kb_document", entityId: DOC },
+    ]);
+  });
+
+  it("records nothing when the service refused", async () => {
+    uploadDocument.mockRejectedValue(new AppError("validation_failed", "Too big.", { file: "Pick a smaller file." }));
+    deleteDocument.mockRejectedValue(new AppError("not_found", "Not found."));
+    await upload(as("owner.token.sig"));
+    await app(new Request(`http://localhost:4000/api/kb/documents/${DOC}`, { method: "DELETE", headers: as("owner.token.sig") }));
+    expect(auditQuietly).not.toHaveBeenCalled();
   });
 });

@@ -1,0 +1,28 @@
+name: Interiors, a pincode the business serves but whose technician does not work there is offered no time, and a person takes over
+description: "Day 7 PR E. The catalog lists two pincodes (the business's own service areas, which the pack's scoring reads), but the only technician works in 600020 (the resource's service area, read by Dev 2's findSlots). A hot customer in 600042 is not offered a time of someone who would not come: nothing is booked, the customer is told a person will follow up, and the chat goes to a person at normal priority (the same as any day with nothing free)."
+pack: interiors
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { type: service, priceFrom: 1000000, attributes: { price_to: 3000000, areas: ["600042", "600020"] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+  workPincodes: ["600020"]
+turns:
+  - customer: "I need a full home makeover for my 3 BHK apartment, about 1150 sq ft, pincode 600042, budget 12 to 15 lakh"
+    mock:
+      extraction: { language: en, intent: give_details, fields: { property_type: apartment, area_sqft: 1150, scope: full_home, budget: 12-15L, pincode: "600042" }, question: null }
+    expect:
+      reply: { sent: true, buttons: [], notContains: ["10:00 am", "3:00 pm", "5:30 pm"] }
+      aiReplies: 1
+      handoff: { trigger: stuck, priority: normal }
+      mode: human
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: no_slots
+  - customer: "so when can someone come?"
+    mock:
+      extraction: { language: en, intent: question, fields: {}, question: null }
+    expect:
+      aiReplies: 0
+      mode: human
+      calendar: { confirmed: [] }

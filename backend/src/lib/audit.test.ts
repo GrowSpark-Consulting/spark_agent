@@ -4,7 +4,7 @@ const insert = vi.fn();
 const from = vi.fn(() => ({ insert }));
 vi.mock("./supabase-admin", () => ({ supabaseAdmin: () => ({ from }) }));
 
-const { writeAudit } = await import("./audit");
+const { auditQuietly, writeAudit } = await import("./audit");
 
 const TENANT = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 const STAFF = "16fd2706-8baf-433b-82eb-8c7fada847da";
@@ -76,5 +76,22 @@ describe("writeAudit", () => {
     await expect(writeAudit({ tenantId: TENANT, actor: "system", action: "trial.expired" })).rejects.toThrow(
       "audit_logs insert failed",
     );
+  });
+});
+
+describe("auditQuietly", () => {
+  const entry = { tenantId: TENANT, actor: STAFF, action: "kb.faq_created", entity: "kb_faq" };
+
+  it("writes the entry", async () => {
+    const write = vi.fn().mockResolvedValue(undefined);
+    await auditQuietly(entry, write);
+    expect(write).toHaveBeenCalledWith(entry);
+  });
+
+  it("never fails the caller: a failed write is logged with the action and the error's kind, not its text", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(auditQuietly(entry, vi.fn().mockRejectedValue(new TypeError("fetch failed for +919812345621")))).resolves.toBeUndefined();
+    expect(error).toHaveBeenCalledWith("[audit] kb.faq_created was not recorded: TypeError");
+    error.mockRestore();
   });
 });

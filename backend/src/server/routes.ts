@@ -1,4 +1,4 @@
-import type { StartTrialResult } from "@pakka/types";
+import type { StartTrialResult, TenantContext } from "@pakka/types";
 import { handleHandoffLink } from "../agent/handoff/takeover";
 import { getLeadCard } from "../agent/leadcard/route";
 import { suggestReply } from "../agent/leadcard/suggest";
@@ -28,6 +28,7 @@ import { sendStaffReply } from "../conversations/staff-reply";
 import { conversationTemplates } from "../conversations/templates";
 import { listFeatures, updateFeature } from "../features/toggles";
 import { deleteDocument, KB_UPLOAD_MAX_BODY_BYTES, uploadDocument } from "../kb/documents";
+import { auditQuietly } from "../lib/audit";
 import { answerGap, createFaq, deleteFaq, dismissGap, listGaps, updateFaq } from "../kb/faqs";
 import { serverEnv } from "../lib/env";
 import { requireRole, resolveTenant } from "../lib/tenant";
@@ -217,34 +218,69 @@ const bookingSlots: RouteHandler = (request, deps, params) =>
 const googleConnect: RouteHandler = (request, deps, params) =>
   tenantRoute(({ context }) => googleConnectUrl(context, new URL(request.url).searchParams.get("resourceId")))(request, deps.userClient, params);
 
+// The knowledge base changes what the assistant tells customers, so each change is audited with the member as the actor
+// (Day 7 audit coverage), after it is made; an audit that fails is logged, never the request's failure (lib/audit.ts auditQuietly).
+const kbAudit = (context: TenantContext, action: string, entity: "kb_document" | "kb_faq" | "kb_gap", entityId: string, diff?: Record<string, unknown>) =>
+  auditQuietly({ tenantId: context.tenant.id, actor: context.user.id, action, entity, entityId, ...(diff ? { diff } : {}) });
+
 // multipart: file (+ optional title) → 202 { id, title, sourceType, status: "processing", createdAt }. Owner or
 // admin. The body is a form, not JSON, so this reads it itself, after the caller and the business are known.
 const kbUpload: RouteHandler = async (request, deps) => {
   const { context } = await requireTenant(request, deps.userClient);
-  return Response.json(await uploadDocument(context, request), { status: 202 });
+  const uploaded = await uploadDocument(context, request);
+  await kbAudit(context, "kb.document_uploaded", "kb_document", uploaded.id);
+  return Response.json(uploaded, { status: 202 });
 };
 // → 204. Owner or admin; an upload or imported document and its chunks (an FAQ has its own route).
 const kbDeleteDocument: RouteHandler = (request, deps, params) =>
-  tenantRoute(({ context }) => deleteDocument(context, params.id), { status: 204 })(request, deps.userClient, params);
+  tenantRoute(
+    async ({ context }) => {
+      await deleteDocument(context, params.id);
+      await kbAudit(context, "kb.document_deleted", "kb_document", params.id);
+    },
+    { status: 204 },
+  )(request, deps.userClient, params);
 
 // { q, a } → 201 { id, q, a }. Owner or admin. A question the business already has is `conflict`; an embedding failure is `upstream_failed`.
-const kbCreateFaq = tenantRoute(({ context, body }) => createFaq(context, body), { status: 201 });
+const kbCreateFaq = tenantRoute(
+  async ({ context, body }) => {
+    const faq = await createFaq(context, body);
+    await kbAudit(context, "kb.faq_created", "kb_faq", faq.id);
+    return faq;
+  },
+  { status: 201 },
+);
 // { q?, a? } → { id, q, a }. Owner or admin.
 const kbUpdateFaq: RouteHandler = (request, deps, params) =>
-  tenantRoute(({ context, body, params: p }) => updateFaq(context, p.id, body))(request, deps.userClient, params);
+  tenantRoute(async ({ context, body, params: p }) => {
+    const faq = await updateFaq(context, p.id, body);
+    await kbAudit(context, "kb.faq_updated", "kb_faq", faq.id);
+    return faq;
+  })(request, deps.userClient, params);
 // → 204. Owner or admin; a FAQ of the business (an upload has its own route).
 const kbDeleteFaq: RouteHandler = (request, deps, params) =>
-  tenantRoute(({ context, params: p }) => deleteFaq(context, p.id), { status: 204 })(request, deps.userClient, params);
+  tenantRoute(
+    async ({ context, params: p }) => {
+      await deleteFaq(context, p.id);
+      await kbAudit(context, "kb.faq_deleted", "kb_faq", p.id);
+    },
+    { status: 204 },
+  )(request, deps.userClient, params);
 // → [{ id, question, askedCount, lastAskedBy }], open gaps, most asked first. Owner, admin or staff.
 const kbListGaps = tenantRoute(({ context }) => listGaps(context));
 // { a } → { faq: { id, q, a } }; the gap is closed in the same transaction. Owner, admin or staff.
 const kbAnswerGap: RouteHandler = (request, deps, params) =>
-  tenantRoute(({ context, body, params: p }) => answerGap(context, p.id, body))(request, deps.userClient, params);
+  tenantRoute(async ({ context, body, params: p }) => {
+    const answered = await answerGap(context, p.id, body);
+    await kbAudit(context, "kb.gap_answered", "kb_gap", p.id, { faqId: answered.faq.id });
+    return answered;
+  })(request, deps.userClient, params);
 // → 204. Owner, admin or staff. The browser sends a POST with no body, so this does not read JSON (like the upload route,
 // it authenticates itself and lets the app turn a thrown error into the envelope).
 const kbDismissGap: RouteHandler = async (request, deps, params) => {
   const { context } = await requireTenant(request, deps.userClient);
   await dismissGap(context, params.id);
+  await kbAudit(context, "kb.gap_dismissed", "kb_gap", params.id);
   return new Response(null, { status: 204 });
 };
 

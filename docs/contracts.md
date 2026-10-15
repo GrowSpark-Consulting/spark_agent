@@ -61,6 +61,8 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0045_notify_attempts` | A keyed send is claimed before WhatsApp is asked (closes the Day 6 reply-key note, section 3.1): `notify_attempts` (server only; `message_id` = the keyed message id, `status` `sending` or `released`), `claim_notify_attempt(tenant, message, kind)` (`claimed`, `sent` when the message is recorded, `in_doubt` when an earlier attempt neither recorded nor released it) and `release_notify_attempt(tenant, message)` (after a refusal for certain). Server only |
 | `0046_rls_tightening` | The Day 7 row-level-security review: `consent_logs` loses its browser INSERT (the server's functions write every entry); staff update only the leads assigned to them and cannot reassign them (owners and admins any lead); `anon` loses every write grant on every table and view, and on tables created later. (0045 is the notify claim, #201) |
 | `0047_message_media` | The private storage bucket `message-media` (50 MB a file, any type) for a customer's photos, voice notes and documents once downloaded from WhatsApp, at `<tenant_id>/<conversation_id>/<message_id>.<ext>` (`backend/src/lib/storage.ts` builds the path). A member reads the files of the business its first folder names (checked inline in the policy, then `is_member`); only the server writes (no insert, update or delete policy). (0045 is #201, 0046 is #203) |
+| `0048_unpaid_trial_deletion` | A business's data is deleted 30 days after its trial ended unpaid: `unpaid_trials_for_cleanup(now)` (still on the trial plan, never paid, no live, past-due or pending subscription, trial ended 23+ days ago; `due` from day 30), `delete_unpaid_trial(tenant, now)` (rechecks under the business's lock; audit `tenant.deleted` with counts only, then the business is deleted and every table that names it goes with it, except `trial_phones`, set to null so the number still cannot take a second free trial; `deleted`, `gone` or `not_eligible`), `media_object_names(tenant, conversations?)` (a business's or some chats' file paths in `message-media`, for the server to remove through the Storage API). `delete_contact_data` (0043) also returns `conversation_ids`. Server only |
+| `0049_browser_write_audit` | Every change a member makes straight from the dashboard (row-level security, no server route) is audited: a trigger, `audit_browser_write()`, on `tenants` (update), `services`, `resources`, `catalog_items`, `quotes` (insert, update, delete), `leads` and `memberships` (update) writes `<entity>.created`, `.updated` or `.deleted` with the member as the actor and `diff` = `{ changed: [column names], <safe column>: { from, to } }`. Only the columns listed as safe for the table carry values (a name, time zone, stage, status, price, owner, takeover preference); a customer's fields, a phone number and the agent settings' text are only named. An update that changes nothing (other than `updated_at`) and a write by the server (no member) are not audited here: the server audits its own. Security definer; nobody can call it directly |
 | `0050_outbound_webhooks` | Outbound webhooks (Pro): `webhook_endpoints` (one per business: https URL, wanted events, `secret_enc` with ENCRYPTION_KEY, `secret_hint`, last success and failure) and `webhook_deliveries` (an outbox: business, event, record id, status `pending`/`delivered`/`failed`/`dropped`, attempts, next attempt, the claiming run; no customer data). A trigger on `leads` (insert; stage reaching `qualified`), `bookings` (reaching `confirmed`; `confirmed` → `cancelled`) and `handoffs` (insert) queues `lead.created`, `lead.qualified`, `booking.confirmed`, `booking.cancelled`, `handoff.opened` in the same transaction, whoever wrote, only for an active endpoint that wants the event, once per record (unique business, event, record); a failure in it never fails the write. `save_webhook_endpoint`, `rotate_webhook_secret`, `delete_webhook_endpoint` (each audited: `webhook_endpoint.created`/`updated` with the host and events, never the path; `secret_rotated`; `deleted`); `claim_webhook_deliveries(run, limit)` (5-minute claim, skip locked; removes rows done over 30 days ago) and `record_webhook_attempt(id, run, outcome, status, error)` (only the claiming run, once; a failure retries after 1, 5, 15 min, 1, 3, 6, 12 h, then `failed`). Server only |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
@@ -364,12 +366,20 @@ invalidateFeatureCache(tenantId?): void
 createTrialTenant({ userId, name, vertical, timezone? }): Promise<{ tenantId, routeCode, trialEndsAt, created }>
 // backend/src/lib/audit.ts
 writeAudit({ tenantId, actor, action, entity?, entityId?, diff? }): Promise<void>
+auditQuietly(entry): Promise<void>   // writeAudit after the change is made; a failure is logged, never thrown
 ```
 
 - `writeAudit` is for every traceable action other than sent messages (`notify_record` writes
   those). `actor` is a user id, `ai`, `system` or `admin:<user id>`; `action` is
   `<entity>.<verb>` (`feature.toggled`); `tenantId` is null only for platform actions. Phone
   numbers in `diff` are masked. It throws if the row is not written.
+- **Audit coverage (Day 7).** Every route that changes something writes an audit row, or says why it has nothing to
+  audit, in `backend/src/server/audit-coverage.test.ts`: a new write route fails that test until it is listed with its
+  action and the file that writes it. The knowledge base routes write `kb.document_uploaded`, `kb.document_deleted`,
+  `kb.faq_created`, `kb.faq_updated`, `kb.faq_deleted`, `kb.gap_answered` (`diff.faqId`) and `kb.gap_dismissed`; a
+  new trial business writes `tenant.created` (`diff` plan and vertical; a repeat signup writes nothing). Changes the
+  dashboard writes straight to the database are audited by the 0049 trigger. Rows written after the change
+  (`auditQuietly`) can be missing if the audit write fails; rows written by SQL functions are in the same transaction.
 
 - `isEnabled` is on only when the business is live (active, or in a trial whose end date has not
   passed), the plan includes the feature and the toggle is on (`default_on` when unset). The
@@ -623,6 +633,16 @@ keys `trial_notice:<business>:<day>:<owner>`. Placeholder wording until Raja's.
 - **Never a paid business:** the claim and the pause recheck under the business's row lock (the lock `settle_payment` takes),
   so a business that pays during or after its trial gets no "trial ending" notice and is not paused.
 - `GET /api/billing/balance` reads a trial paused at its end as `aiPausedReason: trial_ended`.
+- **Deletion 30 days after an unpaid trial (`unpaid-trial-cleanup`, Day 7; `backend/src/billing/unpaid-trials.ts`, 0048).** Once a day
+  at 03:30 in India, one run at a time, up to 100 businesses: a business still on the trial plan that never paid (no successful
+  payment; no live, past-due or pending subscription) is warned 7 days before (from day 23 after its trial ended: an
+  `account_notice` to its owners, "Your Spark Agent trial ended on 20 Sept 2026. Your chats, leads and settings will be deleted on
+  20 Oct 2026." / "Choose a plan in Billing to keep them." with the billing link; key `unpaid_trial_warning:<business>:<date>:<owner>`,
+  so once, and again only if the date moves) and deleted from day 30: `delete_unpaid_trial` rechecks under the business's lock (a plan
+  bought or a trial extended since it was listed wins), writes `tenant.deleted` (counts only), and deletes the business and
+  everything that names it; then its files in `message-media` are removed through the Storage API (a step that throws while any
+  file is left, so Inngest retries it). Kept: the trial number (`trial_phones`, tenant set to null), the audit rows, the members'
+  own logins, and events on the business's own Google Calendar. Each business is a step of its own; a replay finds it `gone`.
 - KNOWN LIMIT: a notice reaches an owner only through their alert number (the Team screen; onboarding does not ask for it
   yet) and, outside their 24-hour window, only once the `staff_alert` template is approved. The pause does not depend on it.
 
@@ -781,18 +801,19 @@ invalid `phone` is `invalid` with `fields.phone`.
 - `GET /api/admin/whatsapp/connections` → `AdminConnection[]` (`backend/src/admin/connections.ts`, Day 7): every business's connections, newest first (up to 500): business, `method`, `status`, the number as Meta displays it, verified name, coexistence, quality, messaging limit, a manual token's expiry, and `lastCheck` `{ ranAt, overall, checks: [{ key, status, message }] }` read from `last_check` in the shape of `docs/whatsapp-connection-contract.md` (null when never checked or in an older shape). No token or secret is ever selected.
 Not built: opening a business's dashboard as an admin (logged) needs its own design.
 
-**Message media (`backend/src/lib/storage.ts`, 0047; agreed with Dev 1, 14 Oct).** Downloaded WhatsApp media goes to the private bucket `message-media` at `<tenant_id>/<conversation_id>/<message_id>.<ext>`: build it with `messageMediaPath` (refuses anything that is not an id) and `mediaExtension(mimeType)` (`.bin` for an unknown type). Written by the server only; a member of the business reads with their own session, or the server hands out a signed URL. **To do once files are stored:** a contact's data deletion and a business's deletion must also remove its folders through the Storage API (deleting rows does not touch storage).
+**Message media (`backend/src/lib/storage.ts`, 0047; agreed with Dev 1, 14 Oct).** Downloaded WhatsApp media goes to the private bucket `message-media` at `<tenant_id>/<conversation_id>/<message_id>.<ext>`: build it with `messageMediaPath` (refuses anything that is not an id) and `mediaExtension(mimeType)` (`.bin` for an unknown type). Written by the server only; a member of the business reads with their own session, or the server hands out a signed URL. Both deletions remove the files too, through the Storage API (deleting rows does not touch storage; 0048 `media_object_names` lists them by path): a contact's data deletion removes its deleted chats' files, and an unpaid trial's deletion removes all of the business's.
 
 **A customer's data deletion (`backend/src/consent/deletion.ts`, 0043; types in `@pakka/types` `privacy.ts`; Settings → Data & privacy).**
 Owner or admin; a contact of another business is `not_found`.
 - `GET /api/contacts/:id/deletion` → `ContactDeletionPreview` `{ contactId, deletedAt, conversations, messages, leads, bookings,
   upcomingBookings }`: what a deletion would remove, for the confirmation.
 - `POST /api/contacts/:id/deletion` (no body) → `ContactDeletionResult` `{ status: deleted | already_deleted, removed { conversations,
-  messages, leads, bookings }, calendarEvents { removed, left } }`. The chats (messages, handoffs) and leads (bookings, quotes) are
+  messages, leads, bookings }, calendarEvents { removed, left }, mediaFiles { removed, left } }`. The chats (messages, handoffs) and leads (bookings, quotes) are
   deleted, the contact is scrubbed, `consent_logs` gets `deletion_requested` and `deleted`, and the audit names the member. Past bookings'
   Google Calendar events carry the customer's name and are taken down after; `left` counts any that couldn't be (Google unreachable,
-  calendar disconnected): the business removes those by hand. `conflict` while a booking is coming up (cancel it first). If the same
-  number writes again later, it is a new contact.
+  calendar disconnected): the business removes those by hand. The deleted chats' photos, voice notes and documents are removed from
+  `message-media` too (0048); `mediaFiles.left` counts any that couldn't be, logged for the team. `conflict` while a booking is coming
+  up (cancel it first). If the same number writes again later, it is a new contact.
 
 **Who may call a route (`backend/src/server/auth.ts`, built):**
 

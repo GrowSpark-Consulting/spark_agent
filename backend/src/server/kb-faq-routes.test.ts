@@ -21,6 +21,11 @@ vi.mock("../kb/faqs", async (importOriginal) => ({
   answerGap: (...args: unknown[]) => answerGap(...args),
   dismissGap: (...args: unknown[]) => dismissGap(...args),
 }));
+const auditQuietly = vi.fn();
+vi.mock("../lib/audit", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/audit")>()),
+  auditQuietly: (...args: unknown[]) => auditQuietly(...args),
+}));
 
 const { createApp } = await import("./app");
 const { AppError } = await import("../lib/errors");
@@ -57,7 +62,7 @@ const FAQ = "f0000000-0000-0000-0000-0000000000f1";
 const GAP = "a0000000-0000-0000-0000-0000000000a1";
 
 beforeEach(() => {
-  for (const mock of [createFaq, updateFaq, deleteFaq, listGaps, answerGap, dismissGap]) mock.mockReset();
+  for (const mock of [createFaq, updateFaq, deleteFaq, listGaps, answerGap, dismissGap, auditQuietly]) mock.mockReset();
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -203,5 +208,46 @@ describe("POST /api/kb/gaps/:id/answer and /dismiss", () => {
     expect((await call("POST", `/api/kb/gaps/${GAP}/dismiss`, { origin: FRONTEND })).status).toBe(401);
     expect(answerGap).not.toHaveBeenCalled();
     expect(dismissGap).not.toHaveBeenCalled();
+  });
+});
+
+describe("audit: each change to the knowledge base names the member who made it", () => {
+  const OWNER = "user-owner@test.local";
+  const audited = () => auditQuietly.mock.calls.map(([entry]) => entry);
+
+  it("a new, edited or removed FAQ", async () => {
+    createFaq.mockResolvedValue({ id: FAQ, q: "Q", a: "A" });
+    updateFaq.mockResolvedValue({ id: FAQ, q: "Q", a: "B" });
+    deleteFaq.mockResolvedValue(undefined);
+    await call("POST", "/api/kb/faqs", as("owner.token.sig"), { q: "Q", a: "A" });
+    await call("PATCH", `/api/kb/faqs/${FAQ}`, as("owner.token.sig"), { a: "B" });
+    await call("DELETE", `/api/kb/faqs/${FAQ}`, as("owner.token.sig"));
+    expect(audited()).toEqual([
+      { tenantId: REALTY, actor: OWNER, action: "kb.faq_created", entity: "kb_faq", entityId: FAQ },
+      { tenantId: REALTY, actor: OWNER, action: "kb.faq_updated", entity: "kb_faq", entityId: FAQ },
+      { tenantId: REALTY, actor: OWNER, action: "kb.faq_deleted", entity: "kb_faq", entityId: FAQ },
+    ]);
+  });
+
+  it("an answered gap (with the FAQ it became) and a dismissed one, in the business the member picked", async () => {
+    answerGap.mockResolvedValue({ faq: { id: FAQ, q: "Home visits?", a: "Yes" } });
+    dismissGap.mockResolvedValue(undefined);
+    await call("POST", `/api/kb/gaps/${GAP}/answer`, as("owner.token.sig"), { a: "Yes" });
+    await call("POST", `/api/kb/gaps/${GAP}/dismiss`, as("multi.token.sig", { "x-pakka-tenant": SALON }));
+    expect(audited()).toEqual([
+      { tenantId: REALTY, actor: OWNER, action: "kb.gap_answered", entity: "kb_gap", entityId: GAP, diff: { faqId: FAQ } },
+      { tenantId: SALON, actor: "user-multi@test.local", action: "kb.gap_dismissed", entity: "kb_gap", entityId: GAP },
+    ]);
+  });
+
+  it("nothing for a change that did not happen", async () => {
+    createFaq.mockRejectedValue(new AppError("conflict", "Already there."));
+    deleteFaq.mockRejectedValue(new AppError("not_found", "Not found."));
+    answerGap.mockRejectedValue(new AppError("conflict", "Already answered."));
+    await call("POST", "/api/kb/faqs", as("owner.token.sig"), { q: "Q", a: "A" });
+    await call("DELETE", `/api/kb/faqs/${FAQ}`, as("owner.token.sig"));
+    await call("POST", `/api/kb/gaps/${GAP}/answer`, as("owner.token.sig"), { a: "x" });
+    await call("POST", "/api/kb/faqs", { origin: FRONTEND }, { q: "Q", a: "A" });
+    expect(auditQuietly).not.toHaveBeenCalled();
   });
 });

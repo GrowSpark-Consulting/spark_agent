@@ -58,7 +58,7 @@ function runner() {
   return { step, ran, memo };
 }
 
-function world(over: { script: string; lead?: Partial<FakeLead>; packOverrides?: unknown; loadCatalog?: (tenantId: string) => Promise<CatalogRow[]>; overridesAllowed?: boolean; qualificationOn?: boolean; scoring?: boolean } = { script: reading({}) }) {
+function world(over: { script: string; pack?: unknown; lead?: Partial<FakeLead>; packOverrides?: unknown; loadCatalog?: (tenantId: string) => Promise<CatalogRow[]>; overridesAllowed?: boolean; qualificationOn?: boolean; scoring?: boolean } = { script: reading({}) }) {
   const messages: FakeMessage[] = [{ id: M1, tenantId: A, conversationId: CONV, direction: "in", sender: "customer", kind: "text", createdAt: "2026-10-08T10:00:00.000Z", body: SECRET }];
   const fake = fakePipelineStore({
     tenants: [{ id: A, vertical: "sample-pack", verticalVersion: 1 }],
@@ -73,7 +73,7 @@ function world(over: { script: string; lead?: Partial<FakeLead>; packOverrides?:
   const deps: UnderstandDeps = {
     store: fake.store,
     llm,
-    loadPackDefinition: async () => pack(),
+    loadPackDefinition: async () => over.pack ?? pack(),
     retrieve: async () => [],
     ...(over.scoring === false ? {} : { scoring: { loadCatalog, isEnabled } }),
   };
@@ -195,5 +195,50 @@ describe("what runs, and what is remembered", () => {
     const w = world({ script: reading({ budget: "60L" }) });
     w.state.failNext.add("saveLeadScore");
     await expect(understandTurn(runner().step, w.turn, w.deps)).rejects.toThrow();
+  });
+});
+
+describe("the kind of booking the pack's business takes (read from the pack's bookingModes, never from an industry name)", () => {
+  const withModes = (bookingModes: string[], extra: Record<string, unknown> = {}) =>
+    samplePack({
+      bookingModes,
+      fields: [
+        { key: "budget", label: "Budget", type: "range_inr", required: true },
+        { key: "zip", label: "Pincode", type: "text" },
+      ],
+      scoring: { rules: [{ field: "budget", match: "within_project_band", points: 60 }, { field: "zip", match: "in_service_area", points: 40 }], thresholds: { hot: 70, warm: 40 }, hardFails: [] },
+      ...extra,
+    });
+  const kindOf = async (modes: string[], extra: Record<string, unknown> = {}) => qualificationOf(world({ pack: withModes(modes, extra), script: reading({ budget: "60L", zip: "600042" }) }));
+
+  it("a slot pack and a site visit pack book as before", async () => {
+    expect((await kindOf(["slot"]))?.bookingKind).toBe("slot");
+    expect((await kindOf(["site_visit"]))?.bookingKind).toBe("site_visit");
+  });
+
+  it("a field visit pack books field visits (it was never recognised: the pack's customers were offered no time)", async () => {
+    expect((await kindOf(["field_visit"]))?.bookingKind).toBe("field_visit");
+  });
+
+  it("a pack that books by none of the three (a callback, a date range) offers no times", async () => {
+    expect((await kindOf(["callback"]))?.bookingKind).toBeNull();
+    expect((await kindOf(["date_range"]))?.bookingKind).toBeNull();
+  });
+
+  it("the first of the pack's modes the agent can book is the one used", async () => {
+    expect((await kindOf(["callback", "field_visit"]))?.bookingKind).toBe("field_visit");
+  });
+
+  it("a field visit says which detail holds where the customer is (the pack's own area rule), as the detail's name only, never the customer's answer", async () => {
+    const q = await kindOf(["field_visit"]);
+    expect(q?.visitAreaField).toBe("zip");
+    expect(JSON.stringify(q)).not.toContain("600042");
+  });
+
+  it("no such detail for a pack with no area rule, and none for a booking kind that does not go to the customer's address", async () => {
+    const noArea = { scoring: { rules: [{ field: "budget", match: "within_project_band", points: 60 }], thresholds: { hot: 70, warm: 40 }, hardFails: [] } };
+    expect((await kindOf(["field_visit"], noArea))?.visitAreaField ?? null).toBeNull();
+    expect((await kindOf(["site_visit"]))?.visitAreaField ?? null).toBeNull();
+    expect((await kindOf(["slot"]))?.visitAreaField ?? null).toBeNull();
   });
 });

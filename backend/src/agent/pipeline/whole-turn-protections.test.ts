@@ -194,21 +194,53 @@ describe("a reply went out, its records were lost, and the run then gives up (wa
   });
 });
 
-describe("KNOWN LIMIT 2b (the reply was delivered but NOTHING of ours recorded it; half closed on Day 7 by Dev 2's notify.send claim, 0045)", () => {
-  it("notify_record failed (the send is reported as sent, no row), the marker and the audit rows are lost, and the step fails on every attempt: the retries no longer resend (the claim answers them 'unknown'), but the handler, which cannot see the claim yet, adds one safe line. Passes while this exists; reading the claim (notify_attempts) in reply-record.ts would close it", async () => {
-    const w = await createWorld({ sends: ["ok_unrecorded", "ok_unrecorded", "ok_unrecorded", "ok_unrecorded"] });
+describe("a reply was delivered but NOTHING of ours recorded it (was KNOWN LIMIT 2b: closed by reading Dev 2's notify.send claim, notify_attempts, 0045)", () => {
+  const lost = (w: World) => {
     w.notify.afterDelivered = () => {
       w.failAudits(999);
       w.fake.state.failAlways.add("saveAgentMeta");
     };
+  };
+
+  it("notify_record failed (reported as sent, no row), the marker and the audit rows are lost, and the step fails on every attempt: the claim proves it went out, so NO safe line: one message", async () => {
+    const w = await createWorld({ sends: ["ok_unrecorded", "ok_unrecorded", "ok_unrecorded", "ok_unrecorded"] });
+    lost(w);
+    await w.post("wamid.A1", TEXT);
+    const [report] = await w.drain({ inject: [{ stepId: "reply", when: "after", times: 4 }] });
+    expect(report.status).toBe("failed");
+    expect(report.giveUp).toBe("already_replied");
+    const r = w.report();
+    expect(w.notify.rows.filter((d) => d.key?.startsWith("reply:"))).toHaveLength(0);
+    expect(r.replies.filter((d) => d.key?.startsWith("reply:"))).toHaveLength(1);
+    expect(r.replies.some((d) => d.key?.startsWith("gave_up:"))).toBe(false);
+  });
+
+  it("the process died after the provider accepted the reply (nothing recorded, the claim stays): still NO safe line", async () => {
+    const w = await createWorld({ sends: ["crash_after_accept"] });
+    lost(w);
+    await w.post("wamid.A1", TEXT);
+    const [report] = await w.drain({ inject: [{ stepId: "reply", when: "after", times: 4 }] });
+    expect(report.giveUp).toBe("already_replied");
+    expect(w.report().replies.some((d) => d.key?.startsWith("gave_up:"))).toBe(false);
+  });
+
+  it("a claim that was RELEASED (WhatsApp refused for certain) proves nothing went out: the safe line is still sent", async () => {
+    const w = await createWorld({ sends: ["permanent", "permanent", "permanent", "permanent"] });
     await w.post("wamid.A1", TEXT);
     const [report] = await w.drain({ inject: [{ stepId: "reply", when: "after", times: 4 }] });
     expect(report.status).toBe("failed");
     expect(report.giveUp).toBe("sent");
-    const r = w.report();
-    expect(w.notify.rows.filter((d) => d.key?.startsWith("reply:"))).toHaveLength(0); // none of the replies was recorded anywhere (only the safe line was)
-    expect(r.replies.filter((d) => d.key?.startsWith("reply:"))).toHaveLength(1); // was 4 before the claim: the retries are answered "unknown"
-    expect(r.replies.filter((d) => d.key?.startsWith("gave_up:"))).toHaveLength(1); // and the safe line on top
+    expect(w.report().replies.filter((d) => d.key?.startsWith("reply:"))).toHaveLength(0);
+  });
+
+  it("the claims cannot be read by the handler: it fails open and sends the safe line, once", async () => {
+    const w = await createWorld({ sends: ["ok_unrecorded", "ok_unrecorded", "ok_unrecorded", "ok_unrecorded"] });
+    lost(w);
+    await w.post("wamid.A1", TEXT);
+    w.fake.state.failAlways.add("claimedMessageIds");
+    const [report] = await w.drain({ inject: [{ stepId: "reply", when: "after", times: 4 }] });
+    expect(report.giveUp).toBe("sent");
+    expect(w.report().replies.filter((d) => d.key?.startsWith("gave_up:"))).toHaveLength(1);
   });
 });
 
