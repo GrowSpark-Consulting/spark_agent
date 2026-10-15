@@ -60,6 +60,7 @@ booking:
     - { priceFrom: 6000000, attributes: { price_to: 8000000, area: Velachery } }
   slots: ["2026-10-11T04:30:00.000Z"]   # free times (ISO UTC); each lasts an hour
   takenWhenChosen: ["..."]              # someone else takes these first, once, when the customer picks one
+  workPincodes: ["600020"]              # a field visit pack: the technician works only in these pincodes (a resource service area); omitted = everywhere
   existing: "2026-10-11T09:30:00.000Z"  # a confirmed booking the customer already has
 ```
 

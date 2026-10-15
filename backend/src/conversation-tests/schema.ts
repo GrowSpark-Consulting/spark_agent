@@ -136,6 +136,8 @@ const BookingSetup = z
     takenWhenChosen: z.array(z.string()).default([]),
     /** A confirmed booking the customer already has (ISO UTC start). */
     existing: z.string().optional(),
+    /** The pincodes the technician works in (the resource's service area): a visit to the customer's address is offered only inside them. Omitted: everywhere. */
+    workPincodes: z.array(z.string().regex(/^\d{6}$/)).optional(),
   })
   .strict();
 
