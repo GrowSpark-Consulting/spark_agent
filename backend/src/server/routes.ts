@@ -6,6 +6,7 @@ import { suggestReply } from "../agent/leadcard/suggest";
 import { accountStatus } from "../billing/account-status";
 import { listConnections } from "../admin/connections";
 import { editFeature, editPlan, extendTrial, grantCredits, listTenants, refundCandidates } from "../billing/admin";
+import { adminMetrics } from "../billing/metrics";
 import { cancelPlan, changePlan, handlePayuReturn, handlePayuWebhook, paymentStatus, resumePlan, startCheckout, startSetupFee, startTopup } from "../billing/checkout";
 import { getBalance } from "../billing/credits";
 import { startTrialFor } from "../billing/start-trial";
@@ -352,6 +353,8 @@ const adminUpdateFeature: RouteHandler = (request, deps, params) =>
   adminRoute(({ admin, body, params: p }) => editFeature(admin, p.key, body))(request, deps.userClient, params);
 // → RefundCandidate[]: payments flagged for a refund.
 const adminRefunds = adminRoute(({ admin }) => refundCandidates(admin));
+// → AdminMetrics: cost per credit and trial-to-paid over the last 7 and 30 days.
+const adminMetricsRoute = adminRoute(() => adminMetrics());
 
 export const ROUTES: readonly Route[] = [
   { path: "/api/health", methods: { GET: health } },
@@ -410,6 +413,7 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/admin/tenants/:id/credits", browser: true, methods: { POST: adminGrantCredits } },
   { path: "/api/admin/plans/:key", browser: true, methods: { PATCH: adminUpdatePlan } },
   { path: "/api/admin/features/:key", browser: true, methods: { PATCH: adminUpdateFeature } },
+  { path: "/api/admin/metrics", browser: true, methods: { GET: (request, deps) => adminMetricsRoute(request, deps.userClient) } },
   { path: "/api/admin/payments/refunds", browser: true, methods: { GET: (request, deps) => adminRefunds(request, deps.userClient) } },
   { path: "/api/admin/whatsapp/manual", browser: true, methods: { POST: (request, deps) => adminManualConnect(request, deps.userClient) } },
   // The two buttons of a staff alert (module 6). No login: the signed token says who tapped and which handoff. Answers are redirects or friendly pages.

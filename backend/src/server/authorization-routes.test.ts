@@ -121,6 +121,7 @@ const ADMIN_CALLS: Call[] = [
   { method: "PATCH", path: "/api/admin/plans/starter", body: { name: "Starter" } },
   { method: "PATCH", path: "/api/admin/features/booking", body: { defaultOn: true } },
   { method: "GET", path: "/api/admin/payments/refunds" },
+  { method: "GET", path: "/api/admin/metrics" },
   { method: "POST", path: "/api/admin/whatsapp/manual", body: {} },
 ];
 
