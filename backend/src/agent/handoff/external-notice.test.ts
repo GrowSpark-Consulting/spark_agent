@@ -85,10 +85,10 @@ describe("a customer writes while a team member has the chat on their own number
     expect(await w.run()).toEqual({ status: "told" });
   });
 
-  it("says 'A team member' when the name is not known", async () => {
+  it("says 'Our team' when the name is not known, never 'A team member'", async () => {
     const w = world({ assigned: "f1000000-0000-4000-8000-000000000009" });
     await w.run();
-    expect(w.sent[0].payload.text).toMatch(/^A team member is looking after/);
+    expect(w.sent[0].payload.text).toBe("Our team is looking after your chat and will reply to you shortly.");
   });
 });
 
