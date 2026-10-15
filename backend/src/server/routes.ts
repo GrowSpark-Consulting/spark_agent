@@ -37,6 +37,7 @@ import { serverEnv } from "../lib/env";
 import { requireRole, resolveTenant } from "../lib/tenant";
 import { createTemplate } from "../notify/templates";
 import { deleteWebhookEndpoint, getWebhookSettings, rotateWebhookSecret, saveWebhookEndpoint, testWebhook } from "../outbound-webhooks/endpoint";
+import { acceptInvite, cancelInvite, inviteMember, previewInvite, resendInvite, teamOverview } from "../team/invites";
 import { adminRoute, authenticate, optionalJson, readJson, requireTenant, tenantRoute, type UserClientFactory } from "./auth";
 
 // Every HTTP endpoint of the API. A route only parses the request and calls a backend service;
@@ -339,6 +340,36 @@ const whatsappDisconnect: RouteHandler = async (request, deps, params) => {
 // { tenantId, ... } → 201 connection. Platform admin only (docs/whatsapp-connection-contract.md).
 const adminManualConnect = adminRoute(({ admin, body }) => connectManual(body, admin.actor), { status: 201 });
 
+// Team invitations (migration 0052, team/invites.ts). The link is returned by the create and resend answers only (no-store), and no other route returns it.
+// → TeamOverview: members, seats (members + pending invitations) and, for an owner or admin, the pending invitations. Any member.
+const teamGet = tenantRoute(({ context }) => teamOverview(context));
+// { name, email, role } → 201 { invite, url }. Owner: admin or staff. Admin: staff only. Staff: 403. seat_limit (409) when members + pending invitations fill the plan.
+const teamInvite: RouteHandler = async (request, deps) => {
+  const response = await tenantRoute(({ context, body }) => inviteMember(context, body), { status: 201 })(request, deps.userClient);
+  response.headers.set("cache-control", "no-store");
+  return response;
+};
+// no body → { invite, url, resendsLeft }: a new link (the old one stops), seven more days, no extra seat; 5 a day. The browser sends a POST with no body,
+// so this and the next two authenticate themselves and let the app turn a thrown error into the envelope.
+const teamInviteResend: RouteHandler = async (request, deps, params) => {
+  const { context } = await requireTenant(request, deps.userClient);
+  return Response.json(await resendInvite(context, params.id ?? ""), { headers: { "cache-control": "no-store" } });
+};
+// no body → 204. The link stops working at once.
+const teamInviteCancel: RouteHandler = async (request, deps, params) => {
+  const { context } = await requireTenant(request, deps.userClient);
+  await cancelInvite(context, params.id ?? "");
+  return new Response(null, { status: 204 });
+};
+// Public, no bearer token → { status, businessName, role, expiresAt }; a malformed or unknown token is not_found. Never the invited address.
+const teamInvitePreview: RouteHandler = async (request, _deps, params) =>
+  Response.json(await previewInvite(params.token ?? "", clientKey(request)), { headers: { "cache-control": "no-store" } });
+// Signed in, no body → { tenantId, businessName, role, alreadyMember }. The user (and their verified email) comes from the token, never from the request.
+const teamInviteAccept: RouteHandler = async (request, deps, params) => {
+  const { user } = await authenticate(request, deps.userClient);
+  return Response.json(await acceptInvite(user, params.token ?? ""), { headers: { "cache-control": "no-store" } });
+};
+
 // The admin panel's billing routes (billing/admin.ts, 0041). Platform admins only; every change audited with the admin.
 // → AdminTenant[]: every business with status, plan, credits, trial end, subscription, setup-fee flag.
 const adminTenants = adminRoute(({ admin }) => listTenants(admin));
@@ -406,6 +437,12 @@ export const ROUTES: readonly Route[] = [
   { path: "/api/kb/gaps", browser: true, methods: { GET: (request, deps) => kbListGaps(request, deps.userClient) } },
   { path: "/api/kb/gaps/:id/answer", browser: true, methods: { POST: kbAnswerGap } },
   { path: "/api/kb/gaps/:id/dismiss", browser: true, methods: { POST: kbDismissGap } },
+  { path: "/api/team", browser: true, methods: { GET: (request, deps) => teamGet(request, deps.userClient) } },
+  { path: "/api/team/invite", browser: true, methods: { POST: teamInvite } },
+  { path: "/api/team/invites/:id/resend", browser: true, methods: { POST: teamInviteResend } },
+  { path: "/api/team/invites/:id/cancel", browser: true, methods: { POST: teamInviteCancel } },
+  { path: "/api/team/invites/:token", browser: true, secretParams: ["token"], methods: { GET: teamInvitePreview } },
+  { path: "/api/team/invites/:token/accept", browser: true, secretParams: ["token"], methods: { POST: teamInviteAccept } },
   { path: "/api/whatsapp/webhook-config", browser: true, methods: { GET: (request, deps) => whatsappWebhookConfig(request, deps.userClient) } },
   { path: "/api/whatsapp/manual", browser: true, methods: { POST: (request, deps) => whatsappManualConnect(request, deps.userClient) } },
   { path: "/api/onboarding/whatsapp/embedded-signup", browser: true, methods: { POST: whatsappEmbeddedSignup } },

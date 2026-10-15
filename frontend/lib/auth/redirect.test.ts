@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { authErrorPath, authLinkErrorFrom, authLinkErrorMessage, destinationAfterAuth, safeNext } from "./redirect";
+import { authErrorPath, authLinkErrorFrom, authLinkErrorMessage, destinationAfterAuth, inviteNext, safeNext } from "./redirect";
 
 describe("safeNext", () => {
   it("keeps paths inside the dashboard and onboarding", () => {
@@ -56,5 +56,28 @@ describe("auth link errors", () => {
   it("returns a broken reset link to 'forgot password', where a new one can be requested", () => {
     expect(authErrorPath("link_expired", "/reset-password")).toBe("/forgot-password?error=link_expired");
     expect(authErrorPath("signin_failed", "/reset-password/x")).toBe("/login?error=signin_failed");
+  });
+});
+
+describe("invitation links", () => {
+  const TOKEN = "C".repeat(43);
+
+  it("lets sign-in and sign-up return to an invitation, and to nothing else outside the app", () => {
+    expect(safeNext(`/invite/${TOKEN}`)).toBe(`/invite/${TOKEN}`);
+    expect(inviteNext(`/invite/${TOKEN}`)).toBe(`/invite/${TOKEN}`);
+    for (const bad of [`/invite/${"C".repeat(42)}`, `/invite/${TOKEN}/x`, `/invite/${TOKEN}?a=b`, `//invite/${TOKEN}`, `/invites/${TOKEN}`, `https://evil.example.com/invite/${TOKEN}`, "/invite/", "", null, 42]) {
+      expect(inviteNext(bad), String(bad)).toBeNull();
+      expect(safeNext(bad), String(bad)).toBe("/dashboard");
+    }
+  });
+
+  it("sends the person back to the invitation, with a business or without one", () => {
+    expect(destinationAfterAuth(false, `/invite/${TOKEN}`)).toBe(`/invite/${TOKEN}`);
+    expect(destinationAfterAuth(true, `/invite/${TOKEN}`)).toBe(`/invite/${TOKEN}`);
+    expect(destinationAfterAuth(false, "/dashboard")).toBe("/onboarding");
+  });
+
+  it("returns a failed sign-in from an invitation to login, not signup", () => {
+    expect(authErrorPath("signin_failed", `/invite/${TOKEN}`)).toBe("/login?error=signin_failed");
   });
 });

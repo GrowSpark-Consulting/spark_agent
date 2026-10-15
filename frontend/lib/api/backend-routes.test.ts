@@ -90,6 +90,12 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
   { call: "POST /api/onboarding/whatsapp/embedded-signup", file: "features/connect/connect-link.ts" },
   { call: "POST /api/onboarding/whatsapp/embedded-signup", file: "lib/whatsapp/owner-embedded-signup.ts" },
   { call: "GET /api/connect-links/:token", file: "features/connect/connect-link.ts" },
+  { call: "GET /api/team", file: "features/team/team-api.ts" },
+  { call: "POST /api/team/invite", file: "features/team/team-api.ts" },
+  { call: "POST /api/team/invites/:id/resend", file: "features/team/team-api.ts" },
+  { call: "POST /api/team/invites/:id/cancel", file: "features/team/team-api.ts" },
+  { call: "GET /api/team/invites/:token", file: "features/invite/invite-api.ts" },
+  { call: "POST /api/team/invites/:token/accept", file: "features/invite/invite-api.ts" },
 ];
 
 /**
