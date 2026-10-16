@@ -63,3 +63,34 @@ jobs:
       # 10 parallel members and 10 parallel numbers: never past the plan's seats (2) or numbers (1).
       - run: bash scripts/db/plan-limit-concurrency.sh
       - run: bash scripts/db/team-invite-concurrency.sh
+
+  # Browser tests: the dashboard and onboarding against a production build, the API, and a mock Supabase
+  # (frontend/playwright.config.ts starts all three; no secrets, placeholder keys only). New: not a required
+  # status check until a maintainer adds it in branch protection.
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The version is pinned by @playwright/test in frontend/package.json.
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: frontend
+      # Through the package script: it puts frontend/node_modules/.bin on PATH, which the build step needs.
+      - run: pnpm test:e2e
+        working-directory: frontend
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: playwright-e2e
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 7
