@@ -1,8 +1,9 @@
 # Frontend regression matrix
 
 What the frontend tests check for the real dashboard, onboarding and sign-in, and what they can't check
-yet. Update this file when you add, move or retire a test. Last reviewed 9 Oct 2026 against `main` at `072cf8c`;
-files added after that are Dev 3's uncommitted work in this checkout, listed in section N.
+yet. Update this file when you add, move or retire a test. Sections A to N were last reviewed 9 Oct 2026 against `main` at `072cf8c` (one row in
+K was corrected on 16 Oct); files added after that are Dev 3's uncommitted work in this checkout, listed in section N. **Section P (16 Oct 2026)
+covers the Day 6 to Day 9 screens and says what was run.**
 
 ## Evidence levels
 
@@ -185,7 +186,7 @@ Data: `support/day3.ts` seeds a business per test into the mock Supabase (five l
 | Loading: staff and resources say they are loading, then show | ✅ | E2E `app/loading-and-refresh.spec.ts` ("Booking setup") |
 | Google Calendar per staff member: status shown without ever reading the token, "not switched on", redirect to Google's consent, the outcome after the callback | ✅ | E2E `app/booking-setup.spec.ts` ("Google Calendar per staff member"), Unit `features/settings/google-calendar.test.ts`. The Google side is stood in; no real consent flow was run |
 | Service the assistant books (`tenants.agent_settings.bookingServiceId`): a choice when several services are active, saved without touching the other settings, cleared by removing only that key, a refused save says so and changes nothing, a choice that is no longer active is called out, staff read it only | ✅ | E2E `app/booking-service.spec.ts`; Unit `features/settings/booking-service.test.ts`. Whether the real assistant then books that service is the agent's reading of the key: unseen (BK-1) |
-| Owner or admin only, enforced by the database | ⛔ | the page hides edits from staff, but RLS lets any member write services and resources (`0002_packs_and_bookings.sql`; the code says so). Tightening it is Dev 2 |
+| Owner or admin only, enforced by the database | ➖ | the page hides edits from staff. Migration `0028_owner_admin_writes` (12 Oct 2026) restricts writes to services, resources, catalog items and the business's setup columns to owners and admins (`is_admin`), so the earlier "RLS lets any member write" note is out of date. Not seen working: `pnpm db:test` needs Docker and was not run here (16 Oct 2026, section P) |
 | Real Google OAuth and token storage | ⛔ | needs the Google Cloud project and credentials (Raja); event sync is Day 4 |
 
 ## L. Booking lifecycle rendering (unit)
@@ -299,7 +300,48 @@ Changed: `lib/whatsapp/manual-connect.ts`, `components/onboarding/{step-whatsapp
 
 **12 Oct 2026, audit run (uncommitted, on top of the list above).** New: `features/settings/booking-service{,-section}` (`.ts`, `.tsx`) and `booking-service.test.ts`, `tests/e2e/app/{inbox-limits,lead-detail-refresh,booking-service}.spec.ts`. Changed: `features/inbox/{data,data.test,inbox-screen,conversation-list,chat-view}`, `features/leads/lead-detail.tsx`, `features/settings/booking-setup-screen.tsx`, `tests/e2e/app/knowledge.spec.ts` (poll back-off only), `tests/e2e/support/{mock-supabase.mjs,day3.ts}`, this file.
 
+## P. Day 6 to Day 9 screens (added 16 Oct 2026, Dev 3, uncommitted)
+
+Sections A to N were last written before billing, the team invitations, outbound webhooks, the admin panel, agent settings, the website import,
+message media, Home and the metrics existed in their present form. Each of those has its own spec; this section lists what they cover at the
+level that was run on 16 Oct 2026, and what this session added. Nothing here is evidence for a real database, real RLS, Realtime, Meta, PayU,
+signed media or a live webhook: every spec is mocked (Playwright against `support/mock-supabase.mjs` and `page.route`) or unit.
+The per-requirement status, the open questions and the owners are in `docs/task-notes/2026-10-16-day9-dev3-status-audit.md`; who may do what and
+which route each screen calls is in `docs/dashboard-roles-and-routes.md`.
+
+| Behaviour | Status | Where |
+|---|---|---|
+| Billing: plan and status, credits, plans from the catalogue, credit history, owner-only payment actions, an admin sees no pay buttons, staff are told billing is for owners and admins, PayU return and polling, cancel and resume | ✅ mocked + unit | `app/billing.spec.ts`; `features/billing/*.test.ts` |
+| Billing: invoices | ⛔ | no invoice contract exists (the screen says "No invoice list yet"); see the status audit, D6-2 |
+| Home: credit meter, the month's four numbers, hot leads waiting, today's bookings, trial countdown, paused reasons | ✅ mocked + unit | `app/home-overview.spec.ts`; `features/home/home-api.test.ts` |
+| Team: members, seats, invitations (create, resend, cancel, copy the link once), accept page, own alert number and takeover choice | ✅ mocked + unit | `app/team.spec.ts`, `team-invites.spec.ts`, `team-takeover.spec.ts`, `invite.spec.ts` |
+| Outbound webhook: create, show the secret once, replace it, delete, last delivery, plan refusal, test | ✅ mocked + unit | `app/webhooks.spec.ts`; `features/settings/integrations/*.test.ts` |
+| Agent settings: name, tone, privacy notice, handovers; staff read only; conflict and refusal wording | ✅ mocked + unit | `app/agent-settings.spec.ts`; `features/agent/agent-settings.test.ts` |
+| Agent settings: languages, scoring and qualification rules, takeover default | ⛔ | no storage contract (Dev 1); not built, not mocked |
+| Website import and message media | ✅ mocked + unit | `app/website-import.spec.ts`, `app/inbox-media.spec.ts` |
+| Admin: businesses, extend trial, grant credits, refunds, connections, connect-link, manual connect, metrics | ✅ mocked + unit | `app/admin-*.spec.ts`; `lib/admin/*.test.ts` |
+| Admin: **plans and features editor**. Reads `plans` and `features` as the member (catalogues, `0001`); saves the changed fields only through `PATCH /api/admin/plans/:key` and `/features/:key`; shows Saved only after the answer; a refused price change, a non-admin, a lost answer, wrong numbers and a double press are each worded and change nothing | ✅ mocked + unit | `app/admin-plans.spec.ts` (14 tests, including two overlapping saves finishing out of order), `lib/admin/catalogue.test.ts` (18 tests). The platform-admin check, the SQL functions and the price-conflict rule are the server's and were not run |
+| Admin: open a business's dashboard with an audit entry | ⛔ | no route (Dev 2) |
+| Onboarding WhatsApp step shows the connection the database already holds: active (offers no second connection, Continue moves on), failed and pending (never called connected, other ways still offered), a failed read (Try again, none of the server's detail) | ✅ mocked | `onboarding/onboarding.spec.ts` ("the WhatsApp step shows the connection already saved", 4 tests); unit `lib/whatsapp/saved-connection.test.ts` |
+| Onboarding Connect step says Embedded Signup and assisted onboarding are waiting on Meta approval | ➖ | the step says "isn't set up on this site yet" and "isn't switched on yet"; the wording is Raja's call |
+| Loading states of Billing, Features, Integrations, Team members, Home, the connect page and the invite page: each read held open, the screen says it is loading and nothing else, then shows the content | ✅ mocked | `app/loading-states.spec.ts` (7 tests) |
+| What a **staff** member can do: open the leads board and a lead, see the calendar's bookings, open an Inbox chat and take it over (own token, own business, nothing written to the database) | ✅ mocked | `app/role-access.spec.ts` (3 tests). The refusals for each role are in each screen's own spec |
+| Who may do what, and which route each screen calls | ✅ document | `docs/dashboard-roles-and-routes.md`. Server side: `backend/src/server/authorization-routes.test.ts` (not run in this session). Drift guard for the route list: `lib/api/backend-routes.test.ts` |
+| Accessibility audit: landmarks, headings, names, focus, zoom (19 pinned rules) at 390, 820 and 1440 px | ✅ automated, local only | `app/a11y-audit.spec.ts`: no finding for any pinned rule on the 31 paths audited (the 28 core pages and three legal pages that another session added). **Contrast is not fixed and not pinned** (67 findings on 39 of 84 records for the 28 core pages at HEAD). The fixes are commit `851807d`, not pushed. Not axe, not a screen reader |
+| Services, resources and business setup writes are owner or admin only in the database | ➖ | migration `0028`; `pnpm db:test` needs Docker and was not run (section K) |
+| Real Meta, PayU, Realtime, RLS from a browser, signed media URLs, the webhook, a platform-admin lookup | ➖ | staging only (section M, and the rehearsal request) |
+
 ## Known flakes
+
+**16 Oct 2026, new specs.** `loading-states.spec.ts` first failed intermittently in its Team test: the page's live-region (`role="alert"`)
+that Next.js adds for the page title is the only `alert` on a screen after a client-side navigation, and the first version of the helper counted
+it. The helper now looks inside `main`. Not a product defect. `role-access.spec.ts` had the same cause and now uses the app's own `.app-state`
+alert.
+
+**16 Oct 2026, CI (not Playwright).** `check` failed on `main` at `d073c24` in the backend test `src/kb/fetch-page.test.ts` ("returns the page's HTML
+and the address it ended at": `timeoutMs` 14999, expected 15000: an exact value on a deadline that moved by 1 ms). `check` also failed once at
+`next build` on `2414c27` because Turbopack could not fetch a Google font. Neither is a frontend test. The `e2e` job on `main` is cancelled by the
+next push to `main` (`cancel-in-progress`), so only pull-request runs complete reliably.
 
 **12 Oct 2026, `knowledge.spec.ts:587` "stops polling after the polling window and offers Check again": cause found, partly fixed.**
 Reported earlier as one timeout on tablet that passed alone. Evidence from this run:

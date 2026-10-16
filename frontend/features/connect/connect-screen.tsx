@@ -184,9 +184,13 @@ function fieldDetails(problem: string, fields: Record<string, string> | undefine
 function Notice({ id, tone, title, body, testId, details = [] }: { id?: string; tone: "ok" | "error" | "info"; title: string; body: string; testId: string; details?: string[] }) {
   return (
     <div role={tone === "error" ? "alert" : "status"} data-testid={testId} className="border-2 border-foreground px-4 py-3 text-sm">
-      <strong id={id} className="block text-base">
-        {title}
-      </strong>
+      {id ? (
+        <h1 id={id} className="m-0 block text-base font-bold">
+          {title}
+        </h1>
+      ) : (
+        <strong className="block text-base">{title}</strong>
+      )}
       <span className="text-neutral-700">{body}</span>
       {details.map((line) => (
         <span key={line} className="mt-1 block text-neutral-900">

@@ -19,7 +19,7 @@ export default async function SignupPage({ searchParams }: { searchParams: Promi
   await redirectIfSignedIn(invite);
   const linkError = authLinkErrorMessage(error);
   return (
-    <div className="app-auth">
+    <main className="app-auth">
       <div className="app-auth-card">
         <Link href="/login" className="app-brand">
           <span className="app-brand-mark" aria-hidden="true" />
@@ -37,6 +37,6 @@ export default async function SignupPage({ searchParams }: { searchParams: Promi
           Already have an account? <Link href={invite ? `/login?next=${encodeURIComponent(invite)}` : "/login"}>Sign in</Link>
         </p>
       </div>
-    </div>
+    </main>
   );
 }
