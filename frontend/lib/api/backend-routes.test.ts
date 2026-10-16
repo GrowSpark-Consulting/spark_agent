@@ -73,6 +73,8 @@ const FRONTEND_CALLS: { call: string; file: string }[] = [
   { call: "POST /api/admin/tenants/:id/credits", file: "lib/admin/billing.ts" },
   { call: "GET /api/admin/payments/refunds", file: "lib/admin/billing.ts" },
   { call: "GET /api/admin/metrics", file: "lib/admin/metrics.ts" },
+  { call: "PATCH /api/admin/plans/:key", file: "lib/admin/catalogue.ts" },
+  { call: "PATCH /api/admin/features/:key", file: "lib/admin/catalogue.ts" },
   { call: "GET /api/contacts/:id/deletion", file: "lib/privacy/deletion.ts" },
   { call: "POST /api/contacts/:id/deletion", file: "lib/privacy/deletion.ts" },
   { call: "GET /api/features", file: "features/toggles/feature-api.ts" },
@@ -116,9 +118,6 @@ const AWAITING_BACKEND: { call: string; file: string; where: string }[] = [
 
 /** Backend routes the browser never calls, and why. Anything not here and not in FRONTEND_CALLS fails the test. */
 const NO_BROWSER_CALLER: Record<string, string> = {
-  // The admin panel's billing routes (Dev 2, 0041). The ones the panel calls are in FRONTEND_CALLS.
-  "PATCH /api/admin/plans/:key": "not called: no admin route reads the current plans, so an editor would be filling blind (needs a contract)",
-  "PATCH /api/admin/features/:key": "not called: no admin route reads the current features, so an editor would be filling blind (needs a contract)",
   "GET /api/health": "infrastructure: Railway's liveness check",
   "GET /api/webhooks/whatsapp": "Meta calls it: the webhook verification handshake",
   "POST /api/webhooks/whatsapp": "Meta calls it: inbound messages and statuses (signature checked)",
