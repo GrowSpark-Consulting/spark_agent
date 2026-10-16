@@ -50,7 +50,7 @@ We disclose information only as needed to provide or protect the Service, as ins
 
 When enabled, Anthropic processes message content and relevant business-provided context to generate requested AI outputs. The embeddings provider processes knowledge-base text and search queries to create embeddings. PayU processes transaction information needed for payment. Google receives calendar information when a business connects calendar features. Meta/WhatsApp carries messages between the customer and business.
 
-Langfuse tracing is off unless configured with its credentials. When enabled, traces include operational details such as model, token and cost data, tenant and conversation identifiers, prompt labels, timing and error codes. Message text is not included by default. If `LANGFUSE_CAPTURE_TEXT` is set to `true`, input and reply text is sent after phone numbers and email addresses are masked and the text is shortened. The repository does not establish the current setting in any live environment. Sentry receives selected redacted error details when configured; it is not sent request bodies or customer message text by the reporting code.
+AI telemetry and performance tracing via Langfuse captures only operational metadata such as token counts, model name, latency, cost estimates, character counts, and error codes. In production, `LANGFUSE_CAPTURE_TEXT` is unset, so customer message text and prompt contents are not captured or stored in telemetry traces. If the setting is explicitly enabled in another environment, the code sends input and reply text after masking phone numbers and email addresses and shortening the text. Sentry receives selected redacted error details when configured; it is not sent request bodies or customer message text by the reporting code.
 
 We do not sell personal information. We do not use customer conversation content to train a general-purpose AI model unless the business and affected individuals are given appropriate notice and a lawful basis, and the practice is separately approved and disclosed.
 
@@ -60,9 +60,9 @@ The repository specifies Mumbai, India as the intended database region. The defa
 
 ## Retention
 
-Customer chats and messages are retained until the customer or business requests deletion, or until the account is closed. Eligible unpaid trial business accounts and their tenant data are deleted 30 days after the trial ends; this is a separate account-deletion process.
+Customer chats and messages are retained until a business or contact submits a deletion request. Chats for an eligible unpaid trial tenant are deleted as part of tenant cleanup 30 days after the trial ends.
 
-Security and diagnostic logs are retained for up to 30 days in our hosting infrastructure logs. Backups are retained according to our database provider's backup plan; current period is confirmed by our infrastructure team. Billing/tax records are retained for as long as required by applicable Indian accounting and tax laws, and deleted when no longer required.
+Security and diagnostic logs are retained for up to 30 days in our hosting infrastructure logs. Backups are maintained according to our database-provider plan (currently 7 days for automated daily database backups on Supabase Pro, with rolling weekly disaster-recovery dumps retained for up to 4 weeks). Database backups do not include uploaded Storage media. Billing/tax records are retained for as long as required by applicable Indian accounting and tax laws, and deleted when no longer required.
 
 ## Security
 

@@ -12,7 +12,7 @@ Created a docs-only policy set under `docs/meta-app/` from the supplied draft an
 - `docs/meta-app/data-deletion.md`
 - `docs/meta-app/retention-check.md`
 
-The audit found no general 30-day chat or account/support cleanup job. It found request-based contact deletion and a 30-day-after-trial deletion process for eligible unpaid trial tenants. Billing rows have no general expiry rule, but tenant deletion cascades to payment and credit-ledger rows. Backup and log retention settings are not provable from code; the production checklist describes intended settings that require operator verification. The policy text uses figure-free wording for unresolved periods and includes the verified 30-day unpaid-trial account-deletion behavior.
+The audit found no general 30-day chat or account/support cleanup job. It found request-based contact deletion and a 30-day-after-trial deletion process for eligible unpaid trial tenants. Billing rows have no general expiry rule, but tenant deletion cascades to payment and credit-ledger rows. Dev 2 subsequently confirmed the current backup plan (7-day Supabase Pro daily database backups and weekly encrypted dumps kept up to 4 weeks), up-to-30-day Railway/Vercel hosting logs, and that production `LANGFUSE_CAPTURE_TEXT` is unset. The policy pages reflect these answers, distinguish operational confirmation from code settings, and note database backups exclude uploaded Storage media.
 
 Raja's legal/accounting decisions and Dev 2's infrastructure confirmations are listed in `retention-check.md`.
 
