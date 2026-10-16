@@ -720,3 +720,77 @@ test.describe("onboarding needs an account", () => {
     await expectNoHorizontalOverflow(page);
   });
 });
+
+// The WhatsApp step reads the connection the database already holds (whatsapp_connections_public, as the signed-in member), so a return to the
+// wizard shows the truth rather than the preview. The mock Supabase gives each of these accounts a business with a different saved number; the
+// Business step gets 409 has_business for all of them, as for the project's owner. Mocked: it proves what the step draws from each answer, not
+// what a real database or a real Meta account would say.
+test.describe("the WhatsApp step shows the connection already saved", () => {
+  test.use({ storageState: SIGNED_OUT });
+
+  async function openStepAs(page: Page, email: string) {
+    // A member of a business is sent to the dashboard after sign-in whatever `next` says; the wizard is opened from there.
+    await signIn(page, email);
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await openOnboarding(page);
+    await walkTo(page, "WhatsApp");
+    await expect(page.getByRole("heading", { name: "Connect your WhatsApp number" })).toBeVisible();
+  }
+
+  test("an active saved number is shown as connected, offers no second connection, and Continue moves on", async ({ page }) => {
+    await openStepAs(page, "connected@test.local");
+    const saved = page.getByTestId("saved-connection");
+    await expect(saved).toHaveAttribute("data-state", "connected");
+    await expect(saved).toContainText("Connected · +91 98400 12345");
+    await expect(saved).toContainText("already connected");
+    // Nothing to set up: no method picker, no setup-call offer, no preview note, no Facebook or manual form.
+    await expect(page.getByRole("radiogroup", { name: "Connection method" })).toHaveCount(0);
+    await expect(page.getByTestId("setup-call")).toHaveCount(0);
+    await expect(page.getByRole("note", { name: "Preview" })).toHaveCount(0);
+    await expect(page.getByTestId("facebook-not-configured")).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+    await expect(next(page, "Continue")).toBeEnabled();
+    await expect(next(page, "Do this later")).toHaveCount(0);
+    await next(page, "Continue").click();
+    await expect(page.getByRole("heading", { name: "Team, calendar and features" })).toBeVisible();
+  });
+
+  for (const [email, state, sentence] of [
+    ["failed@test.local", "failed", "It didn’t pass its checks"],
+    ["pending@test.local", "pending", "Setup with Meta isn’t finished yet"],
+  ] as const) {
+    test(`a ${state} saved number is never called connected, and the other ways to connect stay offered`, async ({ page }) => {
+      await openStepAs(page, email);
+      const saved = page.getByTestId("saved-connection");
+      await expect(saved).toHaveAttribute("data-state", "inactive");
+      await expect(saved).toContainText("+91 98400 12345 is saved but isn’t connected");
+      await expect(saved).toContainText(sentence);
+      await expect(page.locator("body")).not.toContainText(/Connected · \+91/);
+      // Still offered: the pickers and the setup-call offer, and the footer says it can be done later.
+      await expect(page.getByRole("radiogroup", { name: "Connection method" })).toBeVisible();
+      await expect(page.getByTestId("setup-call")).toBeVisible();
+      await expect(next(page, "Do this later")).toBeEnabled();
+      await expectNoHorizontalOverflow(page);
+    });
+  }
+
+  test("a failed read says so with Try again, hides the server's detail, and claims neither a number nor none", async ({ page }) => {
+    const reads: string[] = [];
+    page.on("request", (r) => {
+      if (new URL(r.url()).pathname.endsWith("/rest/v1/whatsapp_connections_public")) reads.push(r.method());
+    });
+    await openStepAs(page, "viewerror@test.local");
+    const alert = page.getByTestId("saved-connection-error");
+    await expect(alert).toContainText("We couldn’t check whether a number is already connected");
+    await expect(alert.getByRole("button", { name: "Try again" })).toBeVisible();
+    await expect(page.getByTestId("saved-connection")).toHaveCount(0);
+    await expect(page.locator("body")).not.toContainText(/internal detail|boom|XX000/);
+    await expect(page.locator("body")).not.toContainText(/Connected · \+91/);
+    // The step can still be skipped, and Try again reads again (the same refusal comes back here, and is shown the same way).
+    await expect(next(page, "Do this later")).toBeEnabled();
+    const before = reads.length;
+    await alert.getByRole("button", { name: "Try again" }).click();
+    await expect.poll(() => reads.length).toBeGreaterThan(before);
+    await expect(page.getByTestId("saved-connection-error")).toBeVisible();
+  });
+});

@@ -58,18 +58,38 @@ const SIGNED_IN: { email: string; paths: string[] }[] = [
       "/dashboard/messages/test",
       "/dashboard/settings/booking",
       "/dashboard/settings/privacy",
+      "/dashboard/settings/integrations",
       "/onboarding",
     ],
   },
   { email: "inbox@test.local", paths: ["/dashboard/inbox", "/dashboard/inbox?chat=40000000-0000-0000-0000-000000000002"] },
   {
     email: "wa-platform@test.local",
-    paths: ["/dashboard/admin/whatsapp", "/dashboard/admin/billing", "/dashboard/admin/connections", "/dashboard/admin/metrics"],
+    paths: ["/dashboard/admin/whatsapp", "/dashboard/admin/billing", "/dashboard/admin/connections", "/dashboard/admin/metrics", "/dashboard/admin/plans"],
   },
 ];
 const SIGNED_OUT_PATHS = ["/login", "/signup", "/forgot-password", "/reset-password", `/invite/${TOKEN}`, `/connect/${TOKEN}`];
 
+/** The mock database has no plans or features tables; give the admin plan editor a plan and a feature so the audit sees its forms, not an error. */
+async function stubCatalogue(page: import("@playwright/test").Page) {
+  const rows: Record<string, unknown[]> = {
+    plans: [{ key: "growth", name: "Growth", price_inr: 2499, monthly_credits: 1500, seats: 5, whatsapp_numbers: 2, feature_keys: ["booking"] }],
+    features: [{ key: "booking", name: "Booking in chat", description: "Offers slots and books them.", default_on: true }],
+  };
+  for (const table of Object.keys(rows)) {
+    await page.route(
+      (url) => url.pathname === `/rest/v1/${table}`,
+      (route) => {
+        const req = route.request();
+        if (req.method() === "OPTIONS") return route.fallback();
+        return route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": req.headers()["origin"] ?? "*" }, body: JSON.stringify(rows[table]) });
+      },
+    );
+  }
+}
+
 async function run(page: import("@playwright/test").Page, path: string, width: number): Promise<A11yFinding[]> {
+  if (path === "/dashboard/admin/plans") await stubCatalogue(page);
   await page.goto(path);
   await page.waitForLoadState("networkidle").catch(() => {});
   await page.waitForTimeout(400);
