@@ -26,6 +26,44 @@ async function hold(page: Page, table: string, matches: (url: URL) => boolean = 
 
 const loading = (page: Page, title: string) => page.getByRole("status").filter({ hasText: title });
 
+/** Follows the page's GETs of one table (register before the page opens), to tell when they have gone quiet. */
+function readActivity(page: Page, table: string) {
+  const path = `/rest/v1/${table}`;
+  const inFlight = new Set<unknown>();
+  let lastActivity = Date.now();
+  const mine = (r: { url(): string; method(): string }) => r.method() === "GET" && new URL(r.url()).pathname === path;
+  page.on("request", (r) => {
+    if (!mine(r)) return;
+    inFlight.add(r);
+    lastActivity = Date.now();
+  });
+  const done = (r: { url(): string; method(): string }) => {
+    if (!mine(r)) return;
+    inFlight.delete(r);
+    lastActivity = Date.now();
+  };
+  page.on("requestfinished", done);
+  page.on("requestfailed", done);
+  return { inFlight: () => inFlight.size, lastActivity: () => lastActivity };
+}
+
+// A screen that joins Realtime reads once more to catch up, 400 ms after the join (lib/realtime/table-changes.ts), and Refresh stays
+// disabled while that read runs. A test that holds the table's reads with hold() before that read has landed holds the catch-up too,
+// and then waits for a Refresh button that cannot enable until the test itself releases the hold. This waits until the screen is live
+// and its reads have been quiet for longer than that wait. A quiet window, not a request match: the catch-up read is not guaranteed.
+const CATCH_UP_QUIET_MS = 700;
+async function settleCatchUp(page: Page, reads: ReturnType<typeof readActivity>) {
+  await expect(page.getByText("Updating live."), "the screen never joined Realtime, so its catch-up read cannot be waited for").toBeVisible();
+  const liveSeenAt = Date.now();
+  await expect
+    .poll(() => reads.inFlight() === 0 && Date.now() - Math.max(liveSeenAt, reads.lastActivity()) >= CATCH_UP_QUIET_MS, {
+      message: `the reads did not go quiet for ${CATCH_UP_QUIET_MS} ms after the screen joined Realtime`,
+      timeout: 15_000,
+      intervals: [50, 100, 250],
+    })
+    .toBe(true);
+}
+
 async function openDay(page: Page, account: Day3Account, query = `date=${DAY}`) {
   await open(page, account, `/dashboard/calendar?${query}`, /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday) \d+ \w+$|^Week of/);
 }
@@ -121,8 +159,10 @@ test.describe("Calendar · Refresh", () => {
 
   test("moving to another day while a refresh is running shows the new day, never the old answer", async ({ page, request }) => {
     const account = await newDay3Account(request, { seed: true });
+    const reads = readActivity(page, "bookings");
     await openDay(page, account);
     await expect(page.getByRole("button", { name: /Karthik R/ })).toBeVisible();
+    await settleCatchUp(page, reads);
     const next = await hold(page, "bookings");
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await page.getByRole("button", { name: "Next day" }).click();
