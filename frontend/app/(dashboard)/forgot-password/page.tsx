@@ -13,7 +13,7 @@ export default async function ForgotPasswordPage({ searchParams }: { searchParam
   const linkError =
     error === "link_expired" ? "That reset link has expired or was already used. Enter your email to get a new one." : authLinkErrorMessage(error);
   return (
-    <div className="app-auth">
+    <main className="app-auth">
       <div className="app-auth-card">
         <Link href="/login" className="app-brand">
           <span className="app-brand-mark" aria-hidden="true" />
@@ -29,6 +29,6 @@ export default async function ForgotPasswordPage({ searchParams }: { searchParam
           Remembered it? <Link href="/login">Sign in</Link>
         </p>
       </div>
-    </div>
+    </main>
   );
 }

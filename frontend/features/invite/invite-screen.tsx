@@ -217,9 +217,13 @@ export function InviteScreen({ token }: { token: string }) {
 function Notice({ id, tone, title, body, testId }: { id?: string; tone: "ok" | "error"; title: string; body: string; testId: string }) {
   return (
     <div role={tone === "error" ? "alert" : "status"} data-testid={testId} className="border-2 border-foreground px-4 py-3 text-sm">
-      <strong id={id} className="block text-base">
-        {title}
-      </strong>
+      {id ? (
+        <h1 id={id} className="m-0 block text-base font-bold">
+          {title}
+        </h1>
+      ) : (
+        <strong className="block text-base">{title}</strong>
+      )}
       <span className="text-neutral-700">{body}</span>
     </div>
   );
