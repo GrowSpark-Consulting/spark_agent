@@ -18,15 +18,49 @@ const loadMore = (page: Page) => page.getByRole("button", { name: /Load more lea
 /** Every request the page makes to the leads table, in order, with its method and query. */
 function leadsRequests(page: Page) {
   const seen: { method: string; url: URL }[] = [];
+  const inFlight = new Set<unknown>();
+  let lastActivity = Date.now();
+  const isLeads = (r: { url(): string }) => new URL(r.url()).pathname === "/rest/v1/leads";
+  const settle = (r: { url(): string }) => {
+    if (!isLeads(r)) return;
+    inFlight.delete(r);
+    lastActivity = Date.now();
+  };
   page.on("request", (r) => {
-    const url = new URL(r.url());
-    if (url.pathname === "/rest/v1/leads") seen.push({ method: r.method(), url });
+    if (!isLeads(r)) return;
+    seen.push({ method: r.method(), url: new URL(r.url()) });
+    inFlight.add(r);
+    lastActivity = Date.now();
   });
+  page.on("requestfinished", settle);
+  page.on("requestfailed", settle);
   return {
     all: seen,
     heads: () => seen.filter((r) => r.method === "HEAD"),
     pages: () => seen.filter((r) => r.method === "GET"),
+    inFlight: () => inFlight.size,
+    lastActivity: () => lastActivity,
   };
+}
+
+// The board joins Realtime when it opens and, once joined, reads once more to catch up (lib/realtime/table-changes.ts: a refresh
+// REFRESH_WAIT_MS = 400 ms after the first SUBSCRIBED; features/leads/leads-board.tsx then reads the counts again with it). That read
+// is expected, but when it lands depends on how busy the machine is: a test that records its request-count baseline too early counts it
+// as the user's own read. This waits until the board is live and its leads reads have been quiet for longer than that wait, so the
+// catch-up has landed (or, if the board wasn't ready for it, has been dropped). It is a quiet window, not a request match, because the
+// catch-up read is not guaranteed to happen. Call it before recording a baseline.
+const CATCH_UP_WAIT_MS = 400;
+const QUIET_MS = CATCH_UP_WAIT_MS + 300;
+async function settleCatchUp(page: Page, reads: ReturnType<typeof leadsRequests>) {
+  await expect(page.getByText("Updating live."), "the board never joined Realtime, so its catch-up read cannot be waited for").toBeVisible();
+  const liveSeenAt = Date.now();
+  await expect
+    .poll(() => reads.inFlight() === 0 && Date.now() - Math.max(liveSeenAt, reads.lastActivity()) >= QUIET_MS, {
+      message: `the leads reads did not go quiet for ${QUIET_MS} ms after the board joined Realtime`,
+      timeout: 15_000,
+      intervals: [50, 100, 250],
+    })
+    .toBe(true);
 }
 
 const leadNumbers = async (page: Page) => (await cards(page).allInnerTexts()).map((t) => Number(/Mixed lead (\d+)/.exec(t)?.[1]));
@@ -49,6 +83,7 @@ test.describe("Leads board · filters and counts from the database", () => {
     const reads = leadsRequests(page);
     await open(page, account, "/dashboard/leads", "Leads");
     await expect(cards(page)).toHaveCount(200);
+    await settleCatchUp(page, reads);
     await chip(page, /^Hot/).click();
     await expect(cards(page)).toHaveCount(90);
     const numbers = await leadNumbers(page);
@@ -68,6 +103,7 @@ test.describe("Leads board · filters and counts from the database", () => {
     const reads = leadsRequests(page);
     await open(page, account, "/dashboard/leads", "Leads");
     await expect(cards(page)).toHaveCount(200);
+    await settleCatchUp(page, reads);
     const before = reads.pages().length;
     await page.getByLabel("Score at least").fill("70");
     await expect(cards(page)).toHaveCount(90); // hot only: score 90
@@ -121,6 +157,8 @@ test.describe("Leads board · filters and counts from the database", () => {
     const account = await newDay3Account(request, { mixedLeads: 450 });
     const reads = leadsRequests(page);
     await open(page, account, "/dashboard/leads", "Leads");
+    await expect(cards(page)).toHaveCount(200);
+    await settleCatchUp(page, reads);
     await chip(page, /^Hot/).click();
     await expect(cards(page)).toHaveCount(90);
     // The next read of hot leads no longer holds the newest one: it stopped matching.
