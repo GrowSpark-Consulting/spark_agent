@@ -19,6 +19,43 @@ const leadsReads = (page: Page) => {
   return urls;
 };
 
+/** Follows the page's GETs of the leads table (register before the page opens), to tell when they have gone quiet. */
+const leadsActivity = (page: Page) => {
+  const isLeadsGet = (r: { url(): string; method(): string }) => r.method() === "GET" && new URL(r.url()).pathname === "/rest/v1/leads";
+  const inFlight = new Set<unknown>();
+  let lastActivity = Date.now();
+  page.on("request", (r) => {
+    if (!isLeadsGet(r)) return;
+    inFlight.add(r);
+    lastActivity = Date.now();
+  });
+  const done = (r: { url(): string; method(): string }) => {
+    if (!isLeadsGet(r)) return;
+    inFlight.delete(r);
+    lastActivity = Date.now();
+  };
+  page.on("requestfinished", done);
+  page.on("requestfailed", done);
+  return { inFlight: () => inFlight.size, lastActivity: () => lastActivity };
+};
+
+// The board reads its first page once more 400 ms after it joins Realtime (lib/realtime/table-changes.ts), and Refresh stays disabled
+// while that read runs. A test that hold()s every leads read before that read has landed holds the catch-up too, then waits for a
+// Refresh button that cannot enable until the test itself releases the hold. This waits until the board is live and its reads have been
+// quiet for longer than that wait. A quiet window, not a request match: the catch-up read is not guaranteed.
+const CATCH_UP_QUIET_MS = 700;
+async function settleCatchUp(page: Page, reads: ReturnType<typeof leadsActivity>) {
+  await expect(page.getByText("Updating live."), "the board never joined Realtime, so its catch-up read cannot be waited for").toBeVisible();
+  const liveSeenAt = Date.now();
+  await expect
+    .poll(() => reads.inFlight() === 0 && Date.now() - Math.max(liveSeenAt, reads.lastActivity()) >= CATCH_UP_QUIET_MS, {
+      message: `the leads reads did not go quiet for ${CATCH_UP_QUIET_MS} ms after the board joined Realtime`,
+      timeout: 15_000,
+      intervals: [50, 100, 250],
+    })
+    .toBe(true);
+}
+
 /** Holds the matching GET of the leads table until `release()`; everything else goes straight through. */
 async function hold(page: Page, matches: (url: URL) => boolean = () => true) {
   let release: () => void = () => {};
@@ -153,12 +190,31 @@ test.describe("Leads board · Refresh", () => {
   test("says the board is updating live, and Refresh still reads again without clearing it", async ({ page, request }) => {
     const account = await newDay3Account(request, { seed: true });
     const reads = leadsReads(page);
+    const activity = leadsActivity(page);
+    // The hold is armed by the Refresh click itself, in the page's capture phase, before the board's handler issues its read. A read
+    // that started earlier (the Realtime catch-up) goes through unheld, and the click waits for it to finish; one that would start
+    // later is dropped by the board, which is already refreshing. So the held read is always Refresh's own, never the catch-up's.
+    let armed = false;
+    await page.exposeFunction("__armRefreshHold", () => {
+      armed = true;
+    });
     await open(page, account, "/dashboard/leads", "Leads");
     await expect(board(page)).toBeVisible();
-    await expect(page.getByText("Updating live.")).toBeVisible();
+    await page.evaluate(() => {
+      document.addEventListener(
+        "click",
+        (e) => {
+          const button = (e.target as Element | null)?.closest("button");
+          if (button?.textContent === "Refresh") void (window as unknown as { __armRefreshHold: () => Promise<void> }).__armRefreshHold();
+        },
+        { capture: true, once: false },
+      );
+    });
+    await settleCatchUp(page, activity); // also waits for "Updating live."; keeps the baseline below free of the catch-up
     const before = reads.length;
-    const next = await hold(page);
+    const next = await hold(page, () => armed);
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect.poll(() => next.held(), { message: "Refresh's own read was not held" }).toBe(1);
     await expect(page.getByRole("button", { name: "Refreshing…" })).toBeDisabled();
     await expect(board(page)).toBeVisible(); // still there while it reads
     await expect(page.getByText("Loading your leads")).toHaveCount(0);
