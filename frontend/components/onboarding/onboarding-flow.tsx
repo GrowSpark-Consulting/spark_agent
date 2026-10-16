@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import Image from "next/image";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -160,7 +161,7 @@ export function OnboardingFlow({ activePacks }: { activePacks: ActivePack[] | nu
           href={ROUTES.landing}
           className="flex items-center gap-2.5 text-foreground no-underline mr-auto hover:text-foreground"
         >
-          <span aria-hidden className="block size-[18px] bg-primary" />
+          <Image src="/spark-agent-logo.png" alt="" aria-hidden width={26} height={26} className="block size-[26px]" />
           <span className="font-extrabold text-lg">Spark Agent</span>
         </Link>
         {inSteps && (
