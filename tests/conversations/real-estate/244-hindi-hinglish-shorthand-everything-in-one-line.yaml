@@ -15,7 +15,7 @@ turns:
       reply: "Badhiya! Greater Noida West mein 3BHK aapke liye sahi rahega. Site visit ke liye Sunday 10:00 am, Sunday 3:00 pm ya Monday 5:30 pm free hai. Aapko kaun sa theek rahega?"
     expect:
       extracted: { language: hi, intent: give_details }
-      reply: { sent: true, buttons: [], matches: ["\\b(hai|mein|aap|aapko|ke|ki|ka|rahega|theek)\\b", "\\b10(:00)?\\s?am\\b", "\\b3(:00)?\\s?pm\\b", "\\b5:30\\s?pm\\b"], notContains: ["budget kya", "kaun sa area"] }
+      reply: { sent: true, buttons: [], matches: ["\\b(hai|mein|aap|aapko|ke|ki|ka|rahega|theek)\\b", "\\b10(:00)?\\s?(am|baje)\\b", "\\b3(:00)?\\s?(pm|baje)\\b", "\\b5:30\\s?(pm|baje)\\b"], notContains: ["budget kya", "kaun sa area"] }
       aiReplies: 1
       handoff: null
       calendar: { confirmed: [] }
