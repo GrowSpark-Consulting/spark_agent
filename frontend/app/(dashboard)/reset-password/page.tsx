@@ -13,7 +13,7 @@ export default async function ResetPasswordPage() {
   const { user } = await getAuth();
   if (!user) redirect("/forgot-password?error=link_expired");
   return (
-    <div className="app-auth">
+    <main className="app-auth">
       <div className="app-auth-card">
         <Link href="/login" className="app-brand">
           <span className="app-brand-mark" aria-hidden="true" />
@@ -25,6 +25,6 @@ export default async function ResetPasswordPage() {
         </div>
         <ResetPasswordForm />
       </div>
-    </div>
+    </main>
   );
 }

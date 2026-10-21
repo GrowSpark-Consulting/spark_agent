@@ -158,10 +158,19 @@ describe("mapping rows to the inbox view model", () => {
     expect(attachmentOf({ id: "m1", mime: "image/jpeg", unavailable: "media_gone" })).toEqual({ label: "IMG", name: "Photo", note: "WhatsApp no longer has this file" });
     expect(attachmentOf({ id: "m1", mime: "image/jpeg", unavailable: "bad_answer" })?.note).toBe("WhatsApp wouldn't hand this file over");
     expect(attachmentOf({ id: "m1", mime: "image/jpeg", skipped: "token_rejected" })?.note).toBe("Wasn't saved");
-    // a stored file keeps the "yet" line (no signed-URL route exists) and its path is not in the result
-    const stored = attachmentOf({ id: "m1", mime: "image/jpeg", path: "t/c/m.jpg", size: 10 });
-    expect(stored).toEqual({ label: "IMG", name: "Photo", note: "Can't be shown here yet" });
-    expect(JSON.stringify(stored)).not.toContain("t/c/m.jpg");
+  });
+
+  it("a stored image or document carries its path for media-url.ts to check and sign, with no note, and a left-out or audio file never does", () => {
+    const image = attachmentOf({ id: "m1", mime: "image/jpeg", path: "t/c/m.jpg", size: 10 });
+    expect(image).toEqual({ label: "IMG", name: "Photo", file: { path: "t/c/m.jpg", mime: "image/jpeg" } });
+    const doc = attachmentOf({ id: "m3", mime: "application/pdf; charset=binary", path: "t/c/m.pdf" });
+    expect(doc).toEqual({ label: "PDF", name: "Document", file: { path: "t/c/m.pdf", mime: "application/pdf" } });
+    // the same file with a reason it was left out: the reason wins, no path is carried
+    expect(attachmentOf({ id: "m1", mime: "image/jpeg", path: "t/c/m.jpg", skipped: "too_big" })).toEqual({ label: "IMG", name: "Photo", note: "Too large to keep" });
+    // a voice message is never stored for viewing here
+    expect(attachmentOf({ id: "m2", mime: "audio/ogg", path: "t/c/m.ogg" })?.file).toBeUndefined();
+    // a path that is not text is not a path
+    expect(attachmentOf({ id: "m1", mime: "image/jpeg", path: 5 })).toEqual({ label: "IMG", name: "Photo", note: "Can't be shown here yet" });
   });
 
   it("makes initials from the first two words", () => {

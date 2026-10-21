@@ -3,7 +3,7 @@ import Link from "next/link";
 import { GoogleButton } from "@/components/dashboard/google-button";
 import { SignupForm } from "@/components/dashboard/signup-form";
 import { ErrorState } from "@/components/shared/states";
-import { authLinkErrorMessage } from "@/lib/auth/redirect";
+import { authLinkErrorMessage, inviteNext } from "@/lib/auth/redirect";
 import { redirectIfSignedIn } from "@/lib/auth/session";
 import "@/styles/app.css";
 
@@ -14,11 +14,12 @@ export const metadata: Metadata = { title: "Sign up · Spark Agent" };
 // "Continue with Google" asks for onboarding, but /auth/callback sends an existing member to the
 // dashboard.
 export default async function SignupPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  const { error } = await searchParams;
-  await redirectIfSignedIn();
+  const { error, next } = await searchParams;
+  const invite = inviteNext(next) ?? undefined;
+  await redirectIfSignedIn(invite);
   const linkError = authLinkErrorMessage(error);
   return (
-    <div className="app-auth">
+    <main className="app-auth">
       <div className="app-auth-card">
         <Link href="/login" className="app-brand">
           <span className="app-brand-mark" aria-hidden="true" />
@@ -29,13 +30,13 @@ export default async function SignupPage({ searchParams }: { searchParams: Promi
           <p className="app-lede" style={{ fontSize: 15 }}>Create the account you&apos;ll use to sign in to Spark Agent.</p>
         </div>
         {linkError ? <ErrorState compact title="Couldn't sign you up" description={linkError} /> : null}
-        <SignupForm />
+        <SignupForm next={invite} />
         <p className="app-hint" style={{ fontSize: 14, margin: 0 }}>Or</p>
-        <GoogleButton next="/onboarding" />
+        <GoogleButton next={invite ?? "/onboarding"} />
         <p className="app-hint" style={{ fontSize: 14 }}>
-          Already have an account? <Link href="/login">Sign in</Link>
+          Already have an account? <Link href={invite ? `/login?next=${encodeURIComponent(invite)}` : "/login"}>Sign in</Link>
         </p>
       </div>
-    </div>
+    </main>
   );
 }

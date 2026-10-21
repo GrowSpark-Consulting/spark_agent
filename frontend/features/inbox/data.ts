@@ -14,9 +14,9 @@ import { z } from "zod";
 //   * The list loads the newest CONVERSATION_LIMIT conversations by creation time and is sorted by
 //     each one's newest loaded message. Migration 0010 adds conversations.last_message_at; once it is
 //     applied everywhere, order and page by that column in the query instead.
-//   * Media files aren't downloaded: messages.media holds Meta's media id and mime type only
-//     (docs/task-notes/2026-10-08-feat-agent-webhook-post.md), so photos, documents and voice
-//     messages show a placeholder, never a preview, a player or a link.
+//   * Media: messages.media holds Meta's media id and mime type, and once the download job has run (backend/src/media/download.ts) a
+//     `path` in the private message-media bucket. A photo or document with a path is shown through a signed link (stored-media.tsx,
+//     media-url.ts); without one (not downloaded yet, left out, a voice message) it shows a placeholder and says why.
 
 export const CONVERSATION_LIMIT = 200;
 /** Newest messages loaded per chat; older history needs paging (not built). */
@@ -125,6 +125,11 @@ export interface Attachment {
   name: string;
   /** A second line under the name: why the file can't be opened, or a location's coordinates. */
   note?: string;
+  /**
+   * The stored file, when the download job has kept one (messages.media.path, in the private message-media bucket). The path is not an address:
+   * it is only ever handed to media-url.ts, which checks it and signs it. Absent while the file is not stored, or was left out.
+   */
+  file?: { path: string; mime: string | null };
 }
 
 export interface LastMessage {
@@ -258,9 +263,12 @@ function mediaAttachment(kind: MediaKind, media: unknown): Attachment {
   const fileName = stringField(record, "name") ?? stringField(record, "filename");
   const ext = fileName ? /\.([a-z0-9]{2,4})$/i.exec(fileName)?.[1]?.toUpperCase() : undefined;
   const mime = baseMime(record);
-  if (kind === "image") return { label: "IMG", name: fileName ?? "Photo", note: leftOut ?? "Can't be shown here yet" };
+  // Only an image or a document that was stored; a voice message is never stored, and a file the job left out has no path worth using.
+  const path = !leftOut && kind !== "audio" ? stringField(record, "path") : null;
+  const file = path ? { file: { path, mime } } : {};
+  if (kind === "image") return { label: "IMG", name: fileName ?? "Photo", note: path ? undefined : (leftOut ?? "Can't be shown here yet"), ...file };
   if (kind === "audio") return { label: "AUD", name: "Voice message", note: leftOut ?? "Can't be played here yet" };
-  return { label: ext ?? (mime ? MIME_LABEL[mime] : undefined) ?? "DOC", name: fileName ?? "Document", note: leftOut ?? "Can't be opened here yet" };
+  return { label: ext ?? (mime ? MIME_LABEL[mime] : undefined) ?? "DOC", name: fileName ?? "Document", note: path ? undefined : (leftOut ?? "Can't be opened here yet"), ...file };
 }
 
 /**

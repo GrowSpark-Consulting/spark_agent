@@ -85,7 +85,8 @@ test("an answer that isn't { tenantName, expiresAt } is refused, not drawn", asy
   await stubApi(page, LINK, () => ({ status: 200, body: { tenantName: "", expiresAt: "soon" } }));
   await page.goto(`/connect/${TOKEN}`);
   await expect(page.getByTestId("connect-problem")).toContainText("We couldn’t check this link");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(0);
+  // The problem panel's title is the page's one h1; what must not appear is the link's own heading, which names the business.
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("We couldn’t check this link");
 });
 
 test("the token stays out of the page's text, title and later requests", async ({ page }) => {

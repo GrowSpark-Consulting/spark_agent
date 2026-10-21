@@ -20,6 +20,7 @@ const SECTIONS = [
   { link: "Knowledge base", path: "/dashboard/knowledge", heading: "Knowledge base" },
   { link: "Booking setup", path: "/dashboard/settings/booking", heading: "Booking setup" },
   { link: "Data & privacy", path: "/dashboard/settings/privacy", heading: "Data & privacy" },
+  { link: "Integrations", path: "/dashboard/settings/integrations", heading: "Integrations" },
   { link: "Team", path: "/dashboard/team", heading: "Team" },
   { link: "Send test message", path: "/dashboard/messages/test", heading: "Send a test message" },
   { link: "Create template", path: "/dashboard/templates/new", heading: "Create a message template" },

@@ -9,12 +9,13 @@ import { sectionHead, sectionTitle } from "@/features/settings/section";
 import { formatError, type FormattedError } from "@/lib/errors";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { fetchAlertNumber, saveAlertNumber, validateAlertNumber } from "./alert-number";
+import { MembersSection } from "./members-section";
 import { TakeoverSection } from "./takeover-section";
 
 // /dashboard/team, first slice (docs/dashboard-screen-inventory.md, Team): the signed-in member's own
 // WhatsApp alert number, in the Booking setup screen's layout, and how they take over chats (takeover-section.tsx; the own-number choices
 // follow the handoff_own_number feature row). Every role sets their own; nobody sets anyone else's (row-level security). The rest of the
-// Team screen (members, invites, alert choices) waits on its contracts and isn't shown as working.
+// Team screen (alert choices) waits on its contract and isn't shown as working. Members and invitations are members-section.tsx.
 
 type State = { status: "loading" } | { status: "error"; error: FormattedError } | { status: "ready"; phone: string | null };
 
@@ -81,8 +82,10 @@ export function TeamScreen({ tenantId, userId }: { tenantId: string; userId: str
     <div style={{ display: "flex", flexDirection: "column", gap: "36px", maxWidth: "960px", minWidth: 0, color: "var(--color-text)" }}>
       <div>
         <h1 className="app-h1">Team</h1>
-        <p style={{ margin: "4px 0 0", color: "var(--color-neutral-700)" }}>How Spark Agent reaches you on WhatsApp.</p>
+        <p style={{ margin: "4px 0 0", color: "var(--color-neutral-700)" }}>Who is on your team, and how Spark Agent reaches you on WhatsApp.</p>
       </div>
+
+      <MembersSection tenantId={tenantId} />
 
       <section aria-labelledby="alert-number-heading" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
         <div style={sectionHead}>
@@ -188,7 +191,7 @@ export function TeamScreen({ tenantId, userId }: { tenantId: string; userId: str
       <TakeoverSection tenantId={tenantId} userId={userId} hasAlertNumber={phone !== null} onSaved={flash} />
 
       <p className="app-hint" style={{ margin: 0 }}>
-        Team members, invitations and which alerts you get will be added here later.
+        Which alerts each person gets will be added here later.
       </p>
 
       {confirmRemove ? (

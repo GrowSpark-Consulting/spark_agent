@@ -435,7 +435,12 @@ Replaces: `PLANS`, `USE`, `TOPUP_PACKS`, `PLAN_PRICES`, `PLAN_SEATS`, `PLAN_NUMB
 UI: staff list with role, phone, alert chips, takeover preference; invite form
   ↓ data: TeamMember[], seat usage
   ↓ API: RLS READ memberships (+ profile)
-        POST  /api/team/invite        HANDOVER · Dev 3 (seat limit → 403 seat_limit)
+        GET   /api/team                      BUILT 15 Oct · Dev 3 (members, seats incl. pending invitations, invitations for owner/admin)
+        POST  /api/team/invite               BUILT 15 Oct · Dev 3 ({ name, email, role } → 201 { invite, url }; the link only here; seat limit → 409 seat_limit)
+        POST  /api/team/invites/:id/resend   BUILT 15 Oct · Dev 3 (new link, 7 more days, no extra seat, 5 a day → 429 rate_limited)
+        POST  /api/team/invites/:id/cancel   BUILT 15 Oct · Dev 3
+        GET   /api/team/invites/:token       BUILT 15 Oct · Dev 3 (public; /invite/:token page)
+        POST  /api/team/invites/:token/accept BUILT 15 Oct · Dev 3 (signed in; email must match)
         PATCH /api/team/:userId       PROPOSED · Dev 3
   ↓ error: seat_limit → Upgrade dialog; invalid phone → field error
   ↓ permission: owner, admin edit; staff view self
@@ -452,7 +457,7 @@ interface Team {
              takeoverPref: 'inbox' | 'own_number' | 'ask' | null;
              status: 'active' | 'invited' }[];
 }
-interface InviteInput { name: string; phone: string; role: 'admin' | 'staff' }
+interface InviteInput { name: string; email: string; role: 'admin' | 'staff' }   // email replaces phone (docs/task-notes/2026-10-15-team-invites-implementation.md)
 ```
 
 Replaces: `ALERTS`, `INIT` (team), `industries.*.team`.

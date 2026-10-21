@@ -15,7 +15,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const { next, error } = await searchParams;
   const linkError = authLinkErrorMessage(error);
   return (
-    <div className="app-auth">
+    <main className="app-auth">
       <div className="app-auth-card">
         <Link href="/login" className="app-brand">
           <span className="app-brand-mark" aria-hidden="true" />
@@ -36,6 +36,6 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           Don&apos;t have an account? <Link href="/signup">Sign up</Link>
         </p>
       </div>
-    </div>
+    </main>
   );
 }

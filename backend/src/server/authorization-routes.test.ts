@@ -121,6 +121,7 @@ const ADMIN_CALLS: Call[] = [
   { method: "PATCH", path: "/api/admin/plans/starter", body: { name: "Starter" } },
   { method: "PATCH", path: "/api/admin/features/booking", body: { defaultOn: true } },
   { method: "GET", path: "/api/admin/payments/refunds" },
+  { method: "GET", path: "/api/admin/metrics" },
   { method: "POST", path: "/api/admin/whatsapp/manual", body: {} },
 ];
 
@@ -265,6 +266,7 @@ const PUBLIC: Record<string, string> = {
   "GET /api/inngest": "Inngest's serve endpoint (its own handler; function calls are signed)",
   "PUT /api/inngest": "Inngest's serve endpoint: registration (its own handler; signed)",
   "POST /api/inngest": "Inngest's serve endpoint: function calls (its own handler; signed)",
+  "GET /api/team/invites/:token": "the public invitation page: the token in the path is the credential; it answers only the business name and role, never the invited address",
   "GET /api/connect-links/:token": "the assisted connect page: the token in the path is the credential",
   "GET /h/:token": "a staff alert's button: a signed token says who tapped",
   "GET /api/calendar/google/callback": "Google's redirect: the signed state says who asked",

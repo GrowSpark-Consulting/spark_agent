@@ -92,10 +92,13 @@ test("walks every step without overflow, and Back returns", async ({ page }) => 
   await next(page, "Continue").click();
 
   await expect(page.getByRole("heading", { name: "Teach your assistant" })).toBeVisible();
-  // No website import exists: the step says so, shows nothing "found", and never blocks Continue.
-  await expect(page.getByTestId("import-unavailable")).toContainText("isn’t available yet");
+  // The step offers the same "Import a web page" form as Knowledge, claims nothing was read until an import is made, and never blocks Continue.
+  await expect(page.getByTestId("website-import")).toBeVisible();
+  await expect(page.getByLabel("Web page address")).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Import page" })).toBeEnabled();
+  await expect(page.getByText("Importing from your website isn’t available yet.")).toHaveCount(0);
+  await expect(page.getByTestId("import-progress")).toHaveCount(0);
   await expect(page.getByText(/found/)).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Import" })).toHaveCount(0);
   await expect(next(page, "Continue")).toBeEnabled();
   await expectNoHorizontalOverflow(page);
   await next(page, "Continue").click();
@@ -129,6 +132,50 @@ test("walks every step without overflow, and Back returns", async ({ page }) => 
   await expect(page.getByText(/Test number/)).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "You’re set up." })).toBeVisible();
   await expectNoHorizontalOverflow(page);
+});
+
+test("the Teach step imports a page through the same form as Knowledge, shows it as processing, and does not block or finish onboarding", async ({ page }) => {
+  // POST /api/onboarding/import-site fetches a real page, which the e2e API cannot do: it is stood in for here (see app/website-import.spec.ts).
+  const sent: { body: unknown; tenant: string | null }[] = [];
+  await page.route(/\/api\/onboarding\/import-site$/, async (route) => {
+    const req = route.request();
+    if (req.method() === "OPTIONS") return route.fallback();
+    sent.push({ body: JSON.parse(req.postData() ?? "null"), tenant: req.headers()["x-pakka-tenant"] ?? null });
+    return route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      headers: { "access-control-allow-origin": req.headers()["origin"] ?? "*" },
+      body: JSON.stringify({ id: "30000000-0000-4000-8000-0000000000aa", title: "About us", sourceType: "website", sourceUrl: "https://www.example.com/about", status: "processing", createdAt: "2026-10-24T03:30:00.000Z", replaced: false }),
+    });
+  });
+  await openOnboarding(page);
+  await next(page, "Send code on WhatsApp").click();
+  await page.getByPlaceholder("––––––").fill("123456");
+  await next(page, "Verify and continue").click();
+  await page.getByLabel("Business name").fill("Glow Studio");
+  await option(page, "Beauty parlour").click();
+  await next(page, "Continue").click();
+  await expect(page.getByRole("heading", { name: "Teach your assistant" })).toBeVisible();
+
+  const note = await page.getByTestId("import-note").innerText();
+  await page.getByLabel("Web page address").fill("https://www.example.com/about");
+  await page.getByRole("button", { name: "Import page" }).click();
+  await expect(page.getByTestId("import-progress")).toHaveAttribute("data-kind", "processing");
+  await expect(page.getByTestId("import-progress")).toContainText("Reading the page");
+  await expect(page.getByTestId("import-progress")).not.toContainText("Ready");
+  expect(sent).toHaveLength(1);
+  expect(sent[0].body).toEqual({ url: "https://www.example.com/about" });
+  expect(sent[0].tenant).toMatch(/^[0-9a-f-]{36}$/);
+  // Still on the Teach step, not finished: Continue is open and the wizard goes on.
+  await expect(page.getByRole("heading", { name: "Teach your assistant" })).toBeVisible();
+  await expect(next(page, "Continue")).toBeEnabled();
+  await expectNoHorizontalOverflow(page);
+
+  // The Knowledge base shows the very same form and note: one implementation.
+  await page.goto("/dashboard/knowledge");
+  await expect(page.getByRole("heading", { level: 1, name: "Knowledge base" })).toBeVisible();
+  await expect(page.getByTestId("website-import")).toBeVisible();
+  await expect(page.getByTestId("import-note")).toHaveText(note);
 });
 
 /** The step says it is a preview before anything is clicked. */
@@ -671,5 +718,79 @@ test.describe("onboarding needs an account", () => {
     await next(page, "Go live").click();
     await expect(page.getByRole("link", { name: "Go to my dashboard" })).toBeVisible();
     await expectNoHorizontalOverflow(page);
+  });
+});
+
+// The WhatsApp step reads the connection the database already holds (whatsapp_connections_public, as the signed-in member), so a return to the
+// wizard shows the truth rather than the preview. The mock Supabase gives each of these accounts a business with a different saved number; the
+// Business step gets 409 has_business for all of them, as for the project's owner. Mocked: it proves what the step draws from each answer, not
+// what a real database or a real Meta account would say.
+test.describe("the WhatsApp step shows the connection already saved", () => {
+  test.use({ storageState: SIGNED_OUT });
+
+  async function openStepAs(page: Page, email: string) {
+    // A member of a business is sent to the dashboard after sign-in whatever `next` says; the wizard is opened from there.
+    await signIn(page, email);
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await openOnboarding(page);
+    await walkTo(page, "WhatsApp");
+    await expect(page.getByRole("heading", { name: "Connect your WhatsApp number" })).toBeVisible();
+  }
+
+  test("an active saved number is shown as connected, offers no second connection, and Continue moves on", async ({ page }) => {
+    await openStepAs(page, "connected@test.local");
+    const saved = page.getByTestId("saved-connection");
+    await expect(saved).toHaveAttribute("data-state", "connected");
+    await expect(saved).toContainText("Connected · +91 98400 12345");
+    await expect(saved).toContainText("already connected");
+    // Nothing to set up: no method picker, no setup-call offer, no preview note, no Facebook or manual form.
+    await expect(page.getByRole("radiogroup", { name: "Connection method" })).toHaveCount(0);
+    await expect(page.getByTestId("setup-call")).toHaveCount(0);
+    await expect(page.getByRole("note", { name: "Preview" })).toHaveCount(0);
+    await expect(page.getByTestId("facebook-not-configured")).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+    await expect(next(page, "Continue")).toBeEnabled();
+    await expect(next(page, "Do this later")).toHaveCount(0);
+    await next(page, "Continue").click();
+    await expect(page.getByRole("heading", { name: "Team, calendar and features" })).toBeVisible();
+  });
+
+  for (const [email, state, sentence] of [
+    ["failed@test.local", "failed", "It didn’t pass its checks"],
+    ["pending@test.local", "pending", "Setup with Meta isn’t finished yet"],
+  ] as const) {
+    test(`a ${state} saved number is never called connected, and the other ways to connect stay offered`, async ({ page }) => {
+      await openStepAs(page, email);
+      const saved = page.getByTestId("saved-connection");
+      await expect(saved).toHaveAttribute("data-state", "inactive");
+      await expect(saved).toContainText("+91 98400 12345 is saved but isn’t connected");
+      await expect(saved).toContainText(sentence);
+      await expect(page.locator("body")).not.toContainText(/Connected · \+91/);
+      // Still offered: the pickers and the setup-call offer, and the footer says it can be done later.
+      await expect(page.getByRole("radiogroup", { name: "Connection method" })).toBeVisible();
+      await expect(page.getByTestId("setup-call")).toBeVisible();
+      await expect(next(page, "Do this later")).toBeEnabled();
+      await expectNoHorizontalOverflow(page);
+    });
+  }
+
+  test("a failed read says so with Try again, hides the server's detail, and claims neither a number nor none", async ({ page }) => {
+    const reads: string[] = [];
+    page.on("request", (r) => {
+      if (new URL(r.url()).pathname.endsWith("/rest/v1/whatsapp_connections_public")) reads.push(r.method());
+    });
+    await openStepAs(page, "viewerror@test.local");
+    const alert = page.getByTestId("saved-connection-error");
+    await expect(alert).toContainText("We couldn’t check whether a number is already connected");
+    await expect(alert.getByRole("button", { name: "Try again" })).toBeVisible();
+    await expect(page.getByTestId("saved-connection")).toHaveCount(0);
+    await expect(page.locator("body")).not.toContainText(/internal detail|boom|XX000/);
+    await expect(page.locator("body")).not.toContainText(/Connected · \+91/);
+    // The step can still be skipped, and Try again reads again (the same refusal comes back here, and is shown the same way).
+    await expect(next(page, "Do this later")).toBeEnabled();
+    const before = reads.length;
+    await alert.getByRole("button", { name: "Try again" }).click();
+    await expect.poll(() => reads.length).toBeGreaterThan(before);
+    await expect(page.getByTestId("saved-connection-error")).toBeVisible();
   });
 });

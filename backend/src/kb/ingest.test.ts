@@ -47,6 +47,43 @@ function setup(docOver: Record<string, unknown> = {}, overrides: Partial<IngestD
 }
 const event = { tenantId: A, documentId: DOC };
 
+describe("runIngest: an imported web page is a document like an upload", () => {
+  it("is chunked, embedded and published exactly as an upload is", async () => {
+    const s = setup({ sourceType: "website", sourceUrl: "https://www.example.com/about" });
+    const result = await runIngest(runner().step, event, s.deps);
+    expect(result).toMatchObject({ status: "ready" });
+    expect((s.chunks.get(DOC) ?? []).length).toBeGreaterThan(1);
+    expect(s.docs.get(DOC)).toMatchObject({ status: "ready", error: null });
+  });
+
+  it("a re-import is read again: its text was replaced and it is processing, so the new text is chunked and the old chunks are replaced, never added to", async () => {
+    const s = setup({ sourceType: "website", status: "ready", body: textOf(2) });
+    s.chunks.set(DOC, [{ content: "OLD CHUNK", embedding: [1, 2, 3] }]);
+    const first = await runIngest(runner().step, event, s.deps);
+    expect(first).toEqual({ status: "skipped", reason: "already_ready" }); // a repeat of the same event does nothing
+    s.docs.get(DOC)!.status = "processing"; // what replacing the page does
+    s.docs.get(DOC)!.body = textOf(3);
+    const again = await runIngest(runner().step, event, s.deps);
+    expect(again).toMatchObject({ status: "ready" });
+    const stored = s.chunks.get(DOC) ?? [];
+    expect(stored.map((c) => c.content).join(" ")).not.toContain("OLD CHUNK");
+    expect(stored.length).toBeGreaterThan(1);
+  });
+
+  it("an imported page with no text fails with the plain reason, like an upload", async () => {
+    const s = setup({ sourceType: "website", body: "   " });
+    expect(await runIngest(runner().step, event, s.deps)).toEqual({ status: "failed", reason: "no_text" });
+    expect(s.docs.get(DOC)).toMatchObject({ status: "failed", error: "This document has no text to learn from." });
+  });
+
+  it("another business's page is never read or changed", async () => {
+    const s = setup({ sourceType: "website" });
+    expect(await runIngest(runner().step, { tenantId: B, documentId: DOC }, s.deps)).toEqual({ status: "skipped", reason: "not_found" });
+    expect(s.docs.get(DOC)?.status).toBe("processing");
+    expect(s.embed).not.toHaveBeenCalled();
+  });
+});
+
 describe("runIngest", () => {
   it("chunks the text, embeds it, stores the chunks and marks the document ready", async () => {
     const s = setup();
