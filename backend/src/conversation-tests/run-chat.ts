@@ -17,7 +17,7 @@ import { understandTurn, type UnderstandDeps, type UnderstandResult } from "../a
 import type { SendOutcome } from "../notify/send";
 import { fakePipelineStore, type FakeMessage } from "../test-support/fake-pipeline-store";
 import { createCalendar } from "./calendar";
-import type { Chat, TurnExpect } from "./schema";
+import type { Chat, ChatTurn, TurnExpect } from "./schema";
 
 // Runs one scripted chat through the real pipeline steps (stop check, understanding, reply) on an in-memory store, as
 // process-message runs them. In the default (mock) mode the language models are scripted by the chat, the knowledge
@@ -132,6 +132,14 @@ function timedPort<P extends object>(port: P, probe: StageProbe): P {
   const wrapped: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(port)) wrapped[name] = typeof value === "function" ? timed(probe, "booking", value as (...args: unknown[]) => Promise<unknown>) : value;
   return wrapped as P;
+}
+
+/**
+ * The text the fake knowledge base finds on a turn, the same in mock and --live (the runner's retrieve reads this and nothing else): the turn's own `kb`
+ * (`kb: []` = nothing found, so the code sees a miss), else the older `mock.kb`, else the chat's `kb`.
+ */
+export function knowledgeBaseForTurn(chat: Pick<Chat, "kb">, turn: Pick<ChatTurn, "kb" | "mock">): string[] {
+  return turn.kb ?? turn.mock?.kb ?? chat.kb;
 }
 
 export async function runChat(chat: Chat, options: RunOptions): Promise<ChatReport> {
@@ -274,7 +282,7 @@ export async function runChat(chat: Chat, options: RunOptions): Promise<ChatRepo
     const fail = (message: string) => failures.push(`${label}: ${message}`);
     extractionScript = turnSpec.mock?.extraction ?? {};
     replyScript = turnSpec.mock?.reply === undefined ? [] : [...(Array.isArray(turnSpec.mock.reply) ? turnSpec.mock.reply : [turnSpec.mock.reply])];
-    kb = turnSpec.mock?.kb ?? chat.kb;
+    kb = knowledgeBaseForTurn(chat, turnSpec);
     creditsZero = turnSpec.mock?.credits === "zero";
     bookingReminderFails = turnSpec.mock?.bookingReminder === "fails";
     injected = turnSpec.mock?.inject ?? [];

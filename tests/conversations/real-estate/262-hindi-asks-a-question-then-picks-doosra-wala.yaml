@@ -1,0 +1,45 @@
+name: Hindi customer asks 'दूसरा वाला कितने का है?' (a question, not booked), then picks with 'दूसरा वाला' and is booked
+description: "After three real times are offered, the customer first asks something that has a pick word in it. A good agent answers the question and books nothing. When the customer then says just 'दूसरा वाला' (the second one) the agent books the second time. A bad agent books on the question, or does not understand 'दूसरा वाला'. Fix: the pick reader knows the Hindi pick words, but only when the message is the pick and nothing else, and a message with a question word is never a pick."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 5800000, attributes: { price_to: 8800000, areas: [Greater Noida West, Yamuna Expressway] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Shanti Kunj Residency, Greater Noida West: 2BHK of 1050 sq ft starts at ₹58 lakh."
+turns:
+  - customer: "मुझे 2BHK चाहिए ग्रेटर नोएडा वेस्ट में, बजट 70 लाख, 2 महीने में लेना है। साइट देखनी है"
+    mock:
+      extraction: { language: hi, intent: book, fields: { config: 2BHK, location: Greater Noida West, budget: 70L, timeline: 0-3m }, question: null }
+      reply: "बढ़िया! साइट विज़िट के लिए रविवार 10:00 am, रविवार 3:00 pm या सोमवार 5:30 pm खाली है। आपके लिए कौन सा ठीक रहेगा?"
+    expect:
+      extracted: { language: hi }
+      reply: { sent: true, buttons: [], matches: ["[\\u0900-\\u097F]{3}", "\\b10\\b", "\\b3\\b", "5[:.]30"] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: offer_slots
+  - customer: "दूसरा वाला कितने का है?"
+    mock:
+      extraction: { language: hi, intent: question, fields: {}, question: "How much is the 2BHK?" }
+      reply: "2BHK की शुरुआत ₹58 लाख से होती है। साइट पर आकर आप खुद देख सकते हैं, कौन सा समय ठीक रहेगा?"
+    expect:
+      reply: { sent: true, matches: ["[\\u0900-\\u097F]{3}"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+  - customer: "दूसरा वाला"
+    mock:
+      extraction: { language: hi, intent: give_details, fields: {}, question: null }
+      reply: "हो गया! आपकी साइट विज़िट रविवार 3:00 pm के लिए बुक हो गई है। मिलते हैं!"
+    expect:
+      reply: { sent: true, buttons: [], matches: ["\\b3\\b"] }
+      aiReplies: 1
+      handoff: null
+      leadStage: booked
+      calendar: { confirmed: ["2026-10-11T09:30:00.000Z"] }
+    mockOnly:
+      case: booked

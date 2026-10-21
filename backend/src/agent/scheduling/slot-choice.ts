@@ -26,13 +26,32 @@ const NEAR_MIN = 30;
 // "let me ask my wife first" uses the same word for something else, and must not pick a time.
 const LEAD = String.raw`(?:^|\b(?:the|option|number|slot|choice|take|pick|choose|go with|with|ok|okay|yes|yeah|please|prefer)\s+)`;
 const place = (words: string) => new RegExp(LEAD + String.raw`(?:${words})\b`);
+// A Hindi pick counts only when the message is nothing but the pick and small filler words ("दूसरा वाला बुक कर दो", "doosra wala chalega"):
+// दूसरा / doosra also means "other" ("दूसरा दिन" is another day), so it is never read inside a longer message. क्या / kya is allowed only as the LAST
+// word ("दूसरा वाला ठीक रहेगा क्या?" is a yes/no check on the pick); "दूसरा वाला क्या है" asks something, so it is not a pick.
+const GAP = String.raw`[^\p{L}\p{M}\p{N}]`;
+const HINDI_FILLER = [
+  "वाला", "वाली", "वाले", "ही", "वही", "वो", "वह", "ये", "यह", "ठीक", "सही", "है", "हैं", "चलेगा", "चलेगी", "रहेगा", "चाहिए", "मुझे", "हाँ", "हां", "जी", "ओके", "प्लीज", "बुक", "कर दो", "कर दीजिए", "कर दें", "करो", "लो", "लीजिए",
+  "wala", "wali", "wale", "hi", "wahi", "vahi", "woh", "vo", "ye", "yeh", "theek", "thik", "sahi", "hai", "hain", "chalega", "chalegi", "rahega", "chahiye", "mujhe", "haan", "han", "ha", "ji", "ok", "okay", "please", "plz", "book", "kar do", "kardo", "karo", "kar dijiye", "le lo", "lo", "leejiye",
+].join("|");
+const hindiPick = (words: string) => String.raw`^${GAP}*(?:(?:${HINDI_FILLER})${GAP}+)*(?:${words})(?:${GAP}+(?:${HINDI_FILLER}))*(?:${GAP}+(?:क्या|kya))?${GAP}*$`;
 const ORDINALS: [RegExp, number][] = [
-  [new RegExp(place("first|1st").source + "|" + String.raw`\b(?:mudhal\w*|muthal\w*)\b|முதல்`, "u"), 1],
-  [new RegExp(place("second|2nd").source + "|" + String.raw`\b(?:rend\w*vath\w*|rend\w*vadh\w*|irand\w*vath\w*|irand\w*vadh\w*)\b|இரண்டாவது`, "u"), 2],
-  [new RegExp(place("third|3rd").source + "|" + String.raw`\b(?:moon\w*vath\w*|moon\w*vadh\w*|moondr\w*)\b|மூன்றாவது`, "u"), 3],
+  [new RegExp(place("first|1st|frist|fisrt|firts").source + "|" + String.raw`\b(?:mudhal\w*|muthal\w*)\b|\bonn?a+va(?:th|dh|t|d)\w*\b|முதல்|ஒண்ணாவ|ஒன்னாவ|ஒன்றாவ|` + hindiPick("पहला|पहली|पहले|pehla|pehli|pehle|pahla|pahli|pahle"), "u"), 1],
+  [new RegExp(place("second|2nd|secnd|secound|seccond|sencond").source + "|" + String.raw`\b(?:rend\w*vath\w*|rend\w*vadh\w*|irand\w*vath\w*|irand\w*vadh\w*)\b|\br[ae]nd\w*va(?:th|dh|t|d)\w*\b|இரண்டாவது|ரெண்டாவ|` + hindiPick("दूसरा|दूसरी|दूसरे|doosra|doosri|doosre|dusra|dusri|dusre"), "u"), 2],
+  [new RegExp(place("third|3rd|thrid|thired").source + "|" + String.raw`\b(?:moon\w*vath\w*|moon\w*vadh\w*|moondr\w*)\b|\bmoon\w*va(?:th|dh|t|d)\w*\b|மூன்றாவது|மூணாவ|மூனாவ|` + hindiPick("तीसरा|तीसरी|तीसरे|teesra|teesri|teesre|tisra|tisri|tisre"), "u"), 3],
   [place("fourth|4th"), 4],
   [place("fifth|5th"), 5],
 ];
+// A message that asks something ("ரெண்டாவது எவ்ளோ?", "दूसरा वाला कितने का है") is never a pick: the question is answered first. Whole words only, so a Tamil
+// word that merely starts like one ("என்னால" is not "என்ன") does not count.
+const QUESTION_WORDS = [
+  "how much", "how many", "what", "why", "price",
+  "evlo", "evvalavu", "ethana", "ethanai", "enna", "yen", "eppo", "epdi", "enga", "yaaru", "edhu", "ethu",
+  "kitna", "kitne", "kitni", "kaun", "kaunsa", "kab", "kahan", "kyun", "kaise", "kaisa",
+  "எவ்ளோ", "எவ்வளவு", "எத்தனை", "என்ன", "ஏன்", "எப்போ", "எப்ப", "எப்பொழுது", "எங்க", "எங்கே", "எப்படி", "யார்", "எது",
+  "कितना", "कितने", "कितनी", "कौन", "कौनसा", "कब", "कहाँ", "कहां", "क्यों", "कैसे", "कैसा",
+].join("|");
+const QUESTION = new RegExp(String.raw`(?<![\p{L}\p{M}])(?:${QUESTION_WORDS})(?![\p{L}\p{M}])`, "u");
 const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5 };
 
 const NEGATIVE =
@@ -51,6 +70,7 @@ const OTHER: SlotPick = { kind: "other" };
 
 /** The place a customer names in words ("the second one", "option 2", "#3"), 1-based, or null. */
 function namedPlace(text: string): number | null {
+  if (QUESTION.test(text)) return null;
   for (const [pattern, place] of ORDINALS) if (pattern.test(text)) return place;
   const numbered = /\b(?:option|number|no\.?|slot|choice)\s*(\d{1,2}|one|two|three|four|five)\b|#\s*(\d{1,2})\b/.exec(text);
   if (numbered) {

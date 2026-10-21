@@ -163,3 +163,140 @@ describe("nothing to go on", () => {
     for (const text of ["😀", "a".repeat(5000), "0", "99", "-1", "1e9", "\u0000"]) expect(() => pick(text)).not.toThrow();
   });
 });
+
+// Spoken picks (fix/agent-chat-findings): how people really type "the first / second / third one" in Tamil, Tanglish and Hindi.
+describe("spoken ordinals in Tamil script", () => {
+  it.each([
+    ["ஒண்ணாவது", 0],
+    ["ஒன்னாவது", 0],
+    ["ஒன்றாவது", 0],
+    ["முதல்ல உள்ளது", 0],
+    ["முதல்", 0],
+    ["ரெண்டாவது", 1],
+    ["ரெண்டாவதுதான்", 1],
+    ["ரெண்டாவது ஓகே", 1],
+    ["இரண்டாவது", 1],
+    ["மூணாவது", 2],
+    ["மூனாவது", 2],
+    ["மூணாவது சரி", 2],
+    ["மூன்றாவது", 2],
+  ])("%s", (text, index) => {
+    expect(pick(text)).toEqual(chosen(index));
+  });
+});
+
+describe("spoken ordinals in Tanglish", () => {
+  it.each([
+    ["onnavathu", 0],
+    ["onnavadhu", 0],
+    ["mudhal onnu", 0],
+    ["rendavathu", 1],
+    ["rendavadhu", 1],
+    ["rendavatu", 1],
+    ["randavathu", 1],
+    ["rendavathu ok", 1],
+    ["moonavathu", 2],
+    ["moonavadhu", 2],
+    ["moonavatu", 2],
+    ["the frist one", 0],
+    ["the fisrt one", 0],
+    ["the secnd one", 1],
+    ["the secound one", 1],
+    ["the seccond one", 1],
+    ["the thrid one", 2],
+    ["the thired one", 2],
+  ])("%s", (text, index) => {
+    expect(pick(text)).toEqual(chosen(index));
+  });
+});
+
+describe("spoken ordinals in Hindi", () => {
+  it.each([
+    ["पहला", 0],
+    ["पहला वाला", 0],
+    ["पहली वाली", 0],
+    ["दूसरा", 1],
+    ["दूसरा वाला", 1],
+    ["दूसरा वाला बुक कर दो", 1],
+    ["दूसरा वाला चलेगा", 1],
+    ["दूसरा वाला ठीक है", 1],
+    ["हाँ दूसरा वही", 1],
+    ["जी दूसरा वाला", 1],
+    ["तीसरा", 2],
+    ["तीसरा वाला", 2],
+    ["2nd वाला", 1],
+    ["pehla", 0],
+    ["pehla wala", 0],
+    ["pahla wala", 0],
+    ["doosra", 1],
+    ["dusra", 1],
+    ["doosra wala", 1],
+    ["doosra wala chalega", 1],
+    ["doosra wala theek hai", 1],
+    ["haan doosra wahi", 1],
+    ["ji doosra wala book kar do", 1],
+    ["doosra wala kar do", 1],
+    ["teesra", 2],
+    ["tisra wala", 2],
+  ])("%s", (text, index) => {
+    expect(pick(text)).toEqual(chosen(index));
+  });
+});
+
+describe("things that must NOT be read as a pick", () => {
+  it.each([
+    // "second" as a unit of time, and other words that contain an ordinal
+    ["wait a second"],
+    ["give me a second"],
+    ["10 seconds"],
+    ["hold on a second, let me check"],
+    ["12nd"],
+    // times and counts that are not ordinals
+    ["ரெண்டு மணி"],
+    ["மூணு மணிக்கு"],
+    ["ஒண்ணு"],
+    ["rendu mani"],
+    // "other" is not "second" in Hindi
+    ["दूसरा दिन चलेगा"],
+    ["दूसरा टाइम दिखाओ"],
+    ["doosra din chalega"],
+    ["doosra time dikhao"],
+    ["teesra din"],
+    ["pehle se bataya hai"],
+  ])("%s", (text) => {
+    expect(pick(text).kind).not.toBe("chosen");
+  });
+
+  it.each([
+    // a question is never a pick, even with a pick word in it
+    ["दूसरा वाला कितने का है?"],
+    ["दूसरा वाला कितने का है"],
+    ["doosra wala kitne ka hai"],
+    ["doosra wala kitne ka hai?"],
+    ["ரெண்டாவது எவ்ளோ?"],
+    ["ரெண்டாவது எவ்ளோ"],
+    ["மூணாவது எங்க இருக்கு?"],
+    ["rendavathu evlo?"],
+    ["rendavathu enna time?"],
+  ])("%s is a question, so it is asked again, not booked", (text) => {
+    expect(pick(text)).toEqual({ kind: "unclear" });
+  });
+});
+
+// A "?" alone does not make a message a question: only a question word does. A yes/no check on the pick still books.
+describe("a pick with a yes/no question mark still books; a real question does not", () => {
+  it.each([
+    ["ரெண்டாவது ஓகே வா?", 1],
+    ["rendavadhu ok ah?", 1],
+    ["second one please?", 1],
+    ["दूसरा वाला ठीक रहेगा क्या?", 1],
+    ["doosra wala chalega kya?", 1],
+    ["doosra wala chalega kya", 1],
+  ])("%s books", (text, index) => {
+    expect(pick(text)).toEqual(chosen(index));
+  });
+
+  it.each([["ரெண்டாவது எவ்ளோ?"], ["doosra wala kitne ka hai"], ["what is the second one"], ["दूसरा वाला क्या है"], ["doosra wala kya hai?"], ["दूसरा वाला क्या कीमत है"]])("%s is a question and books nothing", (text) => {
+    expect(pick(text).kind).not.toBe("chosen");
+  });
+});

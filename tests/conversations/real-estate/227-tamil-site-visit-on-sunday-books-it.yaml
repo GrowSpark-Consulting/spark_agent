@@ -1,5 +1,5 @@
 name: Tamil ready buyer wants a Sunday visit, is offered three real times, picks one and is booked, and staff are told once
-description: "A buyer who is ready asks for a visit this weekend. A good agent offers the three real times in one plain Tamil message, reads 'இரண்டாவது' as the second one (the code does not yet read the spoken spelling 'ரெண்டாவது', see the task note), books it, and tells staff once that the lead is hot. A bad agent invents a time, books the wrong slot, or sends a list."
+description: "A buyer who is ready asks for a visit this weekend. A good agent offers the three real times in one plain Tamil message, reads 'இரண்டாவது' as the second one, books it, and tells staff once that the lead is hot. A bad agent invents a time, books the wrong slot, or sends a list."
 needsNativeCheck: true
 booking:
   now: "2026-10-10T04:30:00.000Z"
