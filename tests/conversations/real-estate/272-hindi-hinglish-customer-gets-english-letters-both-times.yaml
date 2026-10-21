@@ -1,0 +1,29 @@
+name: Hinglish — a customer who writes Hindi in English letters gets a reply in English letters, both times
+description: "The reply follows the script of the customer's latest message (reply prompt v3, rule 5). A good agent answers a Roman-letter Hindi question in Roman-letter Hindi, in both turns, with the facts from the knowledge base only. A bad agent answers in Devanagari in one turn and in English letters in the next (the live run of chat 244 did), or promises that it told the team something. The runner cannot check that a reply has NO Devanagari, so the check is that the reply has the common Roman-letter Hindi words; a Devanagari reply has none."
+needsNativeCheck: true
+kb:
+  - "Shanti Kunj Residency, Greater Noida West: 2BHK of 1050 sq ft starts at ₹58 lakh and 3BHK of 1450 sq ft starts at ₹82 lakh."
+  - "Loan partners: Ganga Housing Finance and Himalaya Bank help with home loans. The sales team can set up a meeting with them. The EMI depends on the loan amount and the bank's own rate, and the bank confirms it."
+turns:
+  - customer: "greater noida west me 2bhk ka rate kya hai bhai"
+    mock:
+      extraction: { language: hi, intent: question, fields: { location: Greater Noida West, config: 2BHK }, question: "What is the price of a 2BHK in Greater Noida West?" }
+      reply: "Greater Noida West mein 2BHK 1050 sq ft ki shuruaat ₹58 lakh se hoti hai. Kya aap site visit karna chahenge?"
+    expect:
+      extracted: { language: hi, intent: question }
+      reply: { sent: true, matches: ["\\b(hai|hain|mein|aap|ka|ki|ke|se|hoti|karna|kya)\\b", "58"], notContains: ["team kitta soll"] }
+      noInventedPrice: true
+      aiReplies: 1
+    mockOnly:
+      case: answered_from_kb
+      reply: { contains: ["₹58 lakh"] }
+  - customer: "home loan milega kya? EMI kitni hogi"
+    mock:
+      extraction: { language: hi, intent: question, fields: { funding: loan_needed }, question: "Is a home loan available and what will the EMI be?" }
+      reply: "Ji haan, hamare loan partner Ganga Housing Finance aur Himalaya Bank hain. EMI kitni hogi yeh bank hi confirm karega, main koi amount nahi bata sakta."
+    expect:
+      reply: { sent: true, matches: ["\\b(hai|hain|mein|aap|ka|ki|ke|se|hogi|karega|nahi|haan)\\b", "Ganga|Himalaya"], notContains: ["team kitta soll"] }
+      noInventedPrice: true
+      aiReplies: 1
+    mockOnly:
+      case: answered_from_kb

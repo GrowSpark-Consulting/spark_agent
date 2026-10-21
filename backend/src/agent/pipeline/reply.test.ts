@@ -145,7 +145,7 @@ describe("an answer from the knowledge base", () => {
     const w = world({ agentSettings: { persona: "Maya", tone: "formal" } });
     await replyTurn(runner().step, w.turn, understood(found, { language: "ta-en" }), Date.now(), w.deps);
     const request = w.complete.mock.calls[0][0];
-    expect(request).toMatchObject({ role: "reply", tenantId: A, conversationId: CONV, prompt: { name: "reply", version: 2 } });
+    expect(request).toMatchObject({ role: "reply", tenantId: A, conversationId: CONV, prompt: { name: "reply", version: 3 } });
     const system = request.system.map((b) => b.text).join("\n");
     expect(system).toContain("Skyline Homes");
     expect(system).toContain("Maya");

@@ -13,7 +13,7 @@ import { stripUnsafeCharacters } from "../../lib/text";
 import type { NotifyPayload, SendOutcome } from "../../notify/send";
 import type { LlmClient, LlmMessage } from "../llm/anthropic";
 import { LlmError } from "../llm/anthropic";
-import { buildReplyMessages, buildReplySystem, REPLY_PROMPT } from "../prompts/reply_v2";
+import { buildReplyMessages, buildReplySystem, REPLY_PROMPT } from "../prompts/reply_v3";
 import { mentionsArea, normaliseArea } from "../scoring/coverage";
 import { areaText, consentNotice, EXIT_BUTTON_IDS, exitQuestionButtons, fixedText, textLanguage } from "./fixed-texts";
 import { parseReplySettings, type ReplySettings } from "./persona";
