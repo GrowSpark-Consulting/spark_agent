@@ -8,6 +8,7 @@ import { buildReplySystem } from "./reply_v1";
 import { buildLeadCardSystem } from "./leadcard_v1";
 import { buildReplySystem as buildReplySystemV2 } from "./reply_v2";
 import { buildReplySystem as buildReplySystemV3 } from "./reply_v3";
+import { buildReplySystem as buildReplySystemV4 } from "./reply_v4";
 
 // A prompt that is in use is never edited: a change is a new version (extraction_v2.ts, reply_v2.ts), so a trace
 // that says "reply_v1" always means the same words. This test holds the words of the fixed parts of each prompt
@@ -53,6 +54,12 @@ describe("prompt fingerprints", () => {
     const friendly = buildReplySystemV3({ businessName: "X", persona: "Y", tone: "friendly" });
     const formal = buildReplySystemV3({ businessName: "X", tone: "formal" });
     expect(sha([friendly[0].text, friendly[1].text, formal[1].text].join("\n---\n"))).toBe("a6138211728f75fb");
+  });
+
+  it("reply_v4: the rules (no amount of money unless it is in the facts, including the customer's own budget) and both tones are unchanged", () => {
+    const friendly = buildReplySystemV4({ businessName: "X", persona: "Y", tone: "friendly" });
+    const formal = buildReplySystemV4({ businessName: "X", tone: "formal" });
+    expect(sha([friendly[0].text, friendly[1].text, formal[1].text].join("\n---\n"))).toBe("103774a7d55b5c42");
   });
 
   it("leadcard_v1: the rules are unchanged", () => {

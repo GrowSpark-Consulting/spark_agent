@@ -1,5 +1,5 @@
-name: Tamil customer says another builder is cheaper and the agent neither compares nor runs the other builder down
-description: "The customer says a builder nearby gives a bigger flat for less. A good agent stays on this business in Tamil script, gives its own facts, and offers a visit. A bad agent confirms the other price, offers a match, or says anything about the other builder."
+name: Tamil customer says another builder is cheaper; it is read as a price request, so a person looks at it, with no price change, no comparison and no builder discussed
+description: "The customer says a builder nearby gives a bigger flat for 50 lakh and asks why this one is more expensive. The real system reads that as a request for a lower price (price_negotiation), so a good agent never agrees to any price change and never compares or comments on the other builder: it says in Tamil script that a team member will look at it, and the chat goes to a person at high priority (trigger negotiation). A bad agent offers to match 50 lakh, confirms the other price, runs the other builder down, or keeps the chat. Live and mock agree on this since the chat was changed (it first expected a knowledge-base answer and no handover)."
 needsNativeCheck: true
 kb:
   - "Mullai Nagar Heights, Perumbakkam: 2BHK of 880 sq ft starts at ₹54 lakh."
@@ -7,14 +7,14 @@ kb:
 turns:
   - customer: "பக்கத்துல ஒரு பில்டர் 900 sq ft 50 லட்சத்துக்கு தர்றாங்க. நீங்க ஏன் அதிகம்?"
     mock:
-      extraction: { language: ta, intent: question, fields: {}, question: "Another builder offers 900 sq ft for 50 lakh, why is yours higher?" }
-      reply: "மத்த பில்டர் பத்தி எனக்குத் தெரியாது சார். எங்க Mullai Nagar Heights-ல 2BHK 880 சதுர அடி ₹54 லட்சத்துல ஆரம்பிக்குது, கவர்டு கார் பார்க்கிங், ஒவ்வொரு பிளாக்லயும் லிஃப்ட், மொட்டை மாடி தோட்டம் இருக்கு. நேர்ல வந்து பாக்கறீங்களா?"
+      extraction: { language: ta, intent: price_negotiation, fields: {}, question: null }
+      reply: "விலையை மாத்த என்னால முடியாது சார். எங்க குழு உறுப்பினர் இதைப் பாத்து உங்ககிட்ட பேசுவாங்க."
     expect:
-      extracted: { language: ta }
-      reply: { sent: true, matches: ["[\\u0B80-\\u0BFF]{3}"], notContains: ["₹50 லட்சம்", "50 லட்சம்"] }
+      extracted: { language: ta, intent: price_negotiation }
+      reply: { sent: true, matches: ["[\\u0B80-\\u0BFF]{3}"], notContains: ["₹50", "50 லட்சம்", "50 லட்சத்து"] }
       noInventedPrice: true
       aiReplies: 1
-      handoff: null
+      handoff: { trigger: negotiation, priority: high }
+      mode: human
     mockOnly:
-      case: answered_from_kb
-      reply: { contains: ["₹54 லட்சத்துல"] }
+      case: negotiation
