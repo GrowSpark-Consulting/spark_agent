@@ -115,7 +115,9 @@ export function datesIn(rawText: string): DateValue[] {
     if (validDate(month, day)) found.push({ month, day, year: fullYear(year) });
   };
   for (const m of text.matchAll(new RegExp(String.raw`(?<![\d/-])(\d{1,2})(?:st|nd|rd|th)?\s*(?:of\s+)?(${MONTHS})\b\.?(?:,?\s*(\d{4}))?`, "giu"))) add(MONTH_NUMBER(m[2]), Number(m[1]), m[3]);
-  for (const m of text.matchAll(new RegExp(String.raw`\b(${MONTHS})\b\.?\s*(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s*(\d{4}))?`, "giu"))) add(MONTH_NUMBER(m[1]), Number(m[2]), m[3]);
+  // "Oct 11" is a date, but the number after a month is NOT a day when it starts a time ("11 Oct 5:30 pm", "11 Oct 10 am": the 5 and the 10 are hours).
+  const startsATime = String.raw`(?!\s*(?::\s*\d|[ap]\.?\s*m\b))`;
+  for (const m of text.matchAll(new RegExp(String.raw`\b(${MONTHS})\b\.?\s*(\d{1,2})(?:st|nd|rd|th)?\b${startsATime}(?:,?\s*(\d{4}))?`, "giu"))) add(MONTH_NUMBER(m[1]), Number(m[2]), m[3]);
   for (const m of text.matchAll(/(?<![\d/-])(\d{4})-(\d{2})-(\d{2})(?![\d-])/g)) add(Number(m[2]), Number(m[3]), m[1]);
   // dd/mm and dd/mm/yyyy (India); dd-mm-yyyy only with a year, so a range like "1-2 BHK" is not a date
   for (const m of text.matchAll(/(?<![\d/.-])(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?(?![\d/])/g)) {

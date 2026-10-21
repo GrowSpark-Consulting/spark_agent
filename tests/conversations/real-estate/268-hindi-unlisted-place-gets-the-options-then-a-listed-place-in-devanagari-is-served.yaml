@@ -1,0 +1,40 @@
+name: Hindi — a place the business does not have gets the options line, then a listed place written in Devanagari is served and times are offered
+description: "Both sides of the area rule in Hindi. Turn 1: 'गुड़गांव' is not on the business's list (Greater Noida West, Yamuna Expressway), so the customer is told which areas the business has, in Hindi, and no time is offered. Turn 2: the customer writes a LISTED place in Devanagari ('ग्रेटर नोएडा वेस्ट'), which used to be turned away as 'no site there'. A good agent counts it as Greater Noida West and offers three real times. A bad agent says there is no site in Greater Noida West. The mock extraction gives the place AS TEXT in the customer's own script, as the live model does, so the matcher in scoring/area-match.ts is really used."
+needsNativeCheck: true
+contact: { language: hi }
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 5800000, attributes: { price_to: 8800000, areas: [Greater Noida West, Yamuna Expressway] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Shanti Kunj Residency, Greater Noida West: 2BHK of 1050 sq ft starts at ₹58 lakh."
+turns:
+  - customer: "गुड़गांव में 2BHK चाहिए, बजट 70 लाख है, 2 महीने में लेना है"
+    mock:
+      extraction: { language: hi, intent: give_details, fields: { config: 2BHK, location: "गुड़गांव", budget: "70 लाख", timeline: 0-3m }, question: null }
+    expect:
+      extracted: { language: hi }
+      reply: { sent: true, buttons: [], matches: ["[\\u0900-\\u097F]{3}", "Greater Noida West", "Yamuna Expressway"], notContains: ["10:00 am", "3:00 pm", "5:30 pm"] }
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      calendar: { confirmed: [] }
+      areaReminder: false
+    mockOnly:
+      case: area_options
+      reply: { contains: ["Greater Noida West, Yamuna Expressway"] }
+  - customer: "ठीक है, ग्रेटर नोएडा वेस्ट देख लेते हैं"
+    mock:
+      extraction: { language: hi, intent: give_details, fields: { location: "ग्रेटर नोएडा वेस्ट" }, question: null }
+      reply: "बढ़िया! ग्रेटर नोएडा वेस्ट में साइट विज़िट के लिए रविवार 10:00 am, रविवार 3:00 pm या सोमवार 5:30 pm खाली है। कौन सा ठीक रहेगा?"
+    expect:
+      reply: { sent: true, buttons: [], matches: ["[\\u0900-\\u097F]{3}", "\\b10\\b", "\\b3\\b", "5[:.]30"], notContains: ["कोई साइट नहीं है"] }
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      calendar: { confirmed: [] }
+      areaReminder: false
+    mockOnly:
+      case: offer_slots
+      leadTemperature: hot

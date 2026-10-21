@@ -1,4 +1,5 @@
 import type { PackDefinition } from "@pakka/types";
+import { isReadablePlace, sameAreaInAnotherSpelling } from "./area-match";
 import { parseAmountInr } from "./amount";
 
 // The score of a lead, worked out by plain code (docs/handover.md, step 5: "Code decides, the LLM talks"). It reads
@@ -109,7 +110,11 @@ export function judge(match: string, answer: unknown, context: ScoringContext): 
     if (!areas) return undefined;
     if (typeof answer !== "string") return false;
     const said = answer.trim().toLowerCase();
-    return areas.some((a) => new RegExp(`(?<![a-z0-9])${escape(a)}(?![a-z0-9])`).test(said));
+    // First the listed name letter for letter, as a whole word (as always); then the same place written another way (area-match.ts).
+    if (areas.some((a) => new RegExp(`(?<![a-z0-9])${escape(a)}(?![a-z0-9])`).test(said))) return true;
+    if (areas.some((a) => sameAreaInAnotherSpelling(said, a))) return true;
+    // A place in a script that cannot be compared is not judged: it must never be answered with "no site there".
+    return isReadablePlace(said) ? false : undefined;
   }
 
   return undefined;

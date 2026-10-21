@@ -1,0 +1,40 @@
+name: Tamil — a place the business does not have gets the options line, then a listed place written in Tamil script (with an ending) is served and times are offered
+description: "Both sides of the area rule in Tamil. Turn 1: 'அண்ணா நகர்' is not on the business's list (Perumbakkam, Pallikaranai), so the customer is told which areas the business has, in Tamil, and no time is offered. Turn 2: the customer writes a LISTED place in Tamil script, with a Tamil ending ('பெரும்பாக்கத்துல'), which used to be turned away as 'no site there'. A good agent counts it as Perumbakkam, scores the lead, and offers three real times. A bad agent says there is no site in Perumbakkam. The mock extraction gives the place AS TEXT in the customer's own script, as the live model does, so the matcher in scoring/area-match.ts is really used."
+needsNativeCheck: true
+contact: { language: ta }
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 5400000, attributes: { price_to: 7400000, areas: [Perumbakkam, Pallikaranai] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Mullai Nagar Heights, Perumbakkam: 2BHK of 880 sq ft starts at ₹54 lakh."
+turns:
+  - customer: "அண்ணா நகர்ல 2BHK வேணும் சார். 65 லட்சம், 2 மாசத்துல வாங்கணும்"
+    mock:
+      extraction: { language: ta, intent: give_details, fields: { config: 2BHK, location: "அண்ணா நகர்", budget: "65 லட்சம்", timeline: 0-3m }, question: null }
+    expect:
+      extracted: { language: ta }
+      reply: { sent: true, buttons: [], matches: ["[\\u0B80-\\u0BFF]{3}", "Perumbakkam", "Pallikaranai"], notContains: ["10:00 am", "3:00 pm", "5:30 pm"] }
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      calendar: { confirmed: [] }
+      areaReminder: false
+    mockOnly:
+      case: area_options
+      reply: { contains: ["அண்ணா நகர் பகுதியில் தற்போது எங்களிடம் இடங்கள் இல்லை", "Perumbakkam, Pallikaranai"] }
+  - customer: "சரி, பெரும்பாக்கத்துல பாக்கறேன்"
+    mock:
+      extraction: { language: ta, intent: give_details, fields: { location: "பெரும்பாக்கத்துல" }, question: null }
+      reply: "சூப்பர் சார்! பெரும்பாக்கத்துல ஞாயிறு 10:00 am, ஞாயிறு 3:00 pm இல்லனா திங்கள் 5:30 pm சைட் விசிட்டுக்கு இருக்கு. எது வசதி?"
+    expect:
+      reply: { sent: true, buttons: [], matches: ["[\\u0B80-\\u0BFF]{3}", "\\b10\\b", "\\b3\\b", "5[:.]30"], notContains: ["இடங்கள் இல்லை"] }
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      calendar: { confirmed: [] }
+      areaReminder: false
+    mockOnly:
+      case: offer_slots
+      leadTemperature: hot

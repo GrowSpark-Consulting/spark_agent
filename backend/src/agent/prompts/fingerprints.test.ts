@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { buildExtractionSystem } from "./extraction_v1";
 import { buildExtractionSystem as buildExtractionSystemV2 } from "./extraction_v2";
+import { buildExtractionSystem as buildExtractionSystemV3 } from "./extraction_v3";
 import { buildReplySystem } from "./reply_v1";
 import { buildLeadCardSystem } from "./leadcard_v1";
 import { buildReplySystem as buildReplySystemV2 } from "./reply_v2";
@@ -22,6 +23,11 @@ describe("prompt fingerprints", () => {
   it("extraction_v2: the rules, the exit examples and the way a pack's fields are described are unchanged", () => {
     const withFields = buildExtractionSystemV2({ fields: [{ key: "k", label: "L", type: "enum", required: true, options: ["a", "b"] }] });
     expect(sha(withFields.map((b) => b.text).join("\n---\n"))).toBe("226b67567e623565");
+  });
+
+  it("extraction_v3: the rules (with Hindi in English letters), the exit examples and the way a pack's fields are described are unchanged", () => {
+    const withFields = buildExtractionSystemV3({ fields: [{ key: "k", label: "L", type: "enum", required: true, options: ["a", "b"] }] });
+    expect(sha(withFields.map((b) => b.text).join("\n---\n"))).toBe("f14176007b90df9b");
   });
 
   it("reply_v1: the rules and both tones are unchanged", () => {

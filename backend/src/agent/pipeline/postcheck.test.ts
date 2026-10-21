@@ -242,3 +242,67 @@ describe("checkReply: the cap and the questions", () => {
     expect(checkReply("   \n", []).problems).toEqual(["empty"]);
   });
 });
+
+// Found by a live run of chats 203 and 207 (fix/agent-live-findings-2): a number right after a month name is a day, UNLESS it starts a time
+// ("Oct 10:00", "Oct 5:30 pm", "Oct 10 am"). Before the fix "12 Oct 5:30 pm" was read as 12/10 AND 5/10 and the offer of times was replaced by the safe line.
+describe("datesIn: a number after a month that starts a time is not a day", () => {
+  const days = (text: string) => datesIn(text).map((d) => `${d.day}/${d.month}`);
+
+  it.each([
+    ["12 Oct 5:30 pm", ["12/10"]],
+    ["Sunday 11 Oct 10 am", ["11/10"]],
+    ["Sun 11 Oct 10:00 am", ["11/10"]],
+    ["Sun 11 Oct 3 pm", ["11/10"]],
+    ["Sun 11 Oct 3pm", ["11/10"]],
+    ["Sun 11 Oct 10 a.m.", ["11/10"]],
+    ["Oct 5:30", []],
+    ["Oct 10:00 am", []],
+    ["Oct 10 am", []],
+    ["Oct 3pm", []],
+  ])("%s", (text, expected) => {
+    expect(days(text)).toEqual(expected);
+  });
+
+  it("a number after a month is still a day otherwise", () => {
+    expect(days("Oct 11")).toEqual(["11/10"]);
+    expect(days("Oct 11 at 10 am")).toEqual(["11/10"]);
+    expect(days("Oct 11 10 am")).toEqual(["11/10"]);
+    expect(days("Oct 14 10:00 am")).toEqual(["14/10"]);
+    expect(days("October 12th, 2026")).toEqual(["12/10"]);
+    expect(days("Oct 12, 5:30 pm")).toEqual(["12/10"]);
+  });
+});
+
+describe("checkReply: the offer of times, with the exact facts of the live run", () => {
+  const facts = ["Free times: Sun 11 Oct, 10:00 am; Sun 11 Oct, 3:00 pm; Mon 12 Oct, 5:30 pm."];
+
+  it.each([
+    // The four reply drafts the live probe printed (chats 203 and 207, two attempts each). Every one was refused for a date that is not in the text.
+    ["203, attempt 1", "Super, 2BHK Medavakkam pathi pesalam! Site visit ku Sunday 11 Oct morning 10 am, illa Sunday 3 pm, illa Monday 12 Oct 5:30 pm free-a irukku. Edhu ungalukku suit aagum? Budget and 3 months timeline pathi team kitta sollitu varen, avanga detail-a help pannuvanga."],
+    ["203, attempt 2", "Hi! 2BHK Medavakkam pathi pesalam. Sunday 11 Oct 10 am, illa Sunday 3 pm, illa Monday 12 Oct 5:30 pm free-a irukku. Edhu ungalukku suit aagum? Budget and 3 months timeline pathi team kitta check pannitu solren."],
+    ["207, attempt 1", "Congrats on the loan approval sir! Medavakkam la 2BHK visit book pannalaam. Sunday 11 Oct morning 10 am, illa Sunday 3 pm, illa Monday 12 Oct 5:30 pm free-a irukku. Edhu ungalukku suit aagum?"],
+    ["207, attempt 2", "Congrats sir, loan approve aanadhukku vaazhthukkal! Medavakkam la 2BHK visit book pannalaam. Sunday 11 Oct 10:00 am, illana Sunday 11 Oct 3:00 pm, illana Monday 12 Oct 5:30 pm free-a irukku. Edhu ungalukku suit aagum?"],
+    // Other natural ways to write the same three times
+    ["with the commas of the label", "Super sir! Sun 11 Oct, 10:00 am, Sun 11 Oct, 3:00 pm illa Mon 12 Oct, 5:30 pm free. Edhu set aagum?"],
+    ["no commas", "Sun 11 Oct 10:00 am, Sun 11 Oct 3:00 pm illa Mon 12 Oct 5:30 pm free. Edhu set aagum?"],
+    ["day before month, 'at'", "Sunday (11 Oct) at 10:00 am or 3:00 pm, or Monday (12 Oct) at 5:30 pm. Which suits you?"],
+    ["month before day", "Oct 11 at 10 am, Oct 11 at 3 pm or Oct 12 at 5:30 pm?"],
+    ["no dates at all", "Sunday 10:00 am, Sunday 3:00 pm or Monday 5:30 pm"],
+  ])("passes: %s", (_why, reply) => {
+    expect(checkReply(reply, facts)).toEqual({ ok: true, problems: [] });
+  });
+
+  it.each([
+    ["Oct 14 10:00 am", "Free on Oct 14 10:00 am. Which suits you?"],
+    ["14 Oct 10:00 am", "Free on 14 Oct 10:00 am. Which suits you?"],
+    ["Mon 13 Oct 5:30 pm", "Free on Mon 13 Oct 5:30 pm. Which suits you?"],
+    ["a right day with a wrong time", "Sun 11 Oct 9:00 am is free. Which suits you?"],
+  ])("still fails: %s", (_why, reply) => {
+    expect(checkReply(reply, facts).ok).toBe(false);
+  });
+
+  it("a wrong date is reported as a date (and a wrong time as a time)", () => {
+    expect(checkReply("Mon 13 Oct 5:30 pm", facts).problems).toContain("date");
+    expect(checkReply("Sun 11 Oct 9:00 am", facts).problems).toContain("time");
+  });
+});
