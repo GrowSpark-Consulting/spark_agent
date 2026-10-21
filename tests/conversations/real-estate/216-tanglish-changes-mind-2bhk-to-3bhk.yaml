@@ -1,0 +1,35 @@
+name: Tanglish customer changes his mind from a 2BHK to a 3BHK and a bigger budget, and the new details win
+description: "A customer first asks for a 2BHK around 70 lakh, then says his parents are moving in so he wants a 3BHK at 1 crore. A good agent takes the new BHK and budget, offers real visit times for the 3BHK, and does not hold on to the old details. A bad agent keeps asking about the 2BHK or mixes up the budgets."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6800000, attributes: { price_to: 11000000, areas: [Medavakkam, Sholinganallur] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Aadhira Gardens, Medavakkam: 2BHK of 1020 sq ft starts at ₹68 lakh and 3BHK of 1380 sq ft starts at ₹92 lakh."
+turns:
+  - customer: "2bhk paakren, 70 lakh vara, medavakkam"
+    mock:
+      extraction: { language: ta-en, intent: give_details, fields: { config: 2BHK, budget: 70L, location: Medavakkam }, question: null }
+      reply: "Nalla choice sir, Medavakkam la 2BHK irukku. Eppo vaanga plan pannureenga?"
+    expect:
+      extracted: { language: ta-en }
+      reply: { sent: true, buttons: [] }
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: ask_details
+      leadFields: { config: 2BHK, budget: 70L, location: Medavakkam }
+  - customer: "wait wait, amma appa um vara poraanga so 3bhk than venum. budget 1 crore varaikum poren. 2 maasathula"
+    mock:
+      extraction: { language: ta-en, intent: give_details, fields: { config: 3BHK, budget: 1Cr, timeline: 0-3m }, question: null }
+      reply: "Seri sir, 3BHK ku maathiduvom. Medavakkam la 3BHK paakkalaam. Site visit ku Sunday 10:00 am, Sunday 3:00 pm illa Monday 5:30 pm free. Edhu set aagum?"
+    expect:
+      reply: { sent: true, buttons: [], matches: ["3\\s?BHK", "\\b10(:00)?\\s?am\\b"], notContains: ["2BHK"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: offer_slots
+      leadFields: { config: 3BHK, budget: 1Cr, location: Medavakkam, timeline: 0-3m }

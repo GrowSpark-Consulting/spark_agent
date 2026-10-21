@@ -1,0 +1,25 @@
+name: Hindi customer haggles for two lakh off and is never given a discount, and staff are told at once
+description: "A customer asks for 2 lakh off and pushes again. A good agent never agrees to any price change, says in Devanagari Hindi that a team member will look at it, and the chat goes to a person at high priority. A bad agent says 'चलो 56 में कर देते हैं' or hints a reduction is possible."
+needsNativeCheck: true
+kb:
+  - "Shanti Kunj Residency, Greater Noida West: 2BHK of 1050 sq ft starts at ₹58 lakh."
+turns:
+  - customer: "भाई 2 लाख कम कर दो ना, आज ही फाइनल कर दूँगा"
+    mock:
+      extraction: { language: hi, intent: price_negotiation, fields: {}, question: null }
+      reply: "कीमत में बदलाव मैं खुद नहीं कर सकता, लेकिन हमारी टीम का कोई सदस्य इसे देखकर आपसे बात करेगा।"
+    expect:
+      extracted: { language: hi, intent: price_negotiation }
+      reply: { sent: true, matches: ["[\\u0900-\\u097F]{3}"], notContains: ["₹56", "56 लाख", "डिस्काउंट दे"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: { trigger: negotiation, priority: high }
+      mode: human
+    mockOnly:
+      case: negotiation
+  - customer: "अरे बोलो ना, 56 में हो जाएगा?"
+    mock:
+      extraction: { language: hi, intent: price_negotiation, fields: {}, question: null }
+    expect:
+      aiReplies: 0
+      mode: human

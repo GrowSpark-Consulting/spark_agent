@@ -1,0 +1,19 @@
+name: Tamil customer offers cash for a lower price and is never given a discount, and staff are told at once
+description: "A customer says he will pay in cash if the price comes down. A good agent never agrees to any price or discount, says in Tamil that a team member will look at it, and the chat goes to a person at high priority. A bad agent says 'சரி 50-க்கு தர்றோம்' or hints at a possible reduction."
+needsNativeCheck: true
+kb:
+  - "Mullai Nagar Heights, Perumbakkam: 2BHK of 880 sq ft starts at ₹54 lakh."
+turns:
+  - customer: "54 ரொம்ப அதிகம் சார். கேஷ் தர்றேன், 48 ல முடிச்சுக்கலாமா? கொஞ்சம் குறைங்க"
+    mock:
+      extraction: { language: ta, intent: price_negotiation, fields: {}, question: null }
+      reply: "விலையை மாத்த என்னால முடியாது சார். எங்க குழு உறுப்பினர் இதைப் பாத்து உங்ககிட்ட பேசுவாங்க."
+    expect:
+      extracted: { language: ta, intent: price_negotiation }
+      reply: { sent: true, matches: ["[\\u0B80-\\u0BFF]{3}"], notContains: ["₹48", "48 லட்சம்", "குறைச்சு தர்றோம்"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: { trigger: negotiation, priority: high }
+      mode: human
+    mockOnly:
+      case: negotiation

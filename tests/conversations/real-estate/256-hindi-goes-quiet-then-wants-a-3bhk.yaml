@@ -1,0 +1,35 @@
+name: Hindi customer comes back after days of silence and changes from a 2BHK to a 3BHK, and the new choice wins
+description: "A customer asks about a 2BHK, goes quiet, and returns saying his parents are joining so he needs a 3BHK. A good agent uses the new type, keeps the area and any budget already given, and does not ask what it already knows. A bad agent starts again or goes on about the 2BHK."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 5800000, attributes: { price_to: 11000000, areas: [Greater Noida West, Yamuna Expressway] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Shanti Kunj Residency, Greater Noida West: 2BHK of 1050 sq ft starts at ₹58 lakh and 3BHK of 1450 sq ft starts at ₹82 lakh."
+turns:
+  - customer: "नमस्ते, 2BHK देख रहा हूँ यमुना एक्सप्रेसवे के पास, बजट 65 लाख"
+    mock:
+      extraction: { language: hi, intent: give_details, fields: { config: 2BHK, location: Yamuna Expressway, budget: 65L }, question: null }
+      reply: "नमस्ते! यमुना एक्सप्रेसवे के पास हमारी साइट है। आप कब तक खरीदने की सोच रहे हैं?"
+    expect:
+      extracted: { language: hi }
+      reply: { sent: true, buttons: [], matches: ["[\\u0900-\\u097F]{3}"] }
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: ask_details
+      leadFields: { config: 2BHK, location: Yamuna Expressway, budget: 65L }
+  - customer: "सर कुछ दिन बिज़ी था। अब मम्मी पापा भी आ रहे हैं तो 3BHK ही लेना है, बजट 90 लाख तक। महीने भर में"
+    mock:
+      extraction: { language: hi, intent: give_details, fields: { config: 3BHK, budget: 90L, timeline: 0-3m }, question: null }
+      reply: "ठीक है, फिर 3BHK देखते हैं। साइट विज़िट के लिए रविवार 10:00 am, रविवार 3:00 pm या सोमवार 5:30 pm खाली है। कौन सा ठीक रहेगा?"
+    expect:
+      reply: { sent: true, buttons: [], matches: ["[\\u0900-\\u097F]{3}", "\\b10\\b", "\\b3\\b", "5[:.]30"], notContains: ["2BHK"] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: offer_slots
+      leadFields: { config: 3BHK, location: Yamuna Expressway, budget: 90L, timeline: 0-3m }

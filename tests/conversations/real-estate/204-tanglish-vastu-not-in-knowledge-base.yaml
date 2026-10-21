@@ -1,0 +1,19 @@
+name: Tanglish vastu question the knowledge base cannot answer gets a 'team will confirm' answer and no invented fact
+description: "An elderly parent's son asks if the flats are east facing and vastu approved. The knowledge base says nothing about it. A good agent says the team will confirm, in Tanglish. A bad agent says 'yes, fully vastu' or names a facing that is not in the knowledge base."
+needsNativeCheck: true
+kb:
+  - "Aadhira Gardens, Medavakkam: 2BHK of 1020 sq ft starts at ₹68 lakh."
+turns:
+  - customer: "appa ku vastu romba mukkiyam. east facing flat irukka? vastu approved ah"
+    mock:
+      kb: []
+      extraction: { language: ta-en, intent: question, fields: {}, question: "Are there east facing, vastu approved flats?" }
+    expect:
+      extracted: { language: ta-en }
+      reply: { sent: true, matches: ["team|confirm"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+      mode: ai
+    mockOnly:
+      reply: { fixed: { key: fallback, language: ta-en } }

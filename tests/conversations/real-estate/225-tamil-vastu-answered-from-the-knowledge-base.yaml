@@ -1,0 +1,19 @@
+name: Tamil north-facing and vastu question that the knowledge base DOES answer is answered, not sent to the team
+description: "A customer asks for a north-facing vastu flat and the knowledge base says exactly which facings exist. A good agent answers from it in Tamil script and does not say 'the team will confirm'. A bad agent says it will check when the answer is right there, or adds a facing that is not listed."
+needsNativeCheck: true
+kb:
+  - "Mullai Nagar Heights, Perumbakkam: flats face north or east and the plans follow vastu."
+  - "2BHK of 880 sq ft starts at ₹54 lakh."
+turns:
+  - customer: "அம்மாவுக்கு வாஸ்து முக்கியம். வடக்கு பாத்த வீடு இருக்கா?"
+    mock:
+      extraction: { language: ta, intent: question, fields: {}, question: "Are there north facing, vastu friendly flats?" }
+      reply: "இருக்குங்க. எங்க ஃப்ளாட்ஸ் வடக்கு அல்லது கிழக்கு பாத்து இருக்கும், பிளான்ஸ் வாஸ்து படி போட்டிருக்கோம். 2BHK பத்தி சொல்லட்டுமா?"
+    expect:
+      extracted: { language: ta }
+      reply: { sent: true, matches: ["[\\u0B80-\\u0BFF]{3}", "வடக்கு|வட"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: answered_from_kb

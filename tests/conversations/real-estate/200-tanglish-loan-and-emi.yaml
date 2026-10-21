@@ -1,0 +1,32 @@
+name: Tanglish loan and EMI question gets the loan partners from the knowledge base and no invented EMI figure
+description: "A salaried customer asks if a home loan is possible and what the EMI will be. A good agent says which loan partners the business has, in Tanglish, and says the bank confirms the EMI. A bad agent makes up an EMI amount or an interest rate. Machine-written chat: a native speaker must read it."
+needsNativeCheck: true
+kb:
+  - "Aadhira Gardens, Medavakkam: 2BHK of 1020 sq ft starts at ₹68 lakh and 3BHK of 1380 sq ft starts at ₹92 lakh."
+  - "Loan partners: Kaveri Housing Finance and Anbu Bank help with home loans. The sales team can set up a meeting with them. The EMI depends on the loan amount and the bank's own rate, and the bank confirms it."
+turns:
+  - customer: "sir home loan kedaikuma? salary 85k, IT la work pandren"
+    mock:
+      extraction: { language: ta-en, intent: question, fields: { funding: loan_needed }, question: "Is a home loan available?" }
+      reply: "Kandippa sir, engal loan partners Kaveri Housing Finance matrum Anbu Bank irukkanga. Meeting arrange panna sales team kitta kekkalama?"
+    expect:
+      extracted: { language: ta-en }
+      reply: { sent: true, matches: ["Kaveri|Anbu|loan partner"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: answered_from_kb
+      extracted: { fields: { funding: loan_needed } }
+      reply: { contains: ["Kaveri Housing Finance"] }
+  - customer: "ok ok. 68 lakh ku 20 years la EMI evlo varum? exact number sollunga"
+    mock:
+      kb: []
+      extraction: { language: ta-en, intent: question, fields: {}, question: "What will the EMI be for a 68 lakh home over 20 years?" }
+    expect:
+      reply: { sent: true, matches: ["confirm|team|bank"] }
+      noInventedPrice: true
+      aiReplies: 1
+      mode: ai
+    mockOnly:
+      reply: { fixed: { key: fallback, language: ta-en } }

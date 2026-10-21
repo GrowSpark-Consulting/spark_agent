@@ -1,0 +1,29 @@
+name: Tamil shop owner asks the price of a 2BHK and gets it in Tamil script from the knowledge base only
+description: "A small shop owner asks the price and size in colloquial Tamil. A good agent answers in Tamil script with the price and size that are in the knowledge base and nothing else. A bad agent answers in English or Tanglish, or quotes a price for a size that is not in the knowledge base."
+needsNativeCheck: true
+kb:
+  - "Mullai Nagar Heights, Perumbakkam: 2BHK of 880 sq ft starts at ₹54 lakh and 3BHK of 1210 sq ft starts at ₹74 lakh."
+  - "Site visits are free every day. Ask the sales team for the visit timings."
+turns:
+  - customer: "பெரும்பாக்கத்துல 2BHK என்ன விலை சார்? எத்தனை சதுர அடி"
+    mock:
+      extraction: { language: ta, intent: question, fields: { location: Perumbakkam, config: 2BHK }, question: "What is the price and size of a 2BHK in Perumbakkam?" }
+      reply: "பெரும்பாக்கத்துல 2BHK 880 சதுர அடி, ₹54 லட்சத்துல ஆரம்பிக்குது. 3BHK பத்தியும் சொல்லட்டுமா?"
+    expect:
+      extracted: { language: ta, intent: question }
+      reply: { sent: true, matches: ["[\\u0B80-\\u0BFF]{3}", "54"] }
+      noInventedPrice: true
+      aiReplies: 1
+    mockOnly:
+      case: answered_from_kb
+      reply: { contains: ["₹54 லட்சத்துல", "880"] }
+  - customer: "3BHK எவ்ளோ? கடை பக்கத்துலயே வேணும்"
+    mock:
+      extraction: { language: ta, intent: question, fields: { config: 3BHK }, question: "What is the price of a 3BHK?" }
+      reply: "3BHK 1210 சதுர அடி, ₹74 லட்சத்துல ஆரம்பிக்குது. கடை பக்கத்துல இருக்கான்னு எனக்குத் தெரியாது, குழுகிட்ட கேட்டு சொல்றேன்."
+    expect:
+      reply: { sent: true, matches: ["[\\u0B80-\\u0BFF]{3}", "74"] }
+      noInventedPrice: true
+      aiReplies: 1
+    mockOnly:
+      case: answered_from_kb

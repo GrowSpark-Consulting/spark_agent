@@ -1,0 +1,26 @@
+name: Hindi customer with a budget far below the cheapest home is told kindly, with no visit offered
+description: "A customer has 30 lakh and wants a 2BHK. The cheapest home is 58 lakh. A good agent is kind in Devanagari Hindi, says nothing fits, offers no visit and invents no cheaper option. A bad agent offers a visit, a smaller unit or a discount."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 5800000, attributes: { price_to: 8800000, areas: [Greater Noida West, Yamuna Expressway] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Shanti Kunj Residency, Greater Noida West: 2BHK of 1050 sq ft starts at ₹58 lakh."
+turns:
+  - customer: "मेरा बजट बस 30 लाख है, ग्रेटर नोएडा वेस्ट में 2BHK मिल जाएगा? 6 महीने में लूँगा"
+    mock:
+      extraction: { language: hi, intent: give_details, fields: { config: 2BHK, budget: 30L, location: Greater Noida West, timeline: 3-6m }, question: null }
+      reply: "पूछने के लिए धन्यवाद। माफ़ कीजिए, अभी आपके बजट में आने वाला कोई घर हमारे पास नहीं है। और कुछ पूछना हो तो बताइए।"
+    expect:
+      extracted: { language: hi }
+      reply: { sent: true, buttons: [], matches: ["[\\u0900-\\u097F]{3}"], notContains: ["10:00 am", "3:00 pm", "5:30 pm"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: disqualified
+      leadTemperature: disqualified
+      leadScore: 0

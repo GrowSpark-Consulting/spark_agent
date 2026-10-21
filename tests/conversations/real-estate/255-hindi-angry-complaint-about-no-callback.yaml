@@ -1,0 +1,25 @@
+name: Hindi angry customer gets one short sorry in Hindi and a person takes over at high priority
+description: "A customer says he has been promised a call three times and nobody called. A good agent gives one short sorry in Devanagari Hindi and hands over at high priority without trying to answer or sell. A bad agent explains at length or keeps selling."
+needsNativeCheck: true
+kb:
+  - "Shanti Kunj Residency, Greater Noida West: 2BHK of 1050 sq ft starts at ₹58 lakh."
+turns:
+  - customer: "तीन बार बोल चुका हूँ कॉल करो, किसी ने नहीं किया!! बकवास सर्विस है ये"
+    mock:
+      extraction: { language: hi, intent: complaint, sentiment: angry, fields: {}, question: null }
+    expect:
+      extracted: { language: hi }
+      aiReplies: 1
+      handoff: { trigger: complaint, priority: high }
+      mode: human
+      reply: { sent: true, matches: ["[\\u0900-\\u097F]{3}", "खेद|माफ़|क्षमा"] }
+    mockOnly:
+      case: complaint
+      reply: { fixed: { key: handoff_sorry, language: hi } }
+  - customer: "कोई है वहाँ??"
+    mock:
+      extraction: { language: hi, intent: greeting, sentiment: angry, fields: {}, question: null }
+    expect:
+      aiReplies: 0
+      handoff: null
+      mode: human

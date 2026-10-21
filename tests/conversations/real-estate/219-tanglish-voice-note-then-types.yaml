@@ -1,0 +1,30 @@
+name: Tanglish customer sends a voice note while driving, is asked once to type, then types and is answered
+description: "A voice note has no words the assistant can read. A good agent sends one polite line in Tanglish asking the customer to type, tells staff a voice note is waiting, keeps the chat with the AI, and answers normally once the customer types. A bad agent guesses what was said or ignores the customer."
+needsNativeCheck: true
+contact: { language: ta-en }
+kb:
+  - "Aadhira Gardens, Medavakkam: 2BHK of 1020 sq ft starts at ₹68 lakh."
+turns:
+  - customer: "[voice note]"
+    voice: true
+    expect:
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      voiceNoteAlert: true
+      reply: { sent: true }
+    mockOnly:
+      case: voice_note
+      reply: { fixed: { key: voice_note, language: ta-en } }
+  - customer: "sorry sir car la irundhen. 2bhk price enna medavakkam"
+    mock:
+      extraction: { language: ta-en, intent: question, fields: { config: 2BHK, location: Medavakkam }, question: "What is the price of a 2BHK in Medavakkam?" }
+      reply: "Paravaillai sir. Medavakkam la 2BHK ₹68 lakh la irundhu start aagum."
+    expect:
+      reply: { sent: true, matches: ["\\b(la|ku|sir|aagum|irundhu)\\b"] }
+      noInventedPrice: true
+      aiReplies: 1
+      voiceNoteAlert: false
+    mockOnly:
+      case: answered_from_kb
+      reply: { contains: ["₹68 lakh"] }

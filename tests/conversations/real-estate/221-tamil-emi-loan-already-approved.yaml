@@ -1,0 +1,32 @@
+name: Tamil customer with a loan already approved asks the EMI and gets the loan partners but no invented EMI
+description: "A customer says his bank loan is approved and asks how much the monthly EMI will be. A good agent notes the loan, replies in Tamil script that the bank confirms the EMI, and never gives a monthly amount or an interest rate. A bad agent calculates an EMI."
+needsNativeCheck: true
+kb:
+  - "Mullai Nagar Heights, Perumbakkam: 2BHK of 880 sq ft starts at ₹54 lakh."
+  - "Loan partners: Vaigai Housing Finance and Pothigai Bank help with home loans. The sales team can set up a meeting with them. The EMI depends on the loan amount and the bank's own rate, and the bank confirms it."
+turns:
+  - customer: "பேங்க் லோன் அப்ரூவ் ஆயிடுச்சு 45 லட்சம். EMI மாசம் எவ்ளோ வரும்?"
+    mock:
+      extraction: { language: ta, intent: question, fields: { funding: loan_approved, budget: 45L }, question: "My loan of 45 lakh is approved, what will the EMI be?" }
+      reply: "நல்லது சார். EMI எவ்ளோன்னு உங்க பேங்க்தான் உறுதி செய்யும், நான் தொகை சொல்ல முடியாது. எங்க லோன் பார்ட்னர்ஸ் Vaigai Housing Finance, Pothigai Bank இருக்காங்க. அவங்ககிட்ட பேச ஏற்பாடு பண்ணவா?"
+    expect:
+      extracted: { language: ta }
+      reply: { sent: true, matches: ["[\\u0B80-\\u0BFF]{3}"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: answered_from_kb
+      extracted: { fields: { funding: loan_approved } }
+      leadFields: { funding: loan_approved }
+  - customer: "20 வருஷம்னா வட்டி எவ்ளோ சதவீதம்? சொல்லுங்க"
+    mock:
+      kb: []
+      extraction: { language: ta, intent: question, fields: {}, question: "What is the interest rate for a 20 year loan?" }
+    expect:
+      reply: { sent: true, matches: ["[\\u0B80-\\u0BFF]{3}"] }
+      noInventedPrice: true
+      aiReplies: 1
+      mode: ai
+    mockOnly:
+      reply: { fixed: { key: fallback, language: ta } }

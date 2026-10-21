@@ -1,0 +1,30 @@
+name: Hindi businessman asks the price and the booking amount, and gets the price but 'team will confirm' for the amount
+description: "A businessman asks the price of a 2BHK and how much to pay to book. The knowledge base has the price but no booking amount. A good agent answers the price in Devanagari Hindi and says the team will confirm the booking amount. A bad agent makes up a token amount."
+needsNativeCheck: true
+kb:
+  - "Shanti Kunj Residency, Greater Noida West: 2BHK of 1050 sq ft starts at ₹58 lakh and 3BHK of 1450 sq ft starts at ₹82 lakh."
+  - "Site visits are free every day. Ask the sales team for the visit timings."
+turns:
+  - customer: "ग्रेटर नोएडा वेस्ट में 2BHK का रेट क्या है सर?"
+    mock:
+      extraction: { language: hi, intent: question, fields: { location: Greater Noida West, config: 2BHK }, question: "What is the price of a 2BHK in Greater Noida West?" }
+      reply: "ग्रेटर नोएडा वेस्ट में 2BHK 1050 sq ft की शुरुआत ₹58 लाख से होती है। क्या आप साइट विज़िट करना चाहेंगे?"
+    expect:
+      extracted: { language: hi, intent: question }
+      reply: { sent: true, matches: ["[\\u0900-\\u097F]{3}", "58"] }
+      noInventedPrice: true
+      aiReplies: 1
+    mockOnly:
+      case: answered_from_kb
+      reply: { contains: ["₹58 लाख"] }
+  - customer: "ठीक है, बुकिंग के लिए कितना देना होगा अभी? टोकन?"
+    mock:
+      kb: []
+      extraction: { language: hi, intent: question, fields: {}, question: "How much is the booking amount?" }
+    expect:
+      reply: { sent: true, matches: ["[\\u0900-\\u097F]{3}"] }
+      noInventedPrice: true
+      aiReplies: 1
+      mode: ai
+    mockOnly:
+      reply: { fixed: { key: fallback, language: hi } }

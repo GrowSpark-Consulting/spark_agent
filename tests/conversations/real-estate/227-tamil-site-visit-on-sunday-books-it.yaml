@@ -1,0 +1,39 @@
+name: Tamil ready buyer wants a Sunday visit, is offered three real times, picks one and is booked, and staff are told once
+description: "A buyer who is ready asks for a visit this weekend. A good agent offers the three real times in one plain Tamil message, reads 'இரண்டாவது' as the second one (the code does not yet read the spoken spelling 'ரெண்டாவது', see the task note), books it, and tells staff once that the lead is hot. A bad agent invents a time, books the wrong slot, or sends a list."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 5400000, attributes: { price_to: 7400000, areas: [Perumbakkam, Pallikaranai] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Mullai Nagar Heights, Perumbakkam: 2BHK of 880 sq ft starts at ₹54 lakh."
+turns:
+  - customer: "சார் நான் ரெடி. 2BHK பெரும்பாக்கம் 65 லட்சம், 2 மாசத்துல வாங்கணும். இந்த வாரம் வந்து பாக்கணும்"
+    mock:
+      extraction: { language: ta, intent: book, fields: { config: 2BHK, location: Perumbakkam, budget: 65L, timeline: 0-3m }, question: null }
+      reply: "சூப்பர் சார்! ஞாயிறு 10:00 am, ஞாயிறு 3:00 pm இல்லனா திங்கள் 5:30 pm சைட் விசிட்டுக்கு இருக்கு. எது உங்களுக்கு வசதி?"
+    expect:
+      extracted: { language: ta }
+      reply: { sent: true, buttons: [], matches: ["\\b10\\b", "\\b3\\b", "5[:.]30"] }
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      hotLead: true
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: offer_slots
+      leadTemperature: hot
+  - customer: "இரண்டாவது ஓகே"
+    mock:
+      extraction: { language: ta, intent: give_details, fields: {}, question: null }
+      reply: "முடிஞ்சது சார்! ஞாயிறு 3:00 pm-க்கு உங்க சைட் விசிட் புக் ஆயிடுச்சு. சந்திப்போம்!"
+    expect:
+      reply: { sent: true, buttons: [], matches: ["\\b3\\b"] }
+      aiReplies: 1
+      handoff: null
+      hotLead: false
+      leadStage: booked
+      calendar: { confirmed: ["2026-10-11T09:30:00.000Z"] }
+    mockOnly:
+      case: booked

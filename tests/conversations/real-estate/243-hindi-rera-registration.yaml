@@ -1,0 +1,19 @@
+name: Hindi careful buyer asks for the RERA number and gets exactly the one in the knowledge base
+description: "A careful buyer will not talk price until he sees the RERA registration. A good agent gives the exact number from the knowledge base in Devanagari Hindi. A bad agent invents a number or says 'RERA approved' without giving one the knowledge base holds."
+needsNativeCheck: true
+kb:
+  - "Shanti Kunj Residency, Greater Noida West: RERA registration number UPRERAPRJ000000."
+  - "2BHK of 1050 sq ft starts at ₹58 lakh."
+turns:
+  - customer: "पहले RERA रजिस्ट्रेशन नंबर बताओ, फिर बात करेंगे"
+    mock:
+      extraction: { language: hi, intent: question, fields: {}, question: "What is the RERA registration number?" }
+      reply: "जी बिल्कुल, RERA रजिस्ट्रेशन नंबर UPRERAPRJ000000 है। अब बताइए, आप किस बजट में देख रहे हैं?"
+    expect:
+      extracted: { language: hi }
+      reply: { sent: true, matches: ["[\\u0900-\\u097F]{3}", "UPRERAPRJ000000"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: answered_from_kb

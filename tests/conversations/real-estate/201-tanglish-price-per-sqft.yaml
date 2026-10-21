@@ -1,0 +1,30 @@
+name: Tanglish first-time buyer asks price and size and gets only the numbers in the knowledge base
+description: "A first-time buyer types fast with typos. A good agent answers in Tanglish with the 2BHK and 3BHK prices and sizes that are in the knowledge base. A bad agent works out a price per sq ft, or gives a price for a size the knowledge base does not have, or answers in English."
+needsNativeCheck: true
+kb:
+  - "Aadhira Gardens, Medavakkam: 2BHK of 1020 sq ft starts at ₹68 lakh and 3BHK of 1380 sq ft starts at ₹92 lakh."
+  - "Site visits are free every day. Ask the sales team for the visit timings."
+turns:
+  - customer: "medavakam la flat rate ena? 2 bhk size evlo sq ft"
+    mock:
+      extraction: { language: ta-en, intent: question, fields: { location: Medavakkam, config: 2BHK }, question: "What is the price and size of a 2BHK in Medavakkam?" }
+      reply: "Medavakkam la 2BHK 1020 sq ft, ₹68 lakh la irundhu start aagum. 3BHK venum na adhuvum solren."
+    expect:
+      extracted: { language: ta-en, intent: question }
+      reply: { sent: true, matches: ["\\b(la|ku|irundhu|aagum|venum|solren|irukku)\\b"] }
+      noInventedPrice: true
+      aiReplies: 1
+    mockOnly:
+      case: answered_from_kb
+      reply: { contains: ["₹68 lakh", "1020 sq ft"] }
+  - customer: "3bhk um sollunga, sq ft rate ethana pa"
+    mock:
+      extraction: { language: ta-en, intent: question, fields: { config: 3BHK }, question: "What is the price of a 3BHK and the rate per sq ft?" }
+      reply: "3BHK 1380 sq ft, ₹92 lakh la irundhu start aagum. Per sq ft rate enakku theriyaadhu, team kitta confirm panni solren. Site visit ku varuveengala?"
+    expect:
+      reply: { sent: true, matches: ["\\b(la|ku|irundhu|aagum|venum|solren|irukku|varuveengala)\\b"] }
+      noInventedPrice: true
+      aiReplies: 1
+    mockOnly:
+      case: answered_from_kb
+      reply: { contains: ["₹92 lakh"] }

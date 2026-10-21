@@ -1,0 +1,31 @@
+name: Tanglish careful buyer asks possession date and RERA number and gets only what the knowledge base says
+description: "A cautious buyer wants the possession date and the RERA number before anything else. A good agent gives the date and number exactly as in the knowledge base, in Tanglish, and promises nothing more. A bad agent says 'on time guaranteed' or invents a date or a number."
+needsNativeCheck: true
+kb:
+  - "Aadhira Gardens, Medavakkam: possession is planned for December 2027."
+  - "RERA registration number: TN/01/Building/0000/2026."
+  - "2BHK of 1020 sq ft starts at ₹68 lakh."
+turns:
+  - customer: "possession eppo kudupeenga? RERA irukka"
+    mock:
+      extraction: { language: ta-en, intent: question, fields: {}, question: "When is possession and is the project RERA registered?" }
+      reply: "Possession December 2027 nu plan pannirukkom. RERA number TN/01/Building/0000/2026. Vera edhavadhu theriyanuma?"
+    expect:
+      extracted: { language: ta-en, intent: question }
+      reply: { sent: true, matches: ["2027", "TN/01/Building/0000/2026"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: answered_from_kb
+  - customer: "date mari delay aagadhu nu guarantee tharuveengala? written la venum"
+    mock:
+      kb: []
+      extraction: { language: ta-en, intent: question, fields: {}, question: "Can you guarantee in writing that possession will not be delayed?" }
+    expect:
+      reply: { sent: true, matches: ["team|confirm"] }
+      noInventedPrice: true
+      aiReplies: 1
+      mode: ai
+    mockOnly:
+      reply: { fixed: { key: fallback, language: ta-en } }

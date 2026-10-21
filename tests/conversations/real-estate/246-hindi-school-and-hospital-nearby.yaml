@@ -1,0 +1,18 @@
+name: Hindi parent asks about schools and a hospital nearby and gets only the places in the knowledge base
+description: "A father wants a good school and a hospital close to the project. A good agent names only the places and distances in the knowledge base, in Devanagari Hindi, and does not add famous names. A bad agent adds schools or hospitals that are not listed."
+needsNativeCheck: true
+kb:
+  - "Near Shanti Kunj Residency: Gyan Bharti Public School is 1.2 km away and Little Scholars School is 3 km away."
+  - "Near Shanti Kunj Residency: Sanjeevani Hospital is 2 km away."
+turns:
+  - customer: "बच्चे छोटे हैं, आसपास स्कूल और हॉस्पिटल है क्या? ज्यादा दूर नहीं चाहिए"
+    mock:
+      extraction: { language: hi, intent: question, fields: {}, question: "Are there schools and a hospital nearby?" }
+      reply: "जी, पास में Gyan Bharti Public School 1.2 km पर और Little Scholars School 3 km पर है। Sanjeevani Hospital 2 km पर है। आप कौन से बजट में देख रहे हैं?"
+    expect:
+      extracted: { language: hi }
+      reply: { sent: true, matches: ["[\\u0900-\\u097F]{3}", "Gyan Bharti|Little Scholars", "Sanjeevani"] }
+      noInventedPrice: true
+      aiReplies: 1
+    mockOnly:
+      case: answered_from_kb

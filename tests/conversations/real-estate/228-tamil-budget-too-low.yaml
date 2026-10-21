@@ -1,0 +1,26 @@
+name: Tamil customer with a budget far below the cheapest home is told kindly, with no visit offered
+description: "A customer has only 18 lakh. The cheapest home is 54 lakh. A good agent is kind in Tamil script, says nothing fits, offers no visit and invents no cheaper option. A bad agent offers a visit, a plot, or a discount."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 5400000, attributes: { price_to: 7400000, areas: [Perumbakkam, Pallikaranai] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Mullai Nagar Heights, Perumbakkam: 2BHK of 880 sq ft starts at ₹54 lakh."
+turns:
+  - customer: "என்கிட்ட 18 லட்சம்தான் இருக்கு, பெரும்பாக்கத்துல ஒரு 1BHK கிடைக்குமா? 6 மாசத்துல வாங்குவேன்"
+    mock:
+      extraction: { language: ta, intent: give_details, fields: { config: 1BHK, budget: 18L, location: Perumbakkam, timeline: 3-6m }, question: null }
+      reply: "கேட்டதுக்கு நன்றி. மன்னிக்கணும், இப்போதைக்கு உங்க பட்ஜெட்டுக்கு பொருந்தற வீடு எங்ககிட்ட இல்ல. வேற ஏதாவது உதவி வேணும்னா சொல்லுங்க."
+    expect:
+      extracted: { language: ta }
+      reply: { sent: true, buttons: [], matches: ["[\\u0B80-\\u0BFF]{3}"], notContains: ["10:00 am", "3:00 pm", "5:30 pm"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: disqualified
+      leadTemperature: disqualified
+      leadScore: 0

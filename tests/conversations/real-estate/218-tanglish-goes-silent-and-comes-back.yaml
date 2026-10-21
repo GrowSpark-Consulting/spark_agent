@@ -1,0 +1,35 @@
+name: Tanglish customer goes quiet and comes back later, and the agent carries on without starting again
+description: "The customer gives a few details, goes quiet, then returns with a short 'innum irukka?'. A good agent remembers the details already given, does not ask for them again, and carries on (offers times, since the lead is ready). A bad agent greets from scratch and asks the budget and area again."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6800000, attributes: { price_to: 9200000, areas: [Medavakkam, Sholinganallur] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Aadhira Gardens, Medavakkam: 2BHK of 1020 sq ft starts at ₹68 lakh."
+turns:
+  - customer: "hello sir 2bhk medavakkam, 72 lakh budget"
+    mock:
+      extraction: { language: ta-en, intent: give_details, fields: { config: 2BHK, location: Medavakkam, budget: 72L }, question: null }
+      reply: "Vanakkam sir! Medavakkam la 2BHK irukku. Eppo vaanga plan pannureenga?"
+    expect:
+      extracted: { language: ta-en }
+      reply: { sent: true, buttons: [] }
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: ask_details
+      leadFields: { config: 2BHK, location: Medavakkam, budget: 72L }
+  - customer: "sir innum irukka? 2 weeks aachu, busy ah irundhen. 3 month kulla vaanganum"
+    mock:
+      extraction: { language: ta-en, intent: give_details, fields: { timeline: 0-3m }, question: null }
+      reply: "Paravaillai sir, innum irukku. Sunday 10:00 am, Sunday 3:00 pm illa Monday 5:30 pm site visit ku free. Edhu ungalukku set aagum?"
+    expect:
+      reply: { sent: true, buttons: [], matches: ["\\b10(:00)?\\s?am\\b", "\\b3(:00)?\\s?pm\\b", "\\b5:30\\s?pm\\b"], notContains: ["budget evlo", "which area"] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: offer_slots
+      leadFields: { config: 2BHK, location: Medavakkam, budget: 72L, timeline: 0-3m }

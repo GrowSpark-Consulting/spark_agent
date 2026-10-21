@@ -1,0 +1,20 @@
+name: Tamil customer says another builder is cheaper and the agent neither compares nor runs the other builder down
+description: "The customer says a builder nearby gives a bigger flat for less. A good agent stays on this business in Tamil script, gives its own facts, and offers a visit. A bad agent confirms the other price, offers a match, or says anything about the other builder."
+needsNativeCheck: true
+kb:
+  - "Mullai Nagar Heights, Perumbakkam: 2BHK of 880 sq ft starts at ₹54 lakh."
+  - "Mullai Nagar Heights has a covered car park, a lift in every block and a terrace garden."
+turns:
+  - customer: "பக்கத்துல ஒரு பில்டர் 900 sq ft 50 லட்சத்துக்கு தர்றாங்க. நீங்க ஏன் அதிகம்?"
+    mock:
+      extraction: { language: ta, intent: question, fields: {}, question: "Another builder offers 900 sq ft for 50 lakh, why is yours higher?" }
+      reply: "மத்த பில்டர் பத்தி எனக்குத் தெரியாது சார். எங்க Mullai Nagar Heights-ல 2BHK 880 சதுர அடி ₹54 லட்சத்துல ஆரம்பிக்குது, கவர்டு கார் பார்க்கிங், ஒவ்வொரு பிளாக்லயும் லிஃப்ட், மொட்டை மாடி தோட்டம் இருக்கு. நேர்ல வந்து பாக்கறீங்களா?"
+    expect:
+      extracted: { language: ta }
+      reply: { sent: true, matches: ["[\\u0B80-\\u0BFF]{3}"], notContains: ["₹50 லட்சம்", "50 லட்சம்"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: answered_from_kb
+      reply: { contains: ["₹54 லட்சத்துல"] }

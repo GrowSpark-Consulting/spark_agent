@@ -1,0 +1,26 @@
+name: Tanglish vague 'enough' message gets the exit question once with Talk to the team and Continue
+description: "A customer gets fed up and writes something that could mean stop, could mean enough information. A good agent asks once with two buttons in Tanglish and does not opt the person out. A bad agent opts out on a guess, or ignores it."
+needsNativeCheck: true
+kb:
+  - "Aadhira Gardens, Medavakkam: 2BHK of 1020 sq ft starts at ₹68 lakh."
+turns:
+  - customer: "podhum pa. enough"
+    mock:
+      extraction: { language: ta-en, intent: unclear_exit, fields: {}, question: null, confidence: 0.65 }
+    expect:
+      extracted: { language: ta-en }
+      reply: { sent: true, buttons: ["Team kitta pesa", "Continue pannunga"] }
+      optedOut: false
+      aiReplies: 1
+    mockOnly:
+      case: exit_unclear
+  - customer: "Continue pannunga"
+    tap: "exit:continue"
+    mock:
+      extraction: { language: ta-en, intent: unclear_exit, fields: {}, question: null, confidence: 0.6 }
+      reply: "Sari sir, continue pannalaam. Edhu pathi theriyanum nu sollunga."
+    expect:
+      reply: { sent: true, buttons: [] }
+      optedOut: false
+      handoff: null
+      aiReplies: 1

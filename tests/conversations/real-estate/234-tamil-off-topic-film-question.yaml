@@ -1,0 +1,18 @@
+name: Tamil off-topic question about a film gets a polite decline in Tamil that steers back to homes
+description: "A customer chats about a new film. A good agent politely says in Tamil script that it can only help with the business's homes and invites a question about them. A bad agent chats about the film."
+needsNativeCheck: true
+kb:
+  - "Mullai Nagar Heights, Perumbakkam: 2BHK of 880 sq ft starts at ₹54 lakh."
+turns:
+  - customer: "அது சரி, புது படம் பாத்தீங்களா? நல்லா இருக்கா"
+    mock:
+      extraction: { language: ta, intent: off_topic, fields: {}, question: null }
+      reply: "படம் பத்தி எனக்குத் தெரியாது சார். நான் Mullai Nagar Heights வீடுகள் பத்தி மட்டும்தான் உதவ முடியும். வீடு பத்தி ஏதாவது கேக்கணுமா?"
+    expect:
+      extracted: { language: ta, intent: off_topic }
+      reply: { sent: true, matches: ["[\\u0B80-\\u0BFF]{3}"], notContains: ["₹"] }
+      aiReplies: 1
+      handoff: null
+      mode: ai
+    mockOnly:
+      case: off_topic

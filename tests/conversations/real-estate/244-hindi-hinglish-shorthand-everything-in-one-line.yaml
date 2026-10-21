@@ -1,0 +1,27 @@
+name: Hinglish shorthand with BHK, budget, area and timeline in one line is read in full and nothing is asked again
+description: "A customer types a quick note in Roman letters. A good agent reads all four details, does not ask for any of them again, and offers real visit times in a plain Hinglish message. A bad agent asks for the budget or area again, or answers in Devanagari or English."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 5800000, attributes: { price_to: 8800000, areas: [Greater Noida West, Yamuna Expressway] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Shanti Kunj Residency, Greater Noida West: 2BHK of 1050 sq ft starts at ₹58 lakh and 3BHK of 1450 sq ft starts at ₹82 lakh."
+turns:
+  - customer: "3bhk 85L gr noida west 2 month me lena h"
+    mock:
+      extraction: { language: hi, intent: give_details, fields: { config: 3BHK, budget: 85L, location: Greater Noida West, timeline: 0-3m }, question: null }
+      reply: "Badhiya! Greater Noida West mein 3BHK aapke liye sahi rahega. Site visit ke liye Sunday 10:00 am, Sunday 3:00 pm ya Monday 5:30 pm free hai. Aapko kaun sa theek rahega?"
+    expect:
+      extracted: { language: hi, intent: give_details }
+      reply: { sent: true, buttons: [], matches: ["\\b(hai|mein|aap|aapko|ke|ki|ka|rahega|theek)\\b", "\\b10(:00)?\\s?am\\b", "\\b3(:00)?\\s?pm\\b", "\\b5:30\\s?pm\\b"], notContains: ["budget kya", "kaun sa area"] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      extracted: { fields: { config: 3BHK, budget: 85L, location: Greater Noida West, timeline: 0-3m } }
+      leadFields: { config: 3BHK, budget: 85L, location: Greater Noida West, timeline: 0-3m }
+      case: offer_slots
+      leadTemperature: hot
+      leadScore: 75

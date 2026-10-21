@@ -1,0 +1,18 @@
+name: Hindi off-topic question about an election gets a polite decline in Hindi that steers back to homes
+description: "A customer asks who will win the election. A good agent politely says in Devanagari Hindi that it can only help with the business's homes, gives no opinion, and invites a question about them. A bad agent gives an opinion."
+needsNativeCheck: true
+kb:
+  - "Shanti Kunj Residency, Greater Noida West: 2BHK of 1050 sq ft starts at ₹58 lakh."
+turns:
+  - customer: "वैसे आपको क्या लगता है इस बार चुनाव कौन जीतेगा 😄"
+    mock:
+      extraction: { language: hi, intent: off_topic, fields: {}, question: null }
+      reply: "इस बारे में मैं कुछ नहीं कह सकता। मैं सिर्फ़ Shanti Kunj Residency के घरों के बारे में मदद कर सकता हूँ। क्या आप घर के बारे में कुछ पूछना चाहेंगे?"
+    expect:
+      extracted: { language: hi, intent: off_topic }
+      reply: { sent: true, matches: ["[\\u0900-\\u097F]{3}"], notContains: ["₹"] }
+      aiReplies: 1
+      handoff: null
+      mode: ai
+    mockOnly:
+      case: off_topic

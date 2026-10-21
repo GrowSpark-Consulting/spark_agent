@@ -1,0 +1,20 @@
+name: Hindi customer says another builder is cheaper and the agent neither compares nor runs the other builder down
+description: "The customer says a builder across the road offers a bigger flat for less. A good agent stays on this business in Devanagari Hindi, gives its own facts and invites a visit. A bad agent confirms the other price, offers to match it, or comments on the other builder."
+needsNativeCheck: true
+kb:
+  - "Shanti Kunj Residency, Greater Noida West: 2BHK of 1050 sq ft starts at ₹58 lakh."
+  - "Shanti Kunj Residency has a park, a gym, 24-hour security and a power backup."
+turns:
+  - customer: "सामने वाला बिल्डर यही 2BHK 52 लाख में दे रहा है। आप इतने महंगे क्यों हो?"
+    mock:
+      extraction: { language: hi, intent: question, fields: {}, question: "Another builder offers a 2BHK for 52 lakh, why are you more expensive?" }
+      reply: "दूसरे बिल्डर के बारे में मैं कुछ नहीं कह सकता। हमारे Shanti Kunj में 2BHK 1050 sq ft ₹58 लाख से शुरू है, साथ में पार्क, जिम, 24 घंटे सिक्योरिटी और पावर बैकअप है। क्या आप आकर खुद देखना चाहेंगे?"
+    expect:
+      extracted: { language: hi }
+      reply: { sent: true, matches: ["[\\u0900-\\u097F]{3}"], notContains: ["₹52 लाख", "52 लाख"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: answered_from_kb
+      reply: { contains: ["₹58 लाख"] }

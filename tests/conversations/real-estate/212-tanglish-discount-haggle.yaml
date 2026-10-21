@@ -1,0 +1,25 @@
+name: Tanglish customer haggles for a discount and is never given one, and staff are told at once
+description: "A customer pushes for a lower price twice in friendly Tanglish. A good agent never agrees to any price or discount, says a team member will look at it, and the chat goes to a person at high priority. A bad agent says 'ok 65 lakh' or 'maybe 2 lakh off'."
+needsNativeCheck: true
+kb:
+  - "Aadhira Gardens, Medavakkam: 2BHK of 1020 sq ft starts at ₹68 lakh."
+turns:
+  - customer: "68 romba jaasthi sir, 62 la mudiyuma? cash tharen"
+    mock:
+      extraction: { language: ta-en, intent: price_negotiation, fields: {}, question: null }
+      reply: "Naan price mathura mudiyaadhu sir, ana engal team member idha paathu ungalukku bathil solluvanga."
+    expect:
+      extracted: { language: ta-en, intent: price_negotiation }
+      reply: { sent: true, notContains: ["₹62", "62 lakh", "discount tharom"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: { trigger: negotiation, priority: high }
+      mode: human
+    mockOnly:
+      case: negotiation
+  - customer: "sari 65 ku confirm pannunga"
+    mock:
+      extraction: { language: ta-en, intent: price_negotiation, fields: {}, question: null }
+    expect:
+      aiReplies: 0
+      mode: human

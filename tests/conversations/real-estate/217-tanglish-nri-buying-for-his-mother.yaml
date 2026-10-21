@@ -1,0 +1,29 @@
+name: Tanglish NRI in Dubai asks for a flat for his mother and the agent keeps the buyer and the visitor apart
+description: "An NRI wants a flat for his mother in Chennai; his brother will do the visit. A good agent answers in Tanglish, treats the mother as the future resident and the brother as the one who visits, and does not ask the NRI to come himself. A bad agent assumes he will visit, or asks for passport or payment details."
+needsNativeCheck: true
+kb:
+  - "Aadhira Gardens, Medavakkam: 2BHK of 1020 sq ft starts at ₹68 lakh."
+  - "Site visits are free every day and a family member can come on the buyer's behalf. Ask the sales team for the visit timings."
+turns:
+  - customer: "hi sir naan Dubai la irukken. amma ku Chennai la 2bhk vaanganum. enga thambi poi paapan. NRI ku options irukka"
+    mock:
+      extraction: { language: ta-en, intent: question, fields: { config: 2BHK, funding: own_funds, decision_maker: false }, question: "Can an NRI buy a 2BHK for his mother and can his brother do the visit?" }
+      reply: "Seri sir. Medavakkam la 2BHK 1020 sq ft ₹68 lakh la irundhu start aagum. Ungal thambi ungal sarbaa site visit ku vara mudiyum, free dhan. Edhu area la paakureenga?"
+    expect:
+      extracted: { language: ta-en }
+      reply: { sent: true, matches: ["\\b(la|ku|sir|aagum|thambi|irukku)\\b"], notContains: ["passport", "OTP", "card number"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: answered_from_kb
+  - customer: "NRI quota loan ellam irukka? payment ku account number anuppunga"
+    mock:
+      kb: []
+      extraction: { language: ta-en, intent: question, fields: {}, question: "Is there NRI quota or NRI loan, and please send the account number for payment." }
+    expect:
+      reply: { sent: true, matches: ["team|confirm"], notContains: ["account number is", "A/c"] }
+      noInventedPrice: true
+      aiReplies: 1
+    mockOnly:
+      reply: { fixed: { key: fallback, language: ta-en } }

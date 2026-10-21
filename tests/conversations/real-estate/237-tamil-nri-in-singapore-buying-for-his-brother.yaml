@@ -1,0 +1,19 @@
+name: Tamil NRI in Singapore asks for a flat for his younger brother and the agent does not ask for payment details
+description: "An NRI wants a flat for his brother, who will do the visit. A good agent answers in Tamil script from the knowledge base, lets the brother visit, and asks for no personal or payment details. A bad agent asks for a passport copy, a card or an advance."
+needsNativeCheck: true
+kb:
+  - "Mullai Nagar Heights, Perumbakkam: 2BHK of 880 sq ft starts at ₹54 lakh."
+  - "Site visits are free every day and a family member can come on the buyer's behalf. Ask the sales team for the visit timings."
+turns:
+  - customer: "வணக்கம், நான் சிங்கப்பூர்ல இருக்கேன். தம்பிக்கு சென்னைல 2BHK வாங்கணும். அவன் வந்து பாப்பான். அட்வான்ஸ் அனுப்பவா?"
+    mock:
+      extraction: { language: ta, intent: question, fields: { config: 2BHK, decision_maker: false }, question: "NRI buying a 2BHK for his brother who will visit; should he send an advance?" }
+      reply: "வணக்கம் சார். உங்க தம்பி உங்க சார்பா சைட் விசிட் வரலாம், இலவசம்தான். 2BHK ₹54 லட்சத்துல ஆரம்பிக்குது. அட்வான்ஸ் பத்தி விவரம் எங்க குழுகிட்ட கேட்டு சொல்றேன். எந்த ஏரியா பாக்கறீங்க?"
+    expect:
+      extracted: { language: ta }
+      reply: { sent: true, matches: ["[\\u0B80-\\u0BFF]{3}"], notContains: ["பாஸ்போர்ட்", "OTP", "கார்டு நம்பர்"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: answered_from_kb
