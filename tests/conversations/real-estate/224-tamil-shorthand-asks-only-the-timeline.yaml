@@ -1,0 +1,39 @@
+name: Tamil shorthand with BHK, budget and area is read in full and only the missing timeline is asked
+description: "A customer types a note-style line with the type of home, budget and area but not when he wants to buy. A good agent reads all three, does not ask for them again, asks only for the timeline, in Tamil script, and once he answers offers real visit times. A bad agent asks for the budget or area again, or asks several things at once."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 5400000, attributes: { price_to: 7400000, areas: [Perumbakkam, Pallikaranai] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Mullai Nagar Heights, Perumbakkam: 2BHK of 880 sq ft starts at ₹54 lakh and 3BHK of 1210 sq ft starts at ₹74 lakh."
+turns:
+  - customer: "2BHK 60L பெரும்பாக்கம்"
+    mock:
+      extraction: { language: ta, intent: give_details, fields: { config: 2BHK, budget: 60L, location: Perumbakkam }, question: null }
+      reply: "சூப்பர்! பெரும்பாக்கத்துல 2BHK பாக்கலாம். எப்போ வாங்கலாம்னு இருக்கீங்க?"
+    expect:
+      extracted: { language: ta, intent: give_details }
+      reply: { sent: true, buttons: [], matches: ["[\\u0B80-\\u0BFF]{3}"] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      extracted: { fields: { config: 2BHK, budget: 60L, location: Perumbakkam } }
+      leadFields: { config: 2BHK, budget: 60L, location: Perumbakkam }
+      case: ask_details
+      reply: { notContains: ["பட்ஜெட்", "எந்த ஏரியா", "எவ்ளோ பட்ஜெட்"] }
+  - customer: "ஒரு 2 மாசத்துல"
+    mock:
+      extraction: { language: ta, intent: give_details, fields: { timeline: 0-3m }, question: null }
+      reply: "சரிங்க. ஞாயிறு 10:00 am, ஞாயிறு 3:00 pm இல்லனா திங்கள் 5:30 pm சைட் விசிட்டுக்கு இருக்கு. எது உங்களுக்கு வசதி?"
+    expect:
+      reply: { sent: true, buttons: [], matches: ["\\b10\\b", "\\b3\\b", "5[:.]30"] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: offer_slots
+      leadFields: { config: 2BHK, budget: 60L, location: Perumbakkam, timeline: 0-3m }
+      leadTemperature: hot

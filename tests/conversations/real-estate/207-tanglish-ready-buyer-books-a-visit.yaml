@@ -1,0 +1,38 @@
+name: Tanglish ready buyer is offered three real times, picks one in words and is booked, and staff are told once
+description: "A buyer with a loan already approved wants to see the flat this week. A good agent offers three real times in one plain Tanglish message, reads 'rendavadhu' as the second one and books it, and tells staff once about the hot lead. A bad agent invents a time, books a different one, or offers a list."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6800000, attributes: { price_to: 9200000, areas: [Medavakkam, Sholinganallur] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Aadhira Gardens, Medavakkam: 2BHK of 1020 sq ft starts at ₹68 lakh."
+turns:
+  - customer: "loan approve aayiduchu sir 80 lakh. 3 maasathula vaanganum, medavakkam la 2bhk paakanum. ippove visit book pannalaam"
+    mock:
+      extraction: { language: ta-en, intent: book, fields: { budget: 80L, funding: loan_approved, timeline: 0-3m, location: Medavakkam, config: 2BHK }, question: null }
+      reply: "Super sir! Sunday 10:00 am, Sunday 3:00 pm illa Monday 5:30 pm site visit ku free. Edhu ungalukku set aagum?"
+    expect:
+      reply: { sent: true, buttons: [], matches: ["\\b10(:00)?\\s?am\\b", "\\b3(:00)?\\s?pm\\b", "\\b5:30\\s?pm\\b"] }
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      hotLead: true
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: offer_slots
+      leadTemperature: hot
+  - customer: "rendavadhu ok"
+    mock:
+      extraction: { language: ta-en, intent: give_details, fields: {}, question: null }
+      reply: "Done sir! Sunday 3:00 pm ku ungal site visit book aayiduchu. Santhikalam!"
+    expect:
+      reply: { sent: true, buttons: [], matches: ["\\b3(:00)?\\s?pm\\b"] }
+      aiReplies: 1
+      handoff: null
+      hotLead: false
+      leadStage: booked
+      calendar: { confirmed: ["2026-10-11T09:30:00.000Z"] }
+    mockOnly:
+      case: booked

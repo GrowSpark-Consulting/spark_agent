@@ -1,0 +1,42 @@
+name: Tamil maintenance question the knowledge base cannot answer gets 'team will confirm', and a later miss after an answered turn does not hand over
+description: "The knowledge base has no maintenance figure. A good agent says in Tamil that the team will confirm and invents no amount. A miss, then an answered question, then another miss is not 'two misses in a row', so no person takes over. A bad agent makes up a monthly maintenance charge, or hands over too early."
+needsNativeCheck: true
+kb:
+  - "Mullai Nagar Heights, Perumbakkam: 2BHK of 880 sq ft starts at ₹54 lakh."
+turns:
+  - customer: "மெயின்டனன்ஸ் மாசம் எவ்ளோ ஆகும் சார்"
+    mock:
+      kb: []
+      extraction: { language: ta, intent: question, fields: {}, question: "What is the monthly maintenance charge?" }
+    expect:
+      extracted: { language: ta }
+      reply: { sent: true, matches: ["[\\u0B80-\\u0BFF]{3}"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+      mode: ai
+    mockOnly:
+      reply: { fixed: { key: fallback, language: ta } }
+  - customer: "சரி 2BHK விலை சொல்லுங்க"
+    mock:
+      extraction: { language: ta, intent: question, fields: { config: 2BHK }, question: "What is the price of a 2BHK?" }
+      reply: "2BHK ₹54 லட்சத்துல ஆரம்பிக்குது சார்."
+    expect:
+      reply: { sent: true, matches: ["[\\u0B80-\\u0BFF]{3}", "54"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: answered_from_kb
+  - customer: "பார்க்கிங் சார்ஜ் தனியா வாங்குவீங்களா?"
+    mock:
+      kb: []
+      extraction: { language: ta, intent: question, fields: {}, question: "Is there a separate parking charge?" }
+    expect:
+      reply: { sent: true, matches: ["[\\u0B80-\\u0BFF]{3}"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+      mode: ai
+    mockOnly:
+      reply: { fixed: { key: fallback, language: ta } }

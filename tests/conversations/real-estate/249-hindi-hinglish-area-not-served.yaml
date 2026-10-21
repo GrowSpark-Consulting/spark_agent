@@ -1,0 +1,23 @@
+name: Hinglish customer asks for Gurgaon where the business has no sites and is told the areas it does have, with no visit offered
+description: "A Roman-letter Hindi customer wants Gurgaon. The business has Greater Noida West and Yamuna Expressway only. A good agent lists the areas it has and offers no time. KNOWN GAP: this line is fixed text, and the fixed Hindi line is in Devanagari, not Roman letters, so it does not match the customer's script; the chat checks the behaviour (areas listed, nothing offered) and not the script. A bad agent offers a visit in Gurgaon."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 5800000, attributes: { price_to: 8800000, areas: [Greater Noida West, Yamuna Expressway] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+turns:
+  - customer: "gurgaon me 2bhk chahiye bhai, 75 lakh, 3 mahine me lena hai"
+    mock:
+      extraction: { language: hi, intent: give_details, fields: { location: Gurgaon, budget: 75L, timeline: 0-3m, config: 2BHK }, question: null }
+    expect:
+      extracted: { language: hi }
+      reply: { sent: true, buttons: [], contains: ["Greater Noida West, Yamuna Expressway"], notContains: ["10:00 am", "3:00 pm", "5:30 pm"] }
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      calendar: { confirmed: [] }
+      areaReminder: false
+    mockOnly:
+      case: area_options
+      reply: { contains: ["फ़िलहाल Gurgaon में हमारी कोई साइट नहीं है"] }

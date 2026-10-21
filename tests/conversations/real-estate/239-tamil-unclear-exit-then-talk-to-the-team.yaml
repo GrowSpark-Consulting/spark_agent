@@ -1,0 +1,29 @@
+name: Tamil vague 'enough' message gets the exit question once with two buttons, and a tap on Talk to the team hands over
+description: "An impatient customer writes something that could mean stop or could mean he has heard enough. A good agent asks once with two buttons in Tamil, does not opt him out, and a tap on the team button hands the chat to a person at high priority. A bad agent opts out on a guess or keeps selling."
+needsNativeCheck: true
+kb:
+  - "Mullai Nagar Heights, Perumbakkam: 2BHK of 880 sq ft starts at ₹54 lakh."
+turns:
+  - customer: "போதும் சார் விடுங்க"
+    mock:
+      extraction: { language: ta, intent: unclear_exit, fields: {}, question: null, confidence: 0.65 }
+    expect:
+      extracted: { language: ta }
+      reply: { sent: true, buttons: ["குழுவிடம் பேச", "தொடருங்கள்"] }
+      optedOut: false
+      handoff: null
+      aiReplies: 1
+    mockOnly:
+      case: exit_unclear
+  - customer: "குழுவிடம் பேச"
+    tap: "exit:talk"
+    mock:
+      extraction: { language: ta, intent: greeting, fields: {}, question: null, confidence: 0.4 }
+    expect:
+      handoff: { trigger: asked_human, priority: high }
+      mode: human
+      aiReplies: 1
+      optedOut: false
+    mockOnly:
+      reply: { fixed: { key: handoff, language: ta } }
+      case: exit_question_talk

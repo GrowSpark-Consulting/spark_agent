@@ -1,0 +1,35 @@
+name: Tamil customer comes back after days of silence and switches from a plot to a flat, and the new choice wins
+description: "A customer first asks about a plot, goes quiet, then returns and says he now wants a 2BHK flat. A good agent drops the plot, uses the new type, keeps the budget and area already given, and asks only for what is still missing. A bad agent keeps talking about the plot or asks for the budget again."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 5400000, attributes: { price_to: 7400000, areas: [Perumbakkam, Pallikaranai] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Mullai Nagar Heights, Perumbakkam: 2BHK of 880 sq ft starts at ₹54 lakh and 3BHK of 1210 sq ft starts at ₹74 lakh."
+turns:
+  - customer: "பள்ளிக்கரணைல ஒரு ப்ளாட் (மனை) கிடைக்குமா? 60 லட்சம் பட்ஜெட்"
+    mock:
+      extraction: { language: ta, intent: give_details, fields: { config: Plot, location: Pallikaranai, budget: 60L }, question: null }
+      reply: "வணக்கம் சார்! பள்ளிக்கரணைல பாக்கலாம். எப்போ வாங்கலாம்னு இருக்கீங்க?"
+    expect:
+      extracted: { language: ta }
+      reply: { sent: true, buttons: [], matches: ["[\\u0B80-\\u0BFF]{3}"] }
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: ask_details
+      leadFields: { config: Plot, location: Pallikaranai, budget: 60L }
+  - customer: "சார் பிசியா இருந்தேன். யோசிச்சு பாத்தேன், ப்ளாட் வேணாம், 2BHK ஃப்ளாட்டே போதும். ஒரு மாசத்துல முடிக்கணும்"
+    mock:
+      extraction: { language: ta, intent: give_details, fields: { config: 2BHK, timeline: 0-3m }, question: null }
+      reply: "சரிங்க சார், 2BHK-க்கே பாக்கலாம். ஞாயிறு 10:00 am, ஞாயிறு 3:00 pm இல்லனா திங்கள் 5:30 pm சைட் விசிட்டுக்கு இருக்கு. எது வசதி?"
+    expect:
+      reply: { sent: true, buttons: [], matches: ["\\b10\\b", "\\b3\\b", "5[:.]30"] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: offer_slots
+      leadFields: { config: 2BHK, location: Pallikaranai, budget: 60L, timeline: 0-3m }

@@ -1,0 +1,26 @@
+name: Tanglish budget far below the cheapest home is told kindly, with no visit offered
+description: "A student with 25 lakh asks for a 2BHK. The cheapest home is 68 lakh. A good agent is kind, says there is nothing that fits, offers no visit, and invents no cheaper option. A bad agent offers a visit anyway, or makes up a cheaper plot or a discount."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6800000, attributes: { price_to: 9200000, areas: [Medavakkam, Sholinganallur] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Aadhira Gardens, Medavakkam: 2BHK of 1020 sq ft starts at ₹68 lakh."
+turns:
+  - customer: "bro 25 lakh budget than, 2bhk medavakkam la kedaikuma. 6 months la vaangidalaam"
+    mock:
+      extraction: { language: ta-en, intent: give_details, fields: { config: 2BHK, budget: 25L, location: Medavakkam, timeline: 3-6m }, question: null }
+      reply: "Kekkaradhuku nandri. Sorry, ippo ungal budget ku porundhura veedu engalidam illa. Vera edhavadhu help venum na sollunga."
+    expect:
+      extracted: { language: ta-en }
+      reply: { sent: true, buttons: [], notContains: ["10:00 am", "3:00 pm", "5:30 pm"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: disqualified
+      leadTemperature: disqualified
+      leadScore: 0

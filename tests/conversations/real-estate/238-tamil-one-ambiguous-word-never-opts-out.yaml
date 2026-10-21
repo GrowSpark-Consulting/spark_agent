@@ -1,0 +1,26 @@
+name: Tamil single ambiguous word 'இல்ல' is not read as an opt-out and the chat carries on
+description: "After a price answer the agent asks if the customer would like to visit, and he replies with one word that only means 'no' to that question. A good agent never opts him out on a single ambiguous word; it carries on politely (or at most asks the exit question). A bad agent opts him out, hands him to staff, or goes quiet."
+needsNativeCheck: true
+kb:
+  - "Mullai Nagar Heights, Perumbakkam: 2BHK of 880 sq ft starts at ₹54 lakh."
+turns:
+  - customer: "2BHK விலை என்ன"
+    mock:
+      extraction: { language: ta, intent: question, fields: { config: 2BHK }, question: "What is the price of a 2BHK?" }
+      reply: "2BHK 880 சதுர அடி, ₹54 லட்சத்துல ஆரம்பிக்குது. நேர்ல வந்து பாக்கறீங்களா?"
+    expect:
+      reply: { sent: true, matches: ["[\\u0B80-\\u0BFF]{3}", "54"] }
+      noInventedPrice: true
+      aiReplies: 1
+    mockOnly:
+      case: answered_from_kb
+  - customer: "இல்ல"
+    mock:
+      extraction: { language: ta, intent: unclear_exit, fields: {}, question: null, confidence: 0.3 }
+      reply: "பரவால்ல சார், அவசரம் ஒண்ணுமில்ல. வீடு பத்தி வேற ஏதாவது தெரிஞ்சுக்கணுமா?"
+    expect:
+      reply: { sent: true }
+      optedOut: false
+      handoff: null
+      mode: ai
+      aiReplies: 1

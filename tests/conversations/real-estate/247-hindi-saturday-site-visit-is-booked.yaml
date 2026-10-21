@@ -1,0 +1,39 @@
+name: Hindi ready buyer wants a visit this weekend, is offered three real times, picks one in his own words and is booked
+description: "A buyer with a clear plan asks for a visit. A good agent offers the three real times in one plain Devanagari Hindi message, reads '3 pm वाला' as the second one, books it, and tells staff once the lead is hot. A bad agent invents a time or books the wrong one."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 5800000, attributes: { price_to: 8800000, areas: [Greater Noida West, Yamuna Expressway] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Shanti Kunj Residency, Greater Noida West: 2BHK of 1050 sq ft starts at ₹58 lakh."
+turns:
+  - customer: "मुझे 2BHK चाहिए ग्रेटर नोएडा वेस्ट में, बजट 70 लाख, 2 महीने में लेना है। इसी वीकेंड साइट देखनी है"
+    mock:
+      extraction: { language: hi, intent: book, fields: { config: 2BHK, location: Greater Noida West, budget: 70L, timeline: 0-3m }, question: null }
+      reply: "बढ़िया! साइट विज़िट के लिए रविवार 10:00 am, रविवार 3:00 pm या सोमवार 5:30 pm खाली है। आपके लिए कौन सा ठीक रहेगा?"
+    expect:
+      extracted: { language: hi }
+      reply: { sent: true, buttons: [], matches: ["[\\u0900-\\u097F]{3}", "\\b10\\b", "\\b3\\b", "5[:.]30"] }
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      hotLead: true
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: offer_slots
+      leadTemperature: hot
+  - customer: "3 pm वाला ठीक है"
+    mock:
+      extraction: { language: hi, intent: give_details, fields: {}, question: null }
+      reply: "हो गया! आपकी साइट विज़िट रविवार 3:00 pm के लिए बुक हो गई है। मिलते हैं!"
+    expect:
+      reply: { sent: true, buttons: [], matches: ["\\b3\\b"] }
+      aiReplies: 1
+      handoff: null
+      hotLead: false
+      leadStage: booked
+      calendar: { confirmed: ["2026-10-11T09:30:00.000Z"] }
+    mockOnly:
+      case: booked

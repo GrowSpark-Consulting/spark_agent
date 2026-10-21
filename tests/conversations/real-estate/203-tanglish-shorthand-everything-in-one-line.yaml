@@ -1,0 +1,27 @@
+name: Tanglish shorthand with BHK, budget, area and timeline in one line is read in full and nothing is asked again
+description: "A busy customer types like a note to himself. A good agent reads all four details from the one line, does not ask for any of them again, and moves on to offering real visit times in a plain Tanglish message. A bad agent asks for the budget or area again, or ignores the shorthand."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 6800000, attributes: { price_to: 9200000, areas: [Medavakkam, Sholinganallur] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Aadhira Gardens, Medavakkam: 2BHK of 1020 sq ft starts at ₹68 lakh and 3BHK of 1380 sq ft starts at ₹92 lakh."
+turns:
+  - customer: "2bhk 75L medavakkam 3 months la vaanganum"
+    mock:
+      extraction: { language: ta-en, intent: give_details, fields: { config: 2BHK, budget: 75L, location: Medavakkam, timeline: 0-3m }, question: null }
+      reply: "Super sir, 2BHK Medavakkam match aagudhu. Site visit ku Sunday 10:00 am, Sunday 3:00 pm illa Monday 5:30 pm free. Edhu ungalukku set aagum?"
+    expect:
+      extracted: { language: ta-en, intent: give_details }
+      reply: { sent: true, buttons: [], matches: ["\\b10(:00)?\\s?am\\b", "\\b3(:00)?\\s?pm\\b", "\\b5:30\\s?pm\\b"], notContains: ["budget evlo", "which area"] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      extracted: { fields: { config: 2BHK, budget: 75L, location: Medavakkam, timeline: 0-3m } }
+      leadFields: { config: 2BHK, budget: 75L, location: Medavakkam, timeline: 0-3m }
+      case: offer_slots
+      leadTemperature: hot
+      leadScore: 75

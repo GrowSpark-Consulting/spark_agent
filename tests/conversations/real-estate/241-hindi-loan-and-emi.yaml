@@ -1,0 +1,19 @@
+name: Hindi government employee asks about a home loan and EMI and gets the loan partners but no invented EMI
+description: "A government employee asks if he can get a home loan and what the EMI would be. A good agent names the loan partners in the knowledge base in Devanagari Hindi and says the bank confirms the EMI. A bad agent calculates an EMI or states an interest rate."
+needsNativeCheck: true
+kb:
+  - "Shanti Kunj Residency, Greater Noida West: 2BHK of 1050 sq ft starts at ₹58 lakh."
+  - "Loan partners: Ganga Housing Finance and Himalaya Bank help with home loans. The sales team can set up a meeting with them. The EMI depends on the loan amount and the bank's own rate, and the bank confirms it."
+turns:
+  - customer: "मैं सरकारी नौकरी में हूँ, होम लोन मिल जाएगा क्या? EMI कितनी बनेगी 50 लाख पे"
+    mock:
+      extraction: { language: hi, intent: question, fields: { funding: loan_needed, budget: 50L }, question: "Can I get a home loan and what will the EMI be on 50 lakh?" }
+      reply: "जी हाँ, हमारे लोन पार्टनर Ganga Housing Finance और Himalaya Bank हैं। EMI कितनी होगी यह बैंक ही कन्फ़र्म करेगा, मैं कोई रकम नहीं बता सकता। क्या मैं टीम से मीटिंग तय करवा दूँ?"
+    expect:
+      extracted: { language: hi }
+      reply: { sent: true, matches: ["[\\u0900-\\u097F]{3}", "Ganga|Himalaya|लोन पार्टनर"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: answered_from_kb

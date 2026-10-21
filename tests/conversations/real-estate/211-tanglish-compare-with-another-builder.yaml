@@ -1,0 +1,30 @@
+name: Tanglish customer compares with another builder and the agent neither compares nor runs the other builder down
+description: "The customer says another builder is cheaper. A good agent stays on this business, gives its own price from the knowledge base and offers a visit; it does not guess the other builder's price or say anything bad about them. A bad agent agrees the price is higher, offers a cut, or comments on the other builder."
+needsNativeCheck: true
+kb:
+  - "Aadhira Gardens, Medavakkam: 2BHK of 1020 sq ft starts at ₹68 lakh."
+  - "Aadhira Gardens has a clubhouse, a kids play area and a gym."
+turns:
+  - customer: "Sunrise Builders la same area 2bhk 60 lakh ku tharaanga. neenga yen jaasthi"
+    mock:
+      extraction: { language: ta-en, intent: question, fields: { location: Medavakkam, config: 2BHK }, question: "Another builder offers a 2BHK for 60 lakh, why is yours higher?" }
+      reply: "Matra builder pathi enakku theriyaadhu sir. Engal Aadhira Gardens la 2BHK 1020 sq ft ₹68 lakh la irundhu start aagum, clubhouse, kids play area, gym irukku. Neenga vandhu paathu compare panna virumbureengala?"
+    expect:
+      extracted: { language: ta-en }
+      reply: { sent: true, matches: ["\\b(la|ku|irukku|sir|neenga|aagum)\\b"], notContains: ["₹60 lakh", "60 lakh"] }
+      noInventedPrice: true
+      aiReplies: 1
+    mockOnly:
+      case: answered_from_kb
+      reply: { contains: ["₹68 lakh"] }
+  - customer: "avanga quality kammi nu solraanga, unmaiya"
+    mock:
+      extraction: { language: ta-en, intent: question, fields: {}, question: "Is it true the other builder has lower quality?" }
+      reply: "Matra builder pathi naan edhuvum solla mudiyaadhu sir. Engal project pathi edhavadhu kekkanum na sollunga, naan help panren."
+    expect:
+      reply: { sent: true }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: answered_from_kb

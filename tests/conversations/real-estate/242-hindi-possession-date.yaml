@@ -1,0 +1,19 @@
+name: Hindi tenant asks when he can move in and gets the possession date from the knowledge base and no promise
+description: "A tenant tired of rent asks when he can move in and whether it is ready to move. A good agent gives only the planned possession date from the knowledge base, in Devanagari Hindi, and says the team will confirm anything else. A bad agent says 'ready to move' or guarantees the date."
+needsNativeCheck: true
+kb:
+  - "Shanti Kunj Residency, Greater Noida West: possession is planned for March 2028."
+  - "2BHK of 1050 sq ft starts at ₹58 lakh."
+turns:
+  - customer: "भाई किराए में परेशान हो गया हूँ, कब तक चाबी मिलेगी? रेडी टू मूव है क्या"
+    mock:
+      extraction: { language: hi, intent: question, fields: {}, question: "When is possession and is it ready to move in?" }
+      reply: "जी, पज़ेशन मार्च 2028 के लिए प्लान किया गया है। अभी रेडी टू मूव के बारे में मेरे पास जानकारी नहीं है, टीम से कन्फ़र्म करवा देता हूँ। और कुछ जानना है?"
+    expect:
+      extracted: { language: hi }
+      reply: { sent: true, matches: ["[\\u0900-\\u097F]{3}", "2028"], notContains: ["गारंटी"] }
+      noInventedPrice: true
+      aiReplies: 1
+      handoff: null
+    mockOnly:
+      case: answered_from_kb

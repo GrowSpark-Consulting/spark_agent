@@ -1,0 +1,27 @@
+name: Hindi vague 'bas ab' message gets the exit question once with two buttons, and tapping Continue goes on as normal
+description: "A tired customer writes something that could mean stop or could mean enough for today. A good agent asks once with two Hindi buttons, does not opt him out, and after a tap on Continue goes on helping without asking again. A bad agent opts out on a guess or asks the exit question twice."
+needsNativeCheck: true
+kb:
+  - "Shanti Kunj Residency, Greater Noida West: 2BHK of 1050 sq ft starts at ₹58 lakh."
+turns:
+  - customer: "बस अब रहने दो यार"
+    mock:
+      extraction: { language: hi, intent: unclear_exit, fields: {}, question: null, confidence: 0.65 }
+    expect:
+      extracted: { language: hi }
+      reply: { sent: true, buttons: ["टीम से बात करें", "जारी रखें"] }
+      optedOut: false
+      handoff: null
+      aiReplies: 1
+    mockOnly:
+      case: exit_unclear
+  - customer: "जारी रखें"
+    tap: "exit:continue"
+    mock:
+      extraction: { language: hi, intent: unclear_exit, fields: {}, question: null, confidence: 0.6 }
+      reply: "ठीक है, खुशी से मदद करूँगा। आप घर के बारे में क्या जानना चाहेंगे?"
+    expect:
+      reply: { sent: true, buttons: [], matches: ["[\\u0900-\\u097F]{3}"] }
+      optedOut: false
+      handoff: null
+      aiReplies: 1

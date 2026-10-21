@@ -1,0 +1,24 @@
+name: Tamil customer asks for Anna Nagar where the business has no sites and is told the areas it does have, in Tamil
+description: "The customer wants Anna Nagar. The business only has Perumbakkam and Pallikaranai. A good agent answers with the fixed Tamil line listing the areas it has and offers no time. A bad agent offers a visit in Anna Nagar or says something is coming there."
+needsNativeCheck: true
+contact: { language: ta }
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 5400000, attributes: { price_to: 7400000, areas: [Perumbakkam, Pallikaranai] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+turns:
+  - customer: "அண்ணா நகர்ல 3BHK வேணும் சார், 70 லட்சம், 3 மாசத்துல"
+    mock:
+      extraction: { language: ta, intent: give_details, fields: { config: 3BHK, location: "அண்ணா நகர்", budget: 70L, timeline: 0-3m }, question: null }
+    expect:
+      extracted: { language: ta }
+      reply: { sent: true, buttons: [], matches: ["[\\u0B80-\\u0BFF]{3}", "Perumbakkam"], notContains: ["10:00 am", "3:00 pm", "5:30 pm"] }
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      calendar: { confirmed: [] }
+      areaReminder: false
+    mockOnly:
+      case: area_options
+      reply: { contains: ["அண்ணா நகர் பகுதியில் தற்போது எங்களிடம் இடங்கள் இல்லை", "Perumbakkam, Pallikaranai"] }
