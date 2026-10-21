@@ -1,0 +1,20 @@
+name: Tanglish 'neenga bot ah? oru aal kitta pesanum' still goes to a person at high priority
+description: "The customer asks what they are talking to AND asks for a person, in Tanglish. The fix for 'neenga human aa illa robot aa?' (chat 213: answered honestly, no handover) must not swing too far. A good agent reads this as a request for a person: intent talk_to_human, the handover line in Tanglish, a high-priority handover, the chat goes to staff. A bad agent only says it is a virtual assistant and keeps the chat."
+needsNativeCheck: true
+kb:
+  - "Aadhira Gardens, Medavakkam: 2BHK of 1020 sq ft starts at ₹68 lakh."
+turns:
+  - customer: "neenga bot ah? oru aal kitta pesanum"
+    mock:
+      extraction: { language: ta-en, intent: talk_to_human, fields: {}, question: null, asksIfHuman: true, confidence: 0.9 }
+    expect:
+      extracted: { language: ta-en, intent: talk_to_human }
+      handoff: { trigger: asked_human, priority: high }
+      mode: human
+      aiReplies: 1
+      optedOut: false
+      reply: { sent: true }
+    mockOnly:
+      extracted: { asksIfHuman: true }
+      case: asked_human
+      reply: { fixed: { key: handoff, language: ta-en } }

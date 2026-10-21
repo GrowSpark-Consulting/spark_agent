@@ -137,7 +137,7 @@ describe("a message that is understood", () => {
     await understandTurn(runner().step, w.turn, w.deps);
     expect(w.complete).toHaveBeenCalledOnce();
     const request = w.complete.mock.calls[0][0];
-    expect(request).toMatchObject({ role: "extraction", tenantId: A, conversationId: CONV, prompt: { name: "extraction", version: 3 } });
+    expect(request).toMatchObject({ role: "extraction", tenantId: A, conversationId: CONV, prompt: { name: "extraction", version: 4 } });
     const system = request.system.map((b) => b.text).join("\n");
     for (const key of ["budget", "area", "size", "timeline", "party", "notes"]) expect(system).toContain(`"${key}"`);
     const user = request.messages[0].content;

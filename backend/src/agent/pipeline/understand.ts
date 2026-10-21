@@ -4,7 +4,7 @@ import type { KbMatch } from "../../kb/retrieve";
 import type { LlmClient, LlmMessage } from "../llm/anthropic";
 import { LlmError } from "../llm/anthropic";
 import { PackError, resolvePack } from "../packs/load";
-import { buildExtractionMessages, buildExtractionSystem, EXTRACTION_PROMPT } from "../prompts/extraction_v3";
+import { buildExtractionMessages, buildExtractionSystem, EXTRACTION_PROMPT } from "../prompts/extraction_v4";
 import { coverageRule, normaliseArea, readCoverage } from "../scoring/coverage";
 import { qualify, type AskField, type Qualification } from "../scoring/qualify";
 import { buildReferences, type CatalogRow } from "../scoring/references";

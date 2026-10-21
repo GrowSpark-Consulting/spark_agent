@@ -1,0 +1,19 @@
+name: English 'are you a bot? I'd rather talk to a real person' still goes to a person at high priority
+description: "The customer asks what they are talking to AND asks for a person. The fix for 'are you a bot?' (chat 04: answered honestly, no handover) must not swing too far. A good agent reads this as a request for a person: intent talk_to_human, the handover line, a high-priority handover, the chat goes to staff. A bad agent only answers 'I am a virtual assistant' and keeps the chat, ignoring the request for a person."
+kb:
+  - "2BHK of 950 sq ft in Velachery starts at ₹78 lakh."
+turns:
+  - customer: "are you a bot? I'd rather talk to a real person"
+    mock:
+      extraction: { language: en, intent: talk_to_human, fields: {}, question: null, asksIfHuman: true, confidence: 0.9 }
+    expect:
+      extracted: { intent: talk_to_human }
+      handoff: { trigger: asked_human, priority: high }
+      mode: human
+      aiReplies: 1
+      optedOut: false
+      reply: { sent: true }
+    mockOnly:
+      extracted: { asksIfHuman: true }
+      case: asked_human
+      reply: { fixed: { key: handoff, language: en } }
