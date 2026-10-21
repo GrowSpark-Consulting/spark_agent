@@ -1,0 +1,26 @@
+name: Hindi budget range '५० से ६० लाख' in Devanagari digits is read as 50 to 60 lakh and real times are offered
+description: "The customer writes the range in Devanagari digits, and it reaches the scoring code as text. A good agent reads 50 to 60 lakh (the unit is shared by both numbers), sees it overlaps the business's price range, and offers three real times. A bad agent reads the digits as nothing or as rupees and closes the chat. The mock extraction gives the amount as text so the reader in scoring/amount.ts is really used."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 5800000, attributes: { price_to: 8800000, areas: [Greater Noida West, Yamuna Expressway] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Shanti Kunj Residency, Greater Noida West: 2BHK of 1050 sq ft starts at ₹58 lakh."
+turns:
+  - customer: "2BHK ग्रेटर नोएडा वेस्ट, बजट ५० से ६० लाख, ३ महीने में लेना है। विज़िट करवा दीजिए"
+    mock:
+      extraction: { language: hi, intent: book, fields: { config: 2BHK, location: Greater Noida West, budget: "५० से ६० लाख", timeline: 0-3m }, question: null }
+      reply: "जी ज़रूर! साइट विज़िट के लिए रविवार 10:00 am, रविवार 3:00 pm या सोमवार 5:30 pm खाली है। कौन सा समय ठीक रहेगा?"
+    expect:
+      extracted: { language: hi }
+      reply: { sent: true, buttons: [], matches: ["[\\u0900-\\u097F]{3}", "\\b10\\b", "\\b3\\b", "5[:.]30"] }
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: offer_slots
+      leadFields: { budget: "५० से ६० लाख" }
+      leadTemperature: hot

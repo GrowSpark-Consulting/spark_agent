@@ -1,0 +1,26 @@
+name: Tamil budget written as '1 கோடி' for a 3BHK is read as one crore, not one rupee, and real times are offered
+description: "The budget reaches the scoring code as the text '1 கோடி'. A good agent reads one crore, which is inside the business's price range for a 3BHK, and offers three real times in a plain Tamil message. A bad agent reads it as 1 rupee, decides it is below the cheapest home, and closes the chat. The mock extraction gives the amount as text so the reader in scoring/amount.ts is really used."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 5400000, attributes: { price_to: 12000000, areas: [Perumbakkam, Pallikaranai] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Mullai Nagar Heights, Perumbakkam: 2BHK of 880 sq ft starts at ₹54 lakh and 3BHK of 1210 sq ft starts at ₹74 lakh."
+turns:
+  - customer: "சார் 3BHK வேணும், பள்ளிக்கரணைல. 1 கோடி வரைக்கும் போவேன். 3 மாசத்துல முடிக்கணும். வந்து பாக்கலாமா"
+    mock:
+      extraction: { language: ta, intent: book, fields: { config: 3BHK, location: Pallikaranai, budget: "1 கோடி", timeline: 0-3m }, question: null }
+      reply: "நிச்சயமா சார்! ஞாயிறு 10:00 am, ஞாயிறு 3:00 pm இல்லனா திங்கள் 5:30 pm சைட் விசிட்டுக்கு இருக்கு. எது வசதி?"
+    expect:
+      extracted: { language: ta }
+      reply: { sent: true, buttons: [], matches: ["[\\u0B80-\\u0BFF]{3}", "\\b10\\b", "\\b3\\b", "5[:.]30"] }
+      aiReplies: 1
+      handoff: null
+      mode: ai
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: offer_slots
+      leadFields: { budget: "1 கோடி" }
+      leadTemperature: hot
