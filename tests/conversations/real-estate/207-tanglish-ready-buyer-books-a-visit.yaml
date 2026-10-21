@@ -14,7 +14,7 @@ turns:
       extraction: { language: ta-en, intent: book, fields: { budget: 80L, funding: loan_approved, timeline: 0-3m, location: Medavakkam, config: 2BHK }, question: null }
       reply: "Super sir! Sunday 10:00 am, Sunday 3:00 pm illa Monday 5:30 pm site visit ku free. Edhu ungalukku set aagum?"
     expect:
-      reply: { sent: true, buttons: [], matches: ["\\b10(:00)?\\s?am\\b", "\\b3(:00)?\\s?pm\\b", "\\b5:30\\s?pm\\b"] }
+      reply: { sent: true, buttons: [], matches: ["\\b10(:00)?\\s?am\\b", "\\b3(:00)?\\s?pm\\b", "\\b5:30\\s?pm\\b"], notContains: ["team kitta soll"] }
       aiReplies: 1
       handoff: null
       mode: ai
@@ -28,7 +28,7 @@ turns:
       extraction: { language: ta-en, intent: give_details, fields: {}, question: null }
       reply: "Done sir! Sunday 3:00 pm ku ungal site visit book aayiduchu. Santhikalam!"
     expect:
-      reply: { sent: true, buttons: [], matches: ["\\b3(:00)?\\s?pm\\b"] }
+      reply: { sent: true, buttons: [], matches: ["\\b3(:00)?\\s?pm\\b"], notContains: ["team kitta soll"] }
       aiReplies: 1
       handoff: null
       hotLead: false

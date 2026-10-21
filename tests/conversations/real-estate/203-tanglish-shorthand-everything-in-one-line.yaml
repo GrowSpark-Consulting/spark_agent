@@ -15,7 +15,7 @@ turns:
       reply: "Super sir, 2BHK Medavakkam match aagudhu. Site visit ku Sunday 10:00 am, Sunday 3:00 pm illa Monday 5:30 pm free. Edhu ungalukku set aagum?"
     expect:
       extracted: { language: ta-en, intent: give_details }
-      reply: { sent: true, buttons: [], matches: ["\\b10(:00)?\\s?am\\b", "\\b3(:00)?\\s?pm\\b", "\\b5:30\\s?pm\\b"], notContains: ["budget evlo", "which area"] }
+      reply: { sent: true, buttons: [], matches: ["\\b10(:00)?\\s?am\\b", "\\b3(:00)?\\s?pm\\b", "\\b5:30\\s?pm\\b"], notContains: ["budget evlo", "which area", "team kitta soll"] }
       aiReplies: 1
       handoff: null
       calendar: { confirmed: [] }

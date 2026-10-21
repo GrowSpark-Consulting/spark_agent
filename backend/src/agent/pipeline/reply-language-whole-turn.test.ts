@@ -52,7 +52,7 @@ describe("the language line of the reply prompt", () => {
 
   it("a high-confidence 'other' (Telugu) still gets the line for another language", async () => {
     const content = await replyPrompt("హలో, 2BHK ధర ఎంత?", "other", 0.9);
-    expect(content).toContain("The customer writes in: a language other than English: reply in that language.");
+    expect(content).toContain("The customer writes in: a language other than English: reply in that language and in the script of the customer's latest message.");
   });
 
   it.each([
