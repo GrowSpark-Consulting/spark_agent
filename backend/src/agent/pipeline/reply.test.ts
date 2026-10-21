@@ -145,7 +145,7 @@ describe("an answer from the knowledge base", () => {
     const w = world({ agentSettings: { persona: "Maya", tone: "formal" } });
     await replyTurn(runner().step, w.turn, understood(found, { language: "ta-en" }), Date.now(), w.deps);
     const request = w.complete.mock.calls[0][0];
-    expect(request).toMatchObject({ role: "reply", tenantId: A, conversationId: CONV, prompt: { name: "reply", version: 3 } });
+    expect(request).toMatchObject({ role: "reply", tenantId: A, conversationId: CONV, prompt: { name: "reply", version: 4 } });
     const system = request.system.map((b) => b.text).join("\n");
     expect(system).toContain("Skyline Homes");
     expect(system).toContain("Maya");
@@ -195,6 +195,16 @@ describe("the post-check", () => {
     expect(second.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
     expect(second[2].content).toMatch(/amounts, dates and times/);
     expect(sentText(w)).toBe("A 2BHK starts at ₹78 lakh.");
+  });
+
+  it("the rewrite message names the likeliest cause: an amount the CUSTOMER wrote (their budget) repeated in the reply", async () => {
+    const w = world({ script: ["A 2BHK starts at ₹65 lakh.", "A 2BHK starts at ₹78 lakh."] });
+    await replyTurn(runner().step, w.turn, understood(found), Date.now(), w.deps);
+    const correction = w.complete.mock.calls[1][0].messages[2].content;
+    expect(correction).toMatch(/Do not repeat or mention any amount of money the customer wrote/);
+    expect(correction).toMatch(/budget or a price they quoted/);
+    expect(correction).toMatch(/amounts, dates and times that are in <facts>/);
+    expect(correction).toMatch(/under 600 characters/);
   });
 
   it("sends exactly 'Let me confirm that with the team' when the second reply is no better, and never asks a third time", async () => {

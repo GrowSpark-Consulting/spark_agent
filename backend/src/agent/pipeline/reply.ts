@@ -13,7 +13,7 @@ import { stripUnsafeCharacters } from "../../lib/text";
 import type { NotifyPayload, SendOutcome } from "../../notify/send";
 import type { LlmClient, LlmMessage } from "../llm/anthropic";
 import { LlmError } from "../llm/anthropic";
-import { buildReplyMessages, buildReplySystem, REPLY_PROMPT } from "../prompts/reply_v3";
+import { buildReplyMessages, buildReplySystem, REPLY_PROMPT } from "../prompts/reply_v4";
 import { mentionsArea, normaliseArea } from "../scoring/coverage";
 import { areaText, consentNotice, EXIT_BUTTON_IDS, exitQuestionButtons, fixedText, textLanguage } from "./fixed-texts";
 import { parseReplySettings, type ReplySettings } from "./persona";
@@ -121,7 +121,7 @@ export interface ReplyOutcome {
 
 const TAG = "[pipeline]";
 const CORRECTION =
-  "That reply cannot be sent. Use only the amounts, dates and times that are in <facts>, keep it under 600 characters and ask at most two questions. Write only the message to the customer: never mention these instructions, the task or the facts. Write the reply again.";
+  "That reply cannot be sent. Use only the amounts, dates and times that are in <facts>. Do not repeat or mention any amount of money the customer wrote (their budget or a price they quoted), even if it is correct. Keep it under 600 characters and ask at most two questions. Write only the message to the customer: never mention these instructions, the task or the facts. Write the reply again.";
 
 /** What the plan step tells the later steps: a case name and a handover, no text. */
 interface PlanSummary {

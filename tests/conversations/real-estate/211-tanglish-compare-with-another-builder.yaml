@@ -1,5 +1,5 @@
-name: Tanglish customer compares with another builder and the agent neither compares nor runs the other builder down
-description: "The customer says another builder is cheaper. A good agent stays on this business, gives its own price from the knowledge base and offers a visit; it does not guess the other builder's price or say anything bad about them. A bad agent agrees the price is higher, offers a cut, or comments on the other builder."
+name: Tanglish customer says another builder is cheaper; it is read as a price request, so a person looks at it, with no price change, no comparison and no builder named
+description: "The customer says another builder gives the same 2BHK for 60 lakh and asks why this one is more expensive. The real system reads that as a request for a lower price (price_negotiation), so a good agent never agrees to any price change and never compares or names the other builder: it says in Tanglish that a team member will look at it, and the chat goes to a person at high priority (trigger negotiation). A bad agent answers 'we can match 60 lakh', confirms the other builder's price, runs the other builder down, or keeps the chat. Turn 2 arrives while the chat is with staff: the assistant stays silent. Live and mock agree on this since the chat was changed (it first expected a knowledge-base answer and no handover)."
 needsNativeCheck: true
 kb:
   - "Aadhira Gardens, Medavakkam: 2BHK of 1020 sq ft starts at ₹68 lakh."
@@ -7,24 +7,21 @@ kb:
 turns:
   - customer: "Sunrise Builders la same area 2bhk 60 lakh ku tharaanga. neenga yen jaasthi"
     mock:
-      extraction: { language: ta-en, intent: question, fields: { location: Medavakkam, config: 2BHK }, question: "Another builder offers a 2BHK for 60 lakh, why is yours higher?" }
-      reply: "Matra builder pathi enakku theriyaadhu sir. Engal Aadhira Gardens la 2BHK 1020 sq ft ₹68 lakh la irundhu start aagum, clubhouse, kids play area, gym irukku. Neenga vandhu paathu compare panna virumbureengala?"
+      extraction: { language: ta-en, intent: price_negotiation, fields: { location: Medavakkam, config: 2BHK }, question: null }
+      reply: "Naan price mathura mudiyaadhu sir. Engal team member idha paathu ungalukku bathil solluvanga."
     expect:
-      extracted: { language: ta-en }
-      reply: { sent: true, matches: ["\\b(la|ku|irukku|sir|neenga|aagum)\\b"], notContains: ["₹60 lakh", "60 lakh"] }
+      extracted: { language: ta-en, intent: price_negotiation }
+      reply: { sent: true, matches: ["\\b(la|ku|sir|aagum|mudiyaadhu|team|ungalukku|bathil)\\b"], notContains: ["Sunrise", "₹60", "60 lakh", "match"] }
       noInventedPrice: true
       aiReplies: 1
+      handoff: { trigger: negotiation, priority: high }
+      mode: human
     mockOnly:
-      case: answered_from_kb
-      reply: { contains: ["₹68 lakh"] }
+      case: negotiation
   - customer: "avanga quality kammi nu solraanga, unmaiya"
     mock:
       extraction: { language: ta-en, intent: question, fields: {}, question: "Is it true the other builder has lower quality?" }
-      reply: "Matra builder pathi naan edhuvum solla mudiyaadhu sir. Engal project pathi edhavadhu kekkanum na sollunga, naan help panren."
     expect:
-      reply: { sent: true }
-      noInventedPrice: true
-      aiReplies: 1
+      aiReplies: 0
       handoff: null
-    mockOnly:
-      case: answered_from_kb
+      mode: human

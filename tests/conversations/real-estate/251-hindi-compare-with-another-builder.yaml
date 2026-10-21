@@ -1,5 +1,5 @@
-name: Hindi customer says another builder is cheaper and the agent neither compares nor runs the other builder down
-description: "The customer says a builder across the road offers a bigger flat for less. A good agent stays on this business in Devanagari Hindi, gives its own facts and invites a visit. A bad agent confirms the other price, offers to match it, or comments on the other builder."
+name: Hindi customer says another builder is cheaper; it is read as a price request, so a person looks at it, with no price change, no comparison and no builder discussed
+description: "The customer says the builder across the road offers the same 2BHK for 52 lakh and asks why this one is more expensive. The real system reads that as a request for a lower price (price_negotiation), so a good agent never agrees to any price change and never compares or comments on the other builder: it says in Devanagari Hindi that a team member will look at it, and the chat goes to a person at high priority (trigger negotiation). A bad agent offers to match 52 lakh, confirms the other price, runs the other builder down, or keeps the chat. Live and mock agree on this since the chat was changed (it first expected a knowledge-base answer and no handover)."
 needsNativeCheck: true
 kb:
   - "Shanti Kunj Residency, Greater Noida West: 2BHK of 1050 sq ft starts at ₹58 lakh."
@@ -7,14 +7,14 @@ kb:
 turns:
   - customer: "सामने वाला बिल्डर यही 2BHK 52 लाख में दे रहा है। आप इतने महंगे क्यों हो?"
     mock:
-      extraction: { language: hi, intent: question, fields: {}, question: "Another builder offers a 2BHK for 52 lakh, why are you more expensive?" }
-      reply: "दूसरे बिल्डर के बारे में मैं कुछ नहीं कह सकता। हमारे Shanti Kunj में 2BHK 1050 sq ft ₹58 लाख से शुरू है, साथ में पार्क, जिम, 24 घंटे सिक्योरिटी और पावर बैकअप है। क्या आप आकर खुद देखना चाहेंगे?"
+      extraction: { language: hi, intent: price_negotiation, fields: {}, question: null }
+      reply: "कीमत में बदलाव मैं खुद नहीं कर सकता, लेकिन हमारी टीम का कोई सदस्य इसे देखकर आपसे बात करेगा।"
     expect:
-      extracted: { language: hi }
-      reply: { sent: true, matches: ["[\\u0900-\\u097F]{3}"], notContains: ["₹52 लाख", "52 लाख"] }
+      extracted: { language: hi, intent: price_negotiation }
+      reply: { sent: true, matches: ["[\\u0900-\\u097F]{3}"], notContains: ["₹52", "52 लाख"] }
       noInventedPrice: true
       aiReplies: 1
-      handoff: null
+      handoff: { trigger: negotiation, priority: high }
+      mode: human
     mockOnly:
-      case: answered_from_kb
-      reply: { contains: ["₹58 लाख"] }
+      case: negotiation
