@@ -90,13 +90,19 @@ const Turn = z
     tap: z.string().min(1).optional(),
     /** The customer sent a voice note: an audio message with no words. `customer` is only the label shown in a failure. */
     voice: z.literal(true).optional(),
+    /**
+     * The knowledge base for this turn, instead of the chat's own, in BOTH modes (mock and --live): `kb: []` means the search finds nothing, so the code
+     * sees a miss (the safe line, and a person after two in a row), as the real search does when nothing passes KB_MIN_SIMILARITY.
+     * Without it the turn gets the chat's own `kb`. (`mock.kb` below is the older spelling; the runner reads it in both modes too.)
+     */
+    kb: z.array(z.string()).optional(),
     mock: z
       .object({
         /** What the mocked extraction model returns; missing keys get quiet defaults (an English question, 0.9). */
         extraction: z.record(z.string(), z.unknown()).optional(),
         /** What the mocked reply model writes, one text per attempt (a second one is the answer to a post-check rejection). */
         reply: z.union([z.string(), z.array(z.string())]).optional(),
-        /** The knowledge base for this turn, instead of the chat's own: [] means no answer. */
+        /** The older spelling of the turn's `kb` (same effect, in both modes): [] means no answer. Prefer the turn's own `kb`. */
         kb: z.array(z.string()).optional(),
         /** The business is out of credits this turn: notify.send refuses the reply (insufficient_credits) and spends nothing. */
         credits: z.literal("zero").optional(),

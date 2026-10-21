@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadChats } from "./load";
-import { runChat } from "./run-chat";
+import { knowledgeBaseForTurn, runChat } from "./run-chat";
 import { Chat } from "./schema";
 
 // The runner itself: a chat that is wrong must FAIL, or the suite proves nothing.
@@ -263,5 +263,57 @@ describe("a cancel with no booking on record", () => {
       ],
     });
     expect((await runChat(chat, { mode: "mock" })).failures).toEqual([]);
+  });
+});
+
+// A turn can say the knowledge base finds nothing (fix/agent-chat-findings): the code then sees a miss, in mock and in --live alike.
+describe("the knowledge base of a turn", () => {
+  const base = { kb: ["2BHK starts at ₹78 lakh."] };
+
+  it("is the turn's own kb first, then mock.kb, then the chat's kb", () => {
+    expect(knowledgeBaseForTurn(base, {})).toEqual(["2BHK starts at ₹78 lakh."]);
+    expect(knowledgeBaseForTurn(base, { mock: { kb: ["from mock"] } })).toEqual(["from mock"]);
+    expect(knowledgeBaseForTurn(base, { kb: ["own"], mock: { kb: ["from mock"] } })).toEqual(["own"]);
+  });
+
+  it("an empty list is an empty knowledge base, not 'use the chat's'", () => {
+    expect(knowledgeBaseForTurn(base, { kb: [] })).toEqual([]);
+    expect(knowledgeBaseForTurn(base, { mock: { kb: [] } })).toEqual([]);
+  });
+
+  it("the loader accepts a turn-level kb", () => {
+    expect(chat({ kb: [], expect: { aiReplies: 1 } }).turns[0].kb).toEqual([]);
+  });
+
+  it("two empty-knowledge-base turns in a row hand the chat to a person (a miss, then the kb_gap handover)", async () => {
+    const miss = { kb: [] as string[], mock: { extraction: { intent: "question", question: "what is the maintenance?" } } };
+    const report = await runChat(
+      Chat.parse({
+        name: "x",
+        kb: ["2BHK starts at ₹78 lakh."],
+        turns: [
+          { customer: "maintenance?", ...miss, expect: { handoff: null, mode: "ai", aiReplies: 1 }, mockOnly: { case: "kb_miss" } },
+          { customer: "and the corpus fund?", ...miss, expect: { handoff: { trigger: "kb_gap", priority: "normal" }, mode: "human", aiReplies: 1 } },
+        ],
+      }),
+      { mode: "mock" },
+    );
+    expect(report.failures).toEqual([]);
+  });
+
+  it("a miss, an answered turn, then a miss is not two in a row", async () => {
+    const report = await runChat(
+      Chat.parse({
+        name: "x",
+        kb: ["2BHK starts at ₹78 lakh."],
+        turns: [
+          { customer: "maintenance?", kb: [], mock: { extraction: { intent: "question", question: "maintenance?" } }, expect: { handoff: null } },
+          { customer: "price?", mock: { extraction: { intent: "question", question: "price?" }, reply: "A 2BHK starts at ₹78 lakh." }, expect: { handoff: null } },
+          { customer: "parking charge?", kb: [], mock: { extraction: { intent: "question", question: "parking charge?" } }, expect: { handoff: null, mode: "ai" } },
+        ],
+      }),
+      { mode: "mock" },
+    );
+    expect(report.failures).toEqual([]);
   });
 });

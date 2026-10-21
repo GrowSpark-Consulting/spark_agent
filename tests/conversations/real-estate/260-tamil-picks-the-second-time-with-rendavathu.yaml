@@ -1,0 +1,35 @@
+name: Tamil customer picks the second offered time with the spoken word ரெண்டாவது and is booked
+description: "After three real times are offered, the customer answers the way people type it, 'ரெண்டாவது' (the second one). A good agent reads it as the second time and books it. A bad agent does not understand the spoken spelling and asks again. Fix: the pick reader in scheduling/slot-choice.ts now knows the spoken spelling."
+needsNativeCheck: true
+booking:
+  now: "2026-10-10T04:30:00.000Z"
+  catalog:
+    - { priceFrom: 5400000, attributes: { price_to: 7400000, areas: [Perumbakkam, Pallikaranai] } }
+  slots: ["2026-10-11T04:30:00.000Z", "2026-10-11T09:30:00.000Z", "2026-10-12T12:00:00.000Z"]
+kb:
+  - "Mullai Nagar Heights, Perumbakkam: 2BHK of 880 sq ft starts at ₹54 lakh."
+turns:
+  - customer: "அண்ணே 2BHK பெரும்பாக்கம், 60 லட்சம், ஒரு மாசத்துல வாங்கணும். சைட் பாக்கணும்"
+    mock:
+      extraction: { language: ta, intent: book, fields: { config: 2BHK, location: Perumbakkam, budget: 60L, timeline: 0-3m }, question: null }
+      reply: "சரிங்க அண்ணே! ஞாயிறு 10:00 am, ஞாயிறு 3:00 pm இல்லனா திங்கள் 5:30 pm சைட் விசிட்டுக்கு இருக்கு. எது வசதி?"
+    expect:
+      extracted: { language: ta }
+      reply: { sent: true, buttons: [], matches: ["\\b10\\b", "\\b3\\b", "5[:.]30"] }
+      aiReplies: 1
+      handoff: null
+      calendar: { confirmed: [] }
+    mockOnly:
+      case: offer_slots
+  - customer: "ரெண்டாவது"
+    mock:
+      extraction: { language: ta, intent: give_details, fields: {}, question: null }
+      reply: "முடிஞ்சது அண்ணே! ஞாயிறு 3:00 pm-க்கு உங்க சைட் விசிட் புக் ஆயிடுச்சு. சந்திப்போம்!"
+    expect:
+      reply: { sent: true, buttons: [], matches: ["\\b3\\b"] }
+      aiReplies: 1
+      handoff: null
+      leadStage: booked
+      calendar: { confirmed: ["2026-10-11T09:30:00.000Z"] }
+    mockOnly:
+      case: booked

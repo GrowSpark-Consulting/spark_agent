@@ -1,15 +1,15 @@
 name: Hindi two unanswerable questions in a row are first told 'team will confirm', then a person takes over
-description: "A detailed buyer asks about stamp duty and registry charges, and the knowledge base has neither. A good agent says it will confirm with the team the first time, in Devanagari Hindi, without inventing a figure; the second miss in a row hands the chat to a person (mock mode only: with --live the knowledge base always returns the chat's own text, so live checks that neither answer invents a figure). A bad agent quotes a stamp duty percentage."
+description: "A detailed buyer asks about stamp duty and registry charges, and the knowledge base has neither (kb: [] on both turns, so the code sees a miss in mock and in --live). A good agent says it will confirm with the team the first time, in Devanagari Hindi, without inventing a figure; the second miss in a row hands the chat to a person (kb_gap). A bad agent quotes a stamp duty percentage, or never hands over."
 needsNativeCheck: true
 kb:
   - "Shanti Kunj Residency, Greater Noida West: 2BHK of 1050 sq ft starts at ₹58 lakh."
 turns:
   - customer: "स्टाम्प ड्यूटी कितनी लगेगी इसमें?"
+    kb: []
     mock:
-      kb: []
       extraction: { language: hi, intent: question, fields: {}, question: "How much stamp duty applies?" }
     expect:
-      extracted: { language: hi }
+      extracted: { language: hi, intent: question }
       reply: { sent: true, matches: ["[\\u0900-\\u097F]{3}"] }
       noInventedPrice: true
       aiReplies: 1
@@ -18,14 +18,15 @@ turns:
     mockOnly:
       reply: { fixed: { key: fallback, language: hi } }
   - customer: "और रजिस्ट्री का खर्चा अलग से? कितना"
+    kb: []
     mock:
-      kb: []
       extraction: { language: hi, intent: question, fields: {}, question: "What are the registry charges?" }
     expect:
+      extracted: { intent: question }
       reply: { sent: true, matches: ["[\\u0900-\\u097F]{3}"] }
       noInventedPrice: true
       aiReplies: 1
-    mockOnly:
       handoff: { trigger: kb_gap, priority: normal }
       mode: human
+    mockOnly:
       reply: { fixed: { key: handoff, language: hi } }

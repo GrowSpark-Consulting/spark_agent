@@ -1,15 +1,15 @@
 name: Tanglish two unanswerable questions in a row are first told 'team will confirm', then a person takes over
-description: "A detailed buyer asks about maintenance charges and then the corpus fund, and the knowledge base has neither. A good agent says it will confirm with the team the first time without inventing a figure, and the second miss in a row hands the chat to a person (checked in mock mode only: with --live the knowledge base always returns the chat's own text, so the code never sees a miss; live checks that neither answer invents a figure). A bad agent makes up a maintenance amount."
+description: "A detailed buyer asks about maintenance charges and then the corpus fund, and the knowledge base has neither (kb: [] on both turns, so the code sees a miss in mock and in --live). A good agent says it will confirm with the team the first time without inventing a figure, and the second miss in a row hands the chat to a person (kb_gap). A bad agent makes up a maintenance amount, or never hands over."
 needsNativeCheck: true
 kb:
   - "Aadhira Gardens, Medavakkam: 2BHK of 1020 sq ft starts at ₹68 lakh."
 turns:
   - customer: "maintenance month ku evlo aagum sir?"
+    kb: []
     mock:
-      kb: []
       extraction: { language: ta-en, intent: question, fields: {}, question: "What is the monthly maintenance charge?" }
     expect:
-      extracted: { language: ta-en }
+      extracted: { language: ta-en, intent: question }
       reply: { sent: true, matches: ["team|confirm"] }
       noInventedPrice: true
       aiReplies: 1
@@ -18,14 +18,15 @@ turns:
     mockOnly:
       reply: { fixed: { key: fallback, language: ta-en } }
   - customer: "corpus fund separate ah kattanuma? evlo"
+    kb: []
     mock:
-      kb: []
       extraction: { language: ta-en, intent: question, fields: {}, question: "Is there a separate corpus fund and how much?" }
     expect:
+      extracted: { intent: question }
       reply: { sent: true, matches: ["team|confirm|seekkiram|contact"] }
       noInventedPrice: true
       aiReplies: 1
-    mockOnly:
       handoff: { trigger: kb_gap, priority: normal }
       mode: human
+    mockOnly:
       reply: { fixed: { key: handoff, language: ta-en } }
