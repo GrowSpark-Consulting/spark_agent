@@ -151,6 +151,9 @@ Marketplace integration** (remove it if it is installed): it would try to sync t
   4. Re-sync after a deploy that adds, removes or renames a function (Apps → the app → Resync, or
      `curl -X PUT https://<API host>/api/inngest`).
 - In production mode the endpoint answers 401 to anything Inngest didn't sign, including GET.
+- The free plan is 50,000 executions a month (each run and each step counts). Keep idle use under about 150 a day:
+  the schedules and the rules for new jobs are in [job-schedules.md](job-schedules.md). The Apps page must show **one**
+  synced app, the Railway URL; any other synced URL runs every cron again.
 - Smoke test after any new environment: send `system/ping` from the Inngest UI; a
   `system-ping` run should show status Completed.
 

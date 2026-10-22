@@ -40,6 +40,13 @@ export type ClaimedDelivery = z.infer<typeof ClaimedDelivery>;
 
 export const MAX_PER_RUN = 50;
 
+/** Whether any delivery is waiting at all (due or backing off): the hourly job's cheap first look, outside any step. */
+export async function hasPendingDeliveries(deps: Pick<DeliverDeps, "db"> = deliverDeps()): Promise<boolean> {
+  const { data, error } = await deps.db.from("webhook_deliveries").select("id").eq("status", "pending").limit(1);
+  if (error) throw new Error(`webhook_deliveries read failed: ${error.message}`);
+  return Array.isArray(data) && data.length > 0;
+}
+
 /** Up to 50 due deliveries, held for this run for 5 minutes. */
 export async function claimDeliveries(run: string, deps: Pick<DeliverDeps, "db"> = deliverDeps()): Promise<ClaimedDelivery[]> {
   const { data, error } = await deps.db.rpc("claim_webhook_deliveries", { p_run: run, p_limit: MAX_PER_RUN });

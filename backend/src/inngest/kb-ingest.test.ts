@@ -58,8 +58,8 @@ describe("kb-ingest", () => {
 });
 
 describe("kb-sweep", () => {
-  it("runs every 10 minutes", () => {
-    expect((kbSweep.opts as unknown as { triggers: unknown }).triggers).toEqual([{ cron: "*/10 * * * *" }]);
+  it("runs hourly (the Inngest free plan's idle budget, docs/job-schedules.md)", () => {
+    expect((kbSweep.opts as unknown as { triggers: unknown }).triggers).toEqual([{ cron: "0 * * * *" }]);
   });
 
   it("fails documents that have been processing for over 30 minutes, with a plain message, and says how many", async () => {

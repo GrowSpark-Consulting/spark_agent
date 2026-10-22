@@ -6,7 +6,7 @@ import { send, type NotifyPayload, type SendOutcome } from "../notify/send";
 import { staffAlertRecipients } from "../notify/staff-alerts";
 import { inngest } from "./client";
 
-// Every 15 minutes: the businesses where it is now the quarter hour after 8:00 get their day's bookings, sent to each
+// Every hour at :30: the businesses where it is now the hour after 8:00 get their day's bookings, sent to each
 // owner with an alert number (daily_agenda: free; the daily_agenda toggle and plan, Growth and Pro, are checked first).
 // A day without bookings sends nothing. The key `daily_agenda:<business>:<owner>:<local date>` keeps it to one a day,
 // whatever retries or overlapping runs do.
@@ -44,11 +44,15 @@ function settle(outcome: SendOutcome): StepResult {
   return { status: "failed", code: outcome.error.code };
 }
 
-export async function handleDailyAgenda({ step }: { step: Step }, deps: DailyAgendaDeps = defaults()) {
-  const due = await step.run("due", async () => {
-    const now = deps.now();
-    return { at: now.toISOString(), tenants: (await deps.tenants()).filter((t) => isAgendaTime(t.timeZone, now)) };
-  });
+/**
+ * `at` is the run's scheduled time (the cron event's ts), so a replay of the run judges the same hour. Most hours no business
+ * is at 8:00 and the run ends before any step: one Inngest execution (the free plan's budget, docs/job-schedules.md).
+ */
+export async function handleDailyAgenda({ step, at }: { step: Step; at?: Date }, deps: DailyAgendaDeps = defaults()) {
+  const now = at ?? deps.now();
+  const dueNow = (await deps.tenants()).filter((t) => isAgendaTime(t.timeZone, now));
+  if (dueNow.length === 0) return { due: 0, results: [] };
+  const due = await step.run("due", async () => ({ at: now.toISOString(), tenants: dueNow }));
 
   const results: { tenantId: string; sent?: ({ userId: string } & StepResult)[]; skipped?: string }[] = [];
   for (const tenant of due.tenants) {
@@ -70,6 +74,9 @@ export async function handleDailyAgenda({ step }: { step: Step }, deps: DailyAge
   return { due: due.tenants.length, results };
 }
 
-export const dailyAgenda = inngest.createFunction({ id: "daily-agenda", triggers: [{ cron: "*/15 * * * *" }] }, (ctx) =>
-  handleDailyAgenda({ step: { run: <T>(id: string, fn: () => Promise<T>) => ctx.step.run(id, fn) as unknown as Promise<T> } }),
+export const dailyAgenda = inngest.createFunction({ id: "daily-agenda", triggers: [{ cron: "30 * * * *" }] }, (ctx) =>
+  handleDailyAgenda({
+    step: { run: <T>(id: string, fn: () => Promise<T>) => ctx.step.run(id, fn) as unknown as Promise<T> },
+    at: typeof ctx.event?.ts === "number" ? new Date(ctx.event.ts) : undefined,
+  }),
 );
