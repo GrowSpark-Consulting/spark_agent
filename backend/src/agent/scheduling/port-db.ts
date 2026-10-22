@@ -79,7 +79,7 @@ export function createSchedulingDeps(
         if (error) throw failed("the lead's booking could not be read", error);
         for (const row of Array.isArray(data) ? data : []) {
           if (!isObject(row) || typeof row.id !== "string" || typeof row.status !== "string" || typeof row.start_at !== "string" || typeof row.end_at !== "string") continue;
-          // A hold that has run out is not a booking (the release-holds job frees it within a minute).
+          // A hold that has run out is not a booking (Postgres marks it expired within a minute: pg_cron, 0053).
           if (row.status === "held" && (typeof row.hold_expires_at !== "string" || Date.parse(row.hold_expires_at) <= at.getTime())) continue;
           return { id: row.id, start: new Date(row.start_at).toISOString(), end: new Date(row.end_at).toISOString(), status: row.status };
         }

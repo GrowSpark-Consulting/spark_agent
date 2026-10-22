@@ -80,11 +80,11 @@ describe("trial-lifecycle-sweep", () => {
 describe("registration", () => {
   const opts = (fn: unknown) => (fn as { opts: unknown }).opts;
 
-  it("starts on tenant.trial_started, and sweeps every hour at :15 in India, one run at a time", () => {
+  it("starts on tenant.trial_started, and sweeps every two hours at :15 in India, one run at a time", () => {
     expect(functions).toContain(trialLifecycle);
     expect(functions).toContain(trialLifecycleSweep);
     expect(opts(trialLifecycle)).toMatchObject({ id: "trial-lifecycle", triggers: [{ event: TRIAL_STARTED_EVENT }] });
     expect(TRIAL_STARTED_EVENT).toBe("tenant.trial_started");
-    expect(opts(trialLifecycleSweep)).toMatchObject({ id: "trial-lifecycle-sweep", triggers: [{ cron: "TZ=Asia/Kolkata 15 * * * *" }], concurrency: { limit: 1 } });
+    expect(opts(trialLifecycleSweep)).toMatchObject({ id: "trial-lifecycle-sweep", triggers: [{ cron: "TZ=Asia/Kolkata 15 */2 * * *" }], concurrency: { limit: 1 } });
   });
 });

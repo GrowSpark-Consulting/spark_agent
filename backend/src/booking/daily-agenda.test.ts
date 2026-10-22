@@ -6,13 +6,14 @@ const TENANT = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 const tenant = { id: TENANT, name: "Skyline Homes", timeZone: "Asia/Kolkata" };
 
 describe("isAgendaTime", () => {
-  it("is the quarter hour after 8:00 in the business's time zone", () => {
+  it("is the hour after 8:00 in the business's time zone (the job runs hourly at :30)", () => {
     // 8:00 in India is 02:30 UTC.
     expect(isAgendaTime("Asia/Kolkata", new Date("2026-10-10T02:30:00Z"))).toBe(true);
-    expect(isAgendaTime("Asia/Kolkata", new Date("2026-10-10T02:44:59Z"))).toBe(true);
-    expect(isAgendaTime("Asia/Kolkata", new Date("2026-10-10T02:45:00Z"))).toBe(false);
+    expect(isAgendaTime("Asia/Kolkata", new Date("2026-10-10T03:29:59Z"))).toBe(true);
+    expect(isAgendaTime("Asia/Kolkata", new Date("2026-10-10T03:30:00Z"))).toBe(false);
     expect(isAgendaTime("Asia/Kolkata", new Date("2026-10-10T02:29:59Z"))).toBe(false);
-    expect(isAgendaTime("Europe/London", new Date("2026-10-10T07:05:00Z"))).toBe(true); // 8:05 summer time
+    expect(isAgendaTime("Europe/London", new Date("2026-10-10T07:30:00Z"))).toBe(true); // 8:30 summer time: the :30 run
+    expect(isAgendaTime("Asia/Kathmandu", new Date("2026-10-10T02:30:00Z"))).toBe(true); // 8:15: a :45 offset still gets one run
     expect(isAgendaTime("Not/AZone", new Date("2026-10-10T02:30:00Z"))).toBe(false);
   });
 });

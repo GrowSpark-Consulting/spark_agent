@@ -65,6 +65,7 @@ screen-level contracts in `docs/dashboard-screen-contracts.md`; WhatsApp connect
 | `0049_browser_write_audit` | Every change a member makes straight from the dashboard (row-level security, no server route) is audited: a trigger, `audit_browser_write()`, on `tenants` (update), `services`, `resources`, `catalog_items`, `quotes` (insert, update, delete), `leads` and `memberships` (update) writes `<entity>.created`, `.updated` or `.deleted` with the member as the actor and `diff` = `{ changed: [column names], <safe column>: { from, to } }`. Only the columns listed as safe for the table carry values (a name, time zone, stage, status, price, owner, takeover preference); a customer's fields, a phone number and the agent settings' text are only named. An update that changes nothing (other than `updated_at`) and a write by the server (no member) are not audited here: the server audits its own. Security definer; nobody can call it directly |
 | `0050_outbound_webhooks` | Outbound webhooks (Pro): `webhook_endpoints` (one per business: https URL, wanted events, `secret_enc` with ENCRYPTION_KEY, `secret_hint`, last success and failure) and `webhook_deliveries` (an outbox: business, event, record id, status `pending`/`delivered`/`failed`/`dropped`, attempts, next attempt, the claiming run; no customer data). A trigger on `leads` (insert; stage reaching `qualified`), `bookings` (reaching `confirmed`; `confirmed` → `cancelled`) and `handoffs` (insert) queues `lead.created`, `lead.qualified`, `booking.confirmed`, `booking.cancelled`, `handoff.opened` in the same transaction, whoever wrote, only for an active endpoint that wants the event, once per record (unique business, event, record); a failure in it never fails the write. `save_webhook_endpoint`, `rotate_webhook_secret`, `delete_webhook_endpoint` (each audited: `webhook_endpoint.created`/`updated` with the host and events, never the path; `secret_rotated`; `deleted`); `claim_webhook_deliveries(run, limit)` (5-minute claim, skip locked; removes rows done over 30 days ago) and `record_webhook_attempt(id, run, outcome, status, error)` (only the claiming run, once; a failure retries after 1, 5, 15 min, 1, 3, 6, 12 h, then `failed`). Server only |
 | `0051_admin_metrics` | `admin_metrics(now)`: one row for the last 7 days and one for the last 30: `credits_spent` (ledger draws for `ai_reply`, `template_utility`, `template_marketing`; gross, an admin deduction is not usage), `ai_cost_usd` and `ai_calls` (`ai_spend_daily` over the window's India days: every model call, including those that spend no credit), `trials_started` (businesses created in the window) and `trials_paid` (of those, with a successful `subscribe` payment). The demo businesses (`d0000000-...`) are never counted. Server only |
+| `0053_release_holds_pg_cron` | `pg_cron` enabled; job `release-expired-holds` runs `release_expired_holds()` every minute (it was the Inngest `release-holds` cron, which used about half of the free plan's executions); job `purge-cron-run-details` keeps a week of `cron.job_run_details`. The `cron` schema is not reachable from the browser |
 
 **Tenant isolation suite (`supabase/tests/isolation.test.sql`, Day 5).** Two businesses get one row in every table
 that has a `tenant_id` (the list comes from the catalogue). For each table, a member of one business cannot read,
@@ -449,7 +450,7 @@ localWindow(timeZone, { day: 'today' | 'tomorrow' | 'YYYY-MM-DD', part?: 'mornin
 - **Errors:** a taken time is `slot_taken` (409, the exclusion constraint's 23P01); an unknown or other
   business's lead, service, resource or booking is `not_found`; a hold that expired or a booking in the wrong
   state is `conflict`; bad times, kinds or resources are `validation_failed`.
-- **Jobs:** `release-holds` (Inngest cron, every minute) marks holds past their expiry `expired`.
+- **Jobs:** Postgres marks holds past their expiry `expired` every minute (`pg_cron` job `release-expired-holds`, 0053; it was the Inngest `release-holds` cron).
   `google-calendar-sync` (built 9 Oct; `backend/src/booking/google-sync.ts`): `booking.confirmed` puts the booking on
   its person's Google Calendar ("{service}: {customer name}", no phone number, a link to the dashboard's calendar)
   and keeps the event id in `bookings.calendar_event_id`; `booking.changed` with `cancelled` or `rescheduled` takes it
@@ -574,8 +575,8 @@ time?" (`noshow_rebooking`, 1 credit) with one button, the reminders' `booking:<
 answers it the same way; outside the window the `noshow_rebook_vN` template with {{1}} what and {{2}} the business. Key
 `noshow_rebooking:<bookingId>`. No-shows are marked by the booking action routes (Day 5).
 
-**Daily agenda (`daily-agenda`, built 9 Oct).** A cron every 15 minutes: each live business (trial or active) where it
-is now 8:00–8:14 in its own time zone, with `daily_agenda` on, gets today's confirmed bookings (its local day) sent to
+**Daily agenda (`daily-agenda`, built 9 Oct).** A cron every hour at :30: each live business (trial or active) where it
+is now 8:00–8:59 in its own time zone, with `daily_agenda` on, gets today's confirmed bookings (its local day) sent to
 each owner with an alert number (`daily_agenda`, free). A day without bookings sends nothing. Key
 `daily_agenda:<business>:<owner>:<local date>`, so one a day whatever retries do.
 
@@ -1005,7 +1006,7 @@ HMAC over the raw body, compares in constant time and refuses a `t` more than 5 
 `booking.*` → `{ booking: { id, status, startAt, endAt, service, resource, leadId }, contact }`;
 `handoff.opened` → `{ handoff: { id, reason, priority, conversationId }, contact }`; `ping` → `{}`.
 
-Delivery: the `outbound-webhooks` job (every minute, one run at a time) claims up to 50 due events and sends them side by side,
+Delivery: the `outbound-webhooks` job (every hour at :05, one run at a time; an hour with nothing pending ends before any step) claims up to 50 due events and sends them side by side,
 10 s each, never following a redirect, and connects only after checking every address the name resolves to (DNS rebinding).
 A 2xx is delivered; anything else is tried again (1, 5, 15 minutes, 1, 3, 6, 12 hours), then `failed`. At least once: a step
 retried after its POST sends the same event id again. An event is `dropped` (never sent later) when its record is gone (a
@@ -1150,7 +1151,7 @@ answer_kb_gap(p_tenant_id, p_gap_id, p_answer, p_answered_by, p_question default
   (a `ready` document is skipped); a document that is missing, not the business's, or an FAQ is skipped. A document
   with no text, too much text, a request the provider refuses (4xx other than 429, not retried) or an embeddings
   outage ends `failed` with a short `error` the dashboard can show (never the provider's words). A document deleted
-  while the job runs is left deleted. **`kb-sweep`** (cron, every 10 minutes) fails any document still `processing`
+  while the job runs is left deleted. **`kb-sweep`** (cron, hourly) fails any document still `processing`
   after 30 minutes (its job never started or never finished), with "This file took too long to process. Upload it
   again."
 - **Upload size:** a 5 MB file plus its multipart wrapping is more than 5 MB, so the upload route sets

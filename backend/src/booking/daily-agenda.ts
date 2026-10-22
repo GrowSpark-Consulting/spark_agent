@@ -5,11 +5,11 @@ import { oneLine } from "./reminders";
 import { localParts, localWindow, slotLabel } from "./time";
 
 // The daily agenda (docs/handover.md, jobs: daily-agenda, "cron, 8 am tenant time: day's bookings to the owner"; a
-// Growth and Pro feature, checked by the daily_agenda toggle). The job (inngest/daily-agenda.ts) runs every 15 minutes
-// and sends each business its agenda in the quarter hour after 8:00 in the business's own time zone.
+// Growth and Pro feature, checked by the daily_agenda toggle). The job (inngest/daily-agenda.ts) runs every hour at :30
+// and sends each business its agenda in the hour after 8:00 in the business's own time zone (8:00 sharp in India).
 
 export const AGENDA_MINUTE = 8 * 60;
-const QUARTER = 15;
+const AGENDA_WINDOW_MINUTES = 60;
 
 export interface AgendaTenant {
   id: string;
@@ -27,11 +27,11 @@ export async function liveTenants(db: SupabaseClient): Promise<AgendaTenant[]> {
     .map((t) => ({ id: t.id, name: t.name, timeZone: t.timezone }));
 }
 
-/** Whether it is the quarter hour after 8:00 in this time zone (a bad time zone is never due). */
+/** Whether it is the hour after 8:00 in this time zone (a bad time zone is never due). */
 export function isAgendaTime(timeZone: string, now: Date): boolean {
   try {
     const minute = localParts(now, timeZone).minuteOfDay;
-    return minute >= AGENDA_MINUTE && minute < AGENDA_MINUTE + QUARTER;
+    return minute >= AGENDA_MINUTE && minute < AGENDA_MINUTE + AGENDA_WINDOW_MINUTES;
   } catch {
     return false;
   }

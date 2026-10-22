@@ -27,7 +27,6 @@ const INNGEST = (name: string, test: string): Proof => ({ file: `backend/src/inn
 
 const PROOFS: Record<string, Proof[]> = {
   "system-ping": [{ file: "backend/src/inngest/ping.ts", test: 'step.run("pong", () => ({ pong: true }))' }],
-  "release-holds": [{ file: "supabase/tests/booking.test.sql", test: "a second run (a replay of the minute) expires nothing more" }],
   "kb-ingest": [
     { file: "backend/src/kb/ingest.test.ts", test: "does nothing the second time the same event arrives: a ready document is left alone" },
     { file: "backend/src/kb/ingest.test.ts", test: "replaces the chunks of an earlier attempt instead of adding to them" },

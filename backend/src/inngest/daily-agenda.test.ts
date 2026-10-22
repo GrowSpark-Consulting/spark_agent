@@ -32,6 +32,18 @@ beforeEach(() => {
 });
 
 describe("handleDailyAgenda", () => {
+  it("an hour when no business is at 8:00 ends before any step: one Inngest execution", async () => {
+    const steps: string[] = [];
+    const counting = { run: async <T>(id: string, fn: () => Promise<T>) => (steps.push(id), fn()) };
+    await expect(handleDailyAgenda({ step: counting, at: new Date("2026-10-10T05:30:00Z") }, deps())).resolves.toEqual({ due: 0, results: [] });
+    expect(steps).toEqual([]);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("judges the run's scheduled time, not the clock, so a replay later in the day sends the same agenda", async () => {
+    await expect(handleDailyAgenda({ step, at: AT_8_IN_INDIA }, { ...deps(), now: () => new Date("2026-10-10T12:00:00Z") })).resolves.toMatchObject({ due: 1 });
+  });
+
   it("sends today's agenda to each owner of a business where it is just past 8 am, once a day per owner", async () => {
     await expect(handleDailyAgenda({ step }, deps())).resolves.toEqual({
       due: 1,

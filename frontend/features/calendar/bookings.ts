@@ -28,7 +28,7 @@ export function kindLabel(kind: string): string {
 
 /**
  * What a booking is now. A hold past hold_expires_at no longer blocks the time (the engine's rule) even
- * before the release-holds job marks it expired, so it is shown as expired, never as an appointment.
+ * before the database marks it expired (pg_cron, every minute), so it is shown as expired, never as an appointment.
  */
 export type ShownStatus = BookingStatus | "unknown";
 
